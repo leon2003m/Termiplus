@@ -12,6 +12,9 @@ import (
 	"termiplus/internal/sockproxy"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	config.HealthcheckIfRequested(config.Get("LISTEN_ADDR", ":2375"), "/healthz")
 
@@ -34,7 +37,7 @@ func main() {
 
 	p := sockproxy.New(rules, config.Get("DOCKER_SOCKET", "/var/run/docker.sock"), config.Secret("PROXY_TOKEN", false))
 	addr := config.Get("LISTEN_ADDR", ":2375")
-	log.Printf("sockproxy listening on %s, image=%s runtimes=%v network=%s", addr, rules.Image, keys(rules.Runtimes), rules.Network)
+	log.Printf("termiplus sockproxy %s listening on %s, image=%s runtimes=%v network=%s", version, addr, rules.Image, keys(rules.Runtimes), rules.Network)
 	srv := &http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
 }

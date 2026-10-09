@@ -16,6 +16,9 @@ import (
 	"termiplus/internal/gateway"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	config.HealthcheckIfRequested(config.Get("LISTEN_ADDR", ":8080"), "/healthz")
 
@@ -64,7 +67,7 @@ func main() {
 		defer cancel()
 		_ = srv.Shutdown(shut)
 	}()
-	log.Printf("gateway listening on %s with %d policies", srv.Addr, len(policies))
+	log.Printf("termiplus gateway %s listening on %s with %d policies", version, srv.Addr, len(policies))
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}

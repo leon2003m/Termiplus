@@ -1,0 +1,202 @@
+name: Security
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27"
+  GOVULNCHECK_VERSION: "v1.8.0"
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # scan the full history
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh gitleaks
+      - name: Scan git history for secrets
+        run: |
+          set +e
+          gitleaks git --redact --no-banner --config .gitleaks.toml \
+            --report-format json --report-path gitleaks.json .
+          rc=$?
+          n=$(jq 'length' gitleaks.json 2>/dev/null || echo "?")
+          {
+            echo "## Secret scan (gitleaks)"
+            if [ "$rc" = 0 ]; then echo "No secrets found."; else
+              echo "**$n finding(s).** Values are redacted. Rotate any real secret, then remove it from history."
+              echo
+              echo "| Rule | File | Line | Commit |"
+              echo "|---|---|---|---|"
+              jq -r '.[] | "| \(.RuleID) | \(.File) | \(.StartLine) | \(.Commit[0:8]) |"' gitleaks.json
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: report-gitleaks
+          path: gitleaks.json
+          retention-days: 30
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true # always scan with the newest patch release
+          cache: false
+      - name: Scan Go code and toolchain for known vulnerabilities
+        run: |
+          set +e
+          go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./... | tee govulncheck.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo "## Go vulnerabilities (govulncheck, $(go version | awk '{print $3}'))"
+            echo '```'
+            tail -40 govulncheck.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: report-govulncheck
+          path: govulncheck.txt
+          retention-days: 30
+
+  trivy-config:
+    name: trivy (repo)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/install-tools.sh trivy
+      - name: Scan repository (dependencies, Dockerfiles, compose, secrets)
+        run: |
+          set +e
+          trivy fs --quiet --scanners vuln,misconfig,secret --severity HIGH,CRITICAL \
+            --ignore-unfixed --format json --output trivy-repo.json .
+          trivy convert --format table --output trivy-repo.txt trivy-repo.json
+          n=$(jq '[.Results[]? | (.Vulnerabilities // []) + (.Misconfigurations // []) + (.Secrets // []) | length] | add // 0' trivy-repo.json)
+          {
+            echo "## Repository scan (Trivy): $n HIGH/CRITICAL finding(s)"
+            echo '```'
+            head -80 trivy-repo.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$n" = 0 ]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: report-trivy-repo
+          path: trivy-repo.*
+          retention-days: 30
+
+  trivy-image:
+    name: trivy (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: gateway, context: ., target: gateway }
+          - { image: sockproxy, context: ., target: sockproxy }
+          - { image: terminal, context: image, target: "" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          load: true
+          push: false
+          tags: termiplus-${{ matrix.image }}:scan
+          cache-from: type=gha,scope=${{ matrix.image }}
+      - run: .github/scripts/install-tools.sh trivy
+      - name: Scan image
+        run: |
+          set +e
+          img="termiplus-${{ matrix.image }}:scan"
+          trivy image --quiet --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed \
+            --format json --output "trivy-${{ matrix.image }}.json" "$img"
+          trivy convert --format table --output "trivy-${{ matrix.image }}.txt" "trivy-${{ matrix.image }}.json"
+          trivy image --quiet --format spdx-json --output "sbom-${{ matrix.image }}.spdx.json" "$img"
+          n=$(jq '[.Results[]? | (.Vulnerabilities // []) + (.Secrets // []) | length] | add // 0' "trivy-${{ matrix.image }}.json")
+          {
+            echo "## Image scan: termiplus-${{ matrix.image }} (Trivy): $n fixable HIGH/CRITICAL finding(s)"
+            echo '```'
+            head -80 "trivy-${{ matrix.image }}.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$n" = 0 ]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: report-trivy-${{ matrix.image }}
+          path: |
+            trivy-${{ matrix.image }}.*
+            sbom-${{ matrix.image }}.spdx.json
+          retention-days: 30
+
+  # Weekly: keep one issue "Security scan report" in sync with the results.
+  report:
+    name: weekly report
+    if: always() && github.event_name == 'schedule'
+    needs: [gitleaks, govulncheck, trivy-config, trivy-image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Create, update or close the report issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULTS: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Security scan report"
+          failed=$(echo "$RESULTS" | jq -r 'to_entries[] | select(.value.result != "success") | "- \(.key): \(.value.result)"')
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -z "$failed" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "All scans clean on $(date -u +%F): $RUN_URL"
+            fi
+            exit 0
+          fi
+          body=$(printf 'Weekly security scan found problems (%s).\n\n%s\n\nDetails, reports and SBOMs: %s\n' "$(date -u +%F)" "$failed" "$RUN_URL")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label security || gh issue create --title "$title" --body "$body"
+          fi

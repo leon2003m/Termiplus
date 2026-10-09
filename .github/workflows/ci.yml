@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27"
+  STATICCHECK_VERSION: "2026.2.1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Install pinned linters
+        run: .github/scripts/install-tools.sh actionlint hadolint
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then echo "::error::not gofmt-formatted:"; echo "$out"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: staticcheck
+        run: go run "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}" ./...
+      - name: shellcheck
+        run: shellcheck deploy/firewall.sh test/integration/run.sh .github/scripts/*.sh
+      - name: hadolint
+        run: hadolint Dockerfile image/Dockerfile
+      - name: actionlint
+        run: actionlint
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: go test -race
+        run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Coverage report
+        if: always()
+        run: |
+          {
+            echo "## Test coverage"
+            echo '```'
+            go tool cover -func=coverage.out | awk '{printf "%-70s %s\n", $1" "$2, $3}' | tail -25
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+  build:
+    name: build (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: gateway
+            context: .
+            target: gateway
+          - image: sockproxy
+            context: .
+            target: sockproxy
+          - image: terminal
+            context: image
+            target: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          push: false
+          tags: termiplus-${{ matrix.image }}:ci
+          build-args: |
+            VERSION=ci
+            REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

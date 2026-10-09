@@ -2,7 +2,7 @@
 # Builds the gateway and the socket proxy. Pick one with --target:
 #   docker build --target gateway   -t termiplus-gateway .
 #   docker build --target sockproxy -t termiplus-sockproxy .
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.27
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src

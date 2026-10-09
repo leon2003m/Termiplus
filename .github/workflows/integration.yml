@@ -1,0 +1,53 @@
+name: Integration (gVisor)
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: integration (gvisor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install gVisor from its signed apt repository
+        run: |
+          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq runsc
+          sudo runsc install
+          sudo systemctl restart docker
+          runsc --version | head -1
+          docker info --format '{{json .Runtimes}}' | jq -r 'keys[]'
+      - name: End-to-end tests under gVisor
+        run: RUNTIME=runsc test/integration/run.sh 2>&1 | tee integration.log
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "## Integration tests (gVisor)"
+            echo '```'
+            grep -E '^(ok|FAIL|==>|-- )|passed|failed' integration.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: report-integration
+          path: integration.log
+          retention-days: 30
