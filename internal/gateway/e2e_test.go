@@ -42,14 +42,14 @@ func fakeTerminal(t *testing.T, apiKey string) *httptest.Server {
 	})
 	mux.HandleFunc("/files/cwd", func(w http.ResponseWriter, r *http.Request) {
 		if !auth(r) {
-			http.Error(w, "bad key", 401)
+			http.Error(w, "bad key", http.StatusUnauthorized)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"user": r.Header.Get("X-User-Id"), "key": apiKey[:8]})
 	})
 	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		if !auth(r) {
-			http.Error(w, "bad key", 401)
+			http.Error(w, "bad key", http.StatusUnauthorized)
 			return
 		}
 		_, _ = io.WriteString(w, `{"openapi":"3.1.0"}`)
@@ -134,7 +134,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var v map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&v)
 		d.volumes[v["Name"].(string)] = true
-		w.WriteHeader(201)
+		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, "{}")
 	case p == "/containers/create":
 		raw, _ := io.ReadAll(r.Body)
@@ -145,7 +145,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.creates++
 		id := fmt.Sprintf("%064x", d.creates)
 		d.ctrs[name] = &fakeCtr{id: id, name: name, body: b}
-		w.WriteHeader(201)
+		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"Id":%q}`, id)
 	case p == "/containers/json":
 		var out []map[string]any
@@ -161,7 +161,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(p, "/containers/"), "/")
 		c := d.find(parts[0])
 		if c == nil {
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, `{"message":"No such container"}`)
 			return
 		}
@@ -179,7 +179,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				d.addrs[c.name] = strings.TrimPrefix(c.srv.URL, "http://")
 				c.running = true
 			}
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 		case len(parts) == 2 && parts[1] == "stop":
 			if c.running {
 				c.srv.Close()
@@ -188,19 +188,19 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if hc, _ := c.body["HostConfig"].(map[string]any); hc["AutoRemove"] == true {
 				delete(d.ctrs, c.name)
 			}
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 		case len(parts) == 1 && r.Method == http.MethodDelete:
 			if c.running {
 				c.srv.Close()
 			}
 			delete(d.ctrs, c.name)
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 		default:
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	default:
 		d.t.Errorf("fake dockerd got unexpected %s %s", r.Method, p)
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
 
