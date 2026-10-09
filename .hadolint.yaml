@@ -1,0 +1,7 @@
+# Rules ignored on purpose:
+# DL3008: apt package versions are not pinned in the terminal image. It is a
+#         general-purpose sandbox; picking up Debian security updates on every
+#         rebuild matters more than byte-identical builds.
+ignored:
+  - DL3008
+failure-threshold: warning

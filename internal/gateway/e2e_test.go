@@ -642,3 +642,28 @@ func TestEphemeralPerUserCap(t *testing.T) {
 		t.Fatalf("expected 429 when every sandbox is in use, got %d", code)
 	}
 }
+
+func TestRemovedContainerIsRecreated(t *testing.T) {
+	h := newHarness(t)
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 {
+		t.Fatal("first request failed")
+	}
+	// remove the container behind the gateway's back
+	name := naming.Container("alice", "default")
+	h.docker.mu.Lock()
+	c := h.docker.ctrs[name]
+	c.srv.Close()
+	delete(h.docker.ctrs, name)
+	h.docker.mu.Unlock()
+	// make the cached instance look idle so the next request probes it
+	h.g.mgr.mu.Lock()
+	h.g.mgr.instances[name].lastUsed = time.Now().Add(-time.Minute)
+	h.g.mgr.mu.Unlock()
+
+	if code, b := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 {
+		t.Fatalf("expected transparent recreate, got %d %s", code, b)
+	}
+	if h.docker.creates != 2 {
+		t.Fatalf("container should have been recreated, creates=%d", h.docker.creates)
+	}
+}

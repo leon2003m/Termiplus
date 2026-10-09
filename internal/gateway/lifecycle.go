@@ -118,11 +118,19 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	m.mu.Lock()
 	inst := m.instances[name]
 	if inst != nil && inst.ready {
-		inst.lastUsed = time.Now()
+		fresh := time.Since(inst.lastUsed) < probeAfter
 		m.mu.Unlock()
-		return inst, nil
+		// A container unused for a while may have been stopped or removed
+		// outside the gateway; check it is still there before routing to it.
+		if fresh || m.probe(ctx, inst) {
+			m.touch(inst, 0)
+			return inst, nil
+		}
+		log.Printf("%s no longer answers, re-checking container", name)
+		m.invalidate(name)
+	} else {
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
 
 	want := m.configHash(pol, policyName)
 	ct, err := m.docker.Inspect(ctx, name)
@@ -323,6 +331,22 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	}
 	log.Printf("created %s (policy %s, runtime %s, storage %s)", name, policyName, pol.Runtime, labels[naming.LabelStorage])
 	return nil
+}
+
+// probeAfter is how long an instance may be idle before the next request
+// first checks that its container still answers.
+const probeAfter = 10 * time.Second
+
+func (m *manager) probe(ctx context.Context, inst *instance) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+inst.addr+"/health", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func (m *manager) waitReady(ctx context.Context, inst *instance) error {

@@ -58,20 +58,38 @@ docker build -t ot-terminal:0.14.0 image/
 mkdir -p deploy/secrets
 for s in proxy_token gateway_api_key key_secret; do openssl rand -hex 32 > deploy/secrets/$s; done
 
-# 4. Network shared with Open WebUI, then start
-docker network create owui        # skip if Open WebUI already has one; set OWUI_NETWORK
-cd deploy && TERMINAL_IMAGE=ot-terminal:0.14.0 docker compose up -d --build
+# 4. Settings for compose (deploy/.env is gitignored)
+cat > deploy/.env <<ENV
+TERMINAL_IMAGE=ot-terminal:0.14.0
+DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+ENV
 
-# 5. Egress rules (rerun after every Docker restart, e.g. from a systemd unit)
+# 5a. Open WebUI on the same host, sharing the "owui" Docker network:
+docker network create owui        # skip if Open WebUI already has one; set OWUI_NETWORK
+cd deploy && docker compose up -d --build
+
+# 5b. Recommended: termiplus on its own VM, gateway published on a private address:
+cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
+  docker compose -f docker-compose.yml -f docker-compose.separate-vm.yml up -d --build
+
+# 6. Egress rules (rerun after every Docker restart, e.g. from a systemd unit)
 sudo ./firewall.sh
 ```
 
-6. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
+7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
    - URL `http://gateway:8080`, auth type **Bearer**, key = contents of `deploy/secrets/gateway_api_key`
    - Optionally a second one, `http://gateway:8080/p/scratch`, named e.g. "Sandbox (fresh per chat)"
    - Restrict who sees which with access grants
 
-Open WebUI must run in the `owui` network. If it runs elsewhere, publish the gateway port behind TLS instead and keep the key server-side.
+With 5a, Open WebUI must run in the `owui` network. With 5b the gateway speaks plain HTTP on `GATEWAY_BIND`: put it on a private interface (VLAN, WireGuard) or behind a TLS reverse proxy, and allow only the Open WebUI host in the VM and Proxmox firewalls. Never expose the gateway key to browsers.
+
+### Container hardening
+
+| Service | User | Filesystem | Capabilities | Other |
+|---|---|---|---|---|
+| gateway | 65534 (nobody) | read-only, image is `scratch` with one static binary | all dropped | `no-new-privileges`, memory/CPU/PID limits, healthcheck |
+| sockproxy | 65534 plus the socket's group (`DOCKER_GID`), not root | read-only, `scratch` | all dropped | `no-new-privileges`, limits, internal network only |
+| terminals | 1000 with sudo inside the sandbox | writable | Docker defaults | gVisor or Sysbox, default seccomp/AppArmor (overrides refused by the proxy), memory/CPU/PID limits, no ports, sandbox network behind `firewall.sh` |
 
 ## How it works with Open WebUI
 
@@ -165,6 +183,15 @@ go test -race ./...
 ```
 
 Covers 30+ escape attempts against the proxy and an in-process chain (client → gateway → real sockproxy → fake dockerd → fake terminals): per-user routing, auth, WebSocket auth rewrite, capacity limit, idle stop and restart, config-change recreate, both storage profiles, per-user sandbox cap.
+
+End-to-end against a real Docker daemon (builds images, starts the stack, applies the firewall, checks isolation, storage profiles, WebSocket, proxy refusals and that terminals run under the requested runtime):
+
+```bash
+test/integration/run.sh                     # gVisor
+RUNTIME=sysbox-runc test/integration/run.sh
+```
+
+CI runs this under gVisor for every pull request to `main`.
 
 For a quick manual test without gVisor or Sysbox, run the proxy with `ALLOWED_RUNTIMES=runc ALLOW_RUNC_INSECURE=1` and policies using `"runtime": "runc"`. Never do this in production: runc gives sudo inside the container real root on the host kernel.
 

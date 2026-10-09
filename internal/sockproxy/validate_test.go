@@ -219,3 +219,18 @@ func TestEphemeralCreate(t *testing.T) {
 		t.Fatal("unknown field AutoRemove accepted")
 	}
 }
+
+func TestHealthzNeedsNoTokenButReportsDaemon(t *testing.T) {
+	p := New(testRules, "/nonexistent.sock", "right-token")
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unreachable daemon must report 503, got %d", rec.Code)
+	}
+	// healthz with a query string is not the healthcheck: token required
+	rec = httptest.NewRecorder()
+	p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz?x=1", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("healthz with query must need the token, got %d", rec.Code)
+	}
+}

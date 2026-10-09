@@ -1,11 +1,24 @@
 # Per-user terminal image. Plain Debian plus the Open Terminal server.
 # Runs under gVisor (runsc) or Sysbox, so sudo inside is root only inside
 # the sandbox, not on the host.
+# The base is pinned to a release tag; Dependabot proposes updates. Pin to a
+# digest (debian:trixie-slim@sha256:...) for fully reproducible builds.
 ARG BASE=debian:trixie-slim
 FROM ${BASE}
 
 ARG OPEN_TERMINAL_VERSION=0.14.0
+ARG VERSION=dev
+ARG REVISION=unknown
 ARG DEBIAN_FRONTEND=noninteractive
+
+LABEL org.opencontainers.image.title="termiplus-terminal" \
+      org.opencontainers.image.description="Per-user Open Terminal sandbox for termiplus (run under gVisor or Sysbox)" \
+      org.opencontainers.image.source="https://github.com/leon2003m/termiplus" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         sudo ca-certificates curl wget git openssh-client jq less vim-tiny nano \
@@ -21,6 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m venv /opt/open-terminal \
     && /opt/open-terminal/bin/pip install --no-cache-dir "open-terminal==${OPEN_TERMINAL_VERSION}"
 
+# Literal $HOME/$PATH are meant for .bashrc, not for expansion at build time.
+# hadolint ignore=SC2016
 RUN useradd -m -u 1000 -s /bin/bash user \
     && echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/user \
     && chmod 0440 /etc/sudoers.d/user \
@@ -31,10 +46,13 @@ RUN useradd -m -u 1000 -s /bin/bash user \
         >> /home/user/.bashrc \
     && chown -R user:user /home/user
 
-USER user
+USER 1000:1000
 WORKDIR /home/user
 ENV HOME=/home/user
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/health"]
 
 # The API key comes from OPEN_TERMINAL_API_KEY, set per container by the gateway.
 CMD ["/opt/open-terminal/bin/open-terminal", "run", "--host", "0.0.0.0", "--port", "8000", "--cwd", "/home/user"]

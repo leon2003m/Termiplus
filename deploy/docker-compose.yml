@@ -1,19 +1,37 @@
-# Run on a dedicated VM. Open WebUI reaches the gateway over the "owui"
-# network (or any network you attach); terminals live on ot-sandbox.
+# termiplus with Open WebUI in the same Docker network ("owui").
+# For the recommended setup on a dedicated VM see docker-compose.separate-vm.yml.
+#
+# Required environment (e.g. in deploy/.env, which is gitignored):
+#   TERMINAL_IMAGE  terminal image, ideally pinned: ghcr.io/leon2003m/termiplus-terminal@sha256:...
+#   DOCKER_GID      group id owning /var/run/docker.sock:  stat -c %g /var/run/docker.sock
+# Optional:
+#   TERMIPLUS_VERSION  gateway/sockproxy image tag (default: latest release you pulled)
 name: termiplus
 
-x-shared: &shared
+x-shared-env: &shared-env
   TERMINAL_IMAGE: ${TERMINAL_IMAGE:?set TERMINAL_IMAGE, ideally name@sha256:digest}
   SANDBOX_NETWORK: ot-sandbox
   PROXY_TOKEN_FILE: /run/secrets/proxy_token
 
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
 services:
   sockproxy:
+    <<: *hardening
+    image: ghcr.io/leon2003m/termiplus-sockproxy:${TERMIPLUS_VERSION:-latest}
     build: { context: .., target: sockproxy }
-    image: termiplus-sockproxy
-    restart: unless-stopped
+    # Not root: nobody plus the socket's group is enough to use the socket.
+    user: "65534:65534"
+    group_add: ["${DOCKER_GID:?set DOCKER_GID to the group id of /var/run/docker.sock}"]
     environment:
-      <<: *shared
+      <<: *shared-env
       ALLOWED_RUNTIMES: runsc,sysbox-runc
       MAX_MEMORY_MB: "8192"
       MAX_CPUS: "4"
@@ -22,17 +40,19 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     secrets: [proxy_token]
     networks: [ot-control]
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
 
   gateway:
+    <<: *hardening
+    image: ghcr.io/leon2003m/termiplus-gateway:${TERMIPLUS_VERSION:-latest}
     build: { context: .., target: gateway }
-    image: termiplus-gateway
-    restart: unless-stopped
-    depends_on: [sockproxy]
+    user: "65534:65534"
+    depends_on:
+      sockproxy: { condition: service_healthy }
     environment:
-      <<: *shared
+      <<: *shared-env
       DOCKER_API: http://sockproxy:2375
       GATEWAY_API_KEY_FILE: /run/secrets/gateway_api_key
       KEY_SECRET_FILE: /run/secrets/key_secret
@@ -47,9 +67,9 @@ services:
       ot-sandbox:
         ipv4_address: 172.30.0.2   # referenced by firewall.sh
       owui: {}
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 1
+    pids_limit: 256
 
 networks:
   ot-control:
@@ -59,6 +79,7 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.name: ot-sandbox
+      com.docker.network.bridge.enable_icc: "true"   # filtered by firewall.sh
     ipam:
       config:
         - subnet: 172.30.0.0/24

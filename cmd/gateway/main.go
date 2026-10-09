@@ -17,6 +17,8 @@ import (
 )
 
 func main() {
+	config.HealthcheckIfRequested(config.Get("LISTEN_ADDR", ":8080"), "/healthz")
+
 	policies := map[string]gateway.Policy{
 		"default": {Runtime: "runsc", MemoryMB: 2048, CPUs: 2, Pids: 512},
 	}

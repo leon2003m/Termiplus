@@ -13,6 +13,8 @@ import (
 )
 
 func main() {
+	config.HealthcheckIfRequested(config.Get("LISTEN_ADDR", ":2375"), "/healthz")
+
 	rules := sockproxy.Rules{
 		Image:       config.Must("TERMINAL_IMAGE"),
 		Runtimes:    map[string]bool{},

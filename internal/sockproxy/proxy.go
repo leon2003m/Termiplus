@@ -69,6 +69,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
+	// Liveness for the container healthcheck: no token, no query, no body,
+	// and it only reveals whether the daemon answers a ping.
+	if r.Method == http.MethodGet && r.URL.Path == "/healthz" && r.URL.RawQuery == "" {
+		return p.healthz(w, r)
+	}
 	if p.Token != "" {
 		vals := r.Header.Values("X-Proxy-Token")
 		if len(vals) != 1 || subtle.ConstantTimeCompare([]byte(vals[0]), []byte(p.Token)) != 1 {
@@ -198,6 +203,22 @@ func (p *Proxy) containerOp(w http.ResponseWriter, r *http.Request, parts []stri
 		target += "/" + action
 	}
 	return p.forward(w, r, method, target, out, nil)
+}
+
+func (p *Proxy) healthz(w http.ResponseWriter, r *http.Request) error {
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://docker/_ping", nil)
+	resp, err := p.daemon.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "docker unreachable"})
+		return nil
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "docker unhealthy"})
+		return nil
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return nil
 }
 
 func (p *Proxy) resolveOwned(ctx context.Context, ref string) (string, int, error) {
