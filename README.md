@@ -199,6 +199,8 @@ Not yet verified:
 
 ## Licensing
 
+termiplus is licensed under the GNU General Public License v3.0, see [LICENSE](LICENSE).
+
 - **This code** was written from scratch for this project. It uses only the Go standard library (BSD-3-Clause). No code was copied from Open WebUI, Open Terminal or the Terminals project; their sources were only read to learn the request and WebSocket protocol for interoperability.
 - **Terminal image**: Open Terminal is MIT, its Python dependencies are permissive. The Debian base contains GPL tools (bash, coreutils, ...). Internal use creates no obligations. If you ship the image to customers, keep the MIT notices and be able to point to Debian's sources for the GPL packages.
 - Not legal advice.

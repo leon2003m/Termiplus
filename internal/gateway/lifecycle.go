@@ -1,0 +1,447 @@
+package gateway
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"termiplus/internal/dockerapi"
+	"termiplus/internal/naming"
+)
+
+// Policy describes one kind of terminal environment. Users reach a policy via
+// the URL prefix /p/<name>; Open WebUI group access decides who sees which.
+type Policy struct {
+	Runtime  string  `json:"runtime"`
+	MemoryMB int64   `json:"memory_mb"`
+	CPUs     float64 `json:"cpus"`
+	Pids     int64   `json:"pids"`
+	// Home groups policies that share one home volume per user. Defaults to
+	// the policy name. Give terminal and desktop the same value to share files.
+	// Ignored for ephemeral policies.
+	Home string `json:"home,omitempty"`
+	// Storage is "persistent" (default): one container per user with a home
+	// volume that survives restarts. "ephemeral": a fresh container per chat
+	// with no volume, deleted when idle.
+	Storage string `json:"storage,omitempty"`
+	// IdleTimeout overrides the global idle timeout, e.g. "10m".
+	IdleTimeout string `json:"idle_timeout,omitempty"`
+	// MaxPerUser caps concurrent ephemeral sandboxes per user (default 3).
+	// When reached, the user's least recently used idle sandbox is deleted.
+	MaxPerUser int `json:"max_per_user,omitempty"`
+
+	idle time.Duration
+}
+
+func (p Policy) ephemeral() bool { return p.Storage == storageEphemeral }
+
+const (
+	storagePersistent = "persistent"
+	storageEphemeral  = "ephemeral"
+)
+
+type instance struct {
+	name      string
+	userHash  string
+	ephemeral bool
+	idle      time.Duration
+	addr      string // host:port reachable from the gateway
+	key       string // per-container Open Terminal API key
+	ready     bool
+	lastUsed  time.Time
+	conns     int // open WebSocket sessions
+}
+
+type manager struct {
+	docker     *dockerapi.Client
+	image      string
+	network    string
+	port       int
+	keySecret  []byte
+	startWait  time.Duration
+	idle       time.Duration
+	maxRunning int
+	policies   map[string]Policy
+	addrFor    func(name string, port int) string // overridable in tests
+
+	mu        sync.Mutex
+	instances map[string]*instance
+	locks     map[string]*sync.Mutex
+}
+
+func (m *manager) lockFor(name string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l, ok := m.locks[name]
+	if !ok {
+		l = &sync.Mutex{}
+		m.locks[name] = l
+	}
+	return l
+}
+
+// containerKey derives the per-container API key. Nothing to store, and
+// rotating KEY_SECRET changes the config hash so containers get recreated.
+func (m *manager) containerKey(name string) string {
+	mac := hmac.New(sha256.New, m.keySecret)
+	mac.Write([]byte(name))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (m *manager) configHash(pol Policy, policyName string) string {
+	secretFP := sha256.Sum256(m.keySecret)
+	b, _ := json.Marshal([]any{m.image, m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4])})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
+
+// ensure returns a ready instance for (user, policy) or, for ephemeral
+// policies, for (user, session, policy), creating or starting it when needed.
+func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName string, pol Policy) (*instance, error) {
+	name := naming.Container(userID, policyName)
+	if pol.ephemeral() {
+		name = naming.Ephemeral(userID, sessionID, policyName)
+	}
+	l := m.lockFor(name)
+	l.Lock()
+	defer l.Unlock()
+
+	m.mu.Lock()
+	inst := m.instances[name]
+	if inst != nil && inst.ready {
+		inst.lastUsed = time.Now()
+		m.mu.Unlock()
+		return inst, nil
+	}
+	m.mu.Unlock()
+
+	want := m.configHash(pol, policyName)
+	ct, err := m.docker.Inspect(ctx, name)
+	switch {
+	case errors.Is(err, dockerapi.ErrNotFound):
+		ct = nil
+	case err != nil:
+		return nil, err
+	}
+
+	if ct != nil {
+		if ct.Config.Labels[naming.LabelUser] != userID {
+			// 64-bit hash collision or tampering: refuse rather than mix users.
+			return nil, fmt.Errorf("container %s belongs to another user", name)
+		}
+		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) {
+			log.Printf("recreating %s: config changed or stopped sandbox", name)
+			if err := m.docker.Remove(ctx, name); err != nil {
+				return nil, err
+			}
+			ct = nil
+		}
+	}
+
+	if ct == nil || !ct.State.Running {
+		if pol.ephemeral() {
+			if err := m.makeRoomForEphemeral(ctx, naming.UserHash(name), pol, name); err != nil {
+				return nil, err
+			}
+		}
+		if err := m.checkCapacity(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	if ct == nil {
+		if err := m.create(ctx, name, userID, policyName, pol, want); err != nil {
+			return nil, err
+		}
+	}
+	if ct == nil || !ct.State.Running {
+		if err := m.docker.Start(ctx, name); err != nil {
+			return nil, err
+		}
+		log.Printf("started %s (policy %s)", name, policyName)
+	}
+
+	inst = &instance{
+		name:      name,
+		userHash:  naming.UserHash(name),
+		ephemeral: pol.ephemeral(),
+		idle:      m.idleFor(pol),
+		addr:      m.addrFor(name, m.port),
+		key:       m.containerKey(name),
+	}
+	if err := m.waitReady(ctx, inst); err != nil {
+		return nil, err
+	}
+	inst.ready = true
+	inst.lastUsed = time.Now()
+
+	m.mu.Lock()
+	if old := m.instances[name]; old != nil {
+		inst.conns = old.conns
+	}
+	m.instances[name] = inst
+	m.mu.Unlock()
+	return inst, nil
+}
+
+func (m *manager) checkCapacity(ctx context.Context) error {
+	if m.maxRunning <= 0 {
+		return nil
+	}
+	list, err := m.docker.List(ctx)
+	if err != nil {
+		return err
+	}
+	running := 0
+	for _, c := range list {
+		if c.State == "running" {
+			running++
+		}
+	}
+	if running >= m.maxRunning {
+		return errCapacity
+	}
+	return nil
+}
+
+var (
+	errCapacity  = errors.New("too many running terminals, try again later")
+	errUserLimit = errors.New("too many temporary sandboxes in use, close one first")
+)
+
+func (m *manager) idleFor(pol Policy) time.Duration {
+	if pol.idle > 0 {
+		return pol.idle
+	}
+	return m.idle
+}
+
+// makeRoomForEphemeral enforces the per-user cap on ephemeral sandboxes. If
+// the cap is reached, the user's least recently used sandbox without an open
+// terminal session is deleted; if every sandbox is in use, it refuses.
+func (m *manager) makeRoomForEphemeral(ctx context.Context, userHash string, pol Policy, self string) error {
+	max := pol.MaxPerUser
+	if max <= 0 {
+		max = 3
+	}
+	list, err := m.docker.List(ctx)
+	if err != nil {
+		return err
+	}
+	var mine []string
+	for _, c := range list {
+		if len(c.Names) == 0 {
+			continue
+		}
+		n := strings.TrimPrefix(c.Names[0], "/")
+		if n != self && naming.EphemeralName.MatchString(n) && naming.UserHash(n) == userHash {
+			mine = append(mine, n)
+		}
+	}
+	for len(mine) >= max {
+		victim := ""
+		var oldest time.Time
+		m.mu.Lock()
+		for _, n := range mine {
+			inst := m.instances[n]
+			if inst != nil && inst.conns > 0 {
+				continue
+			}
+			var used time.Time // unknown to this gateway: treat as oldest
+			if inst != nil {
+				used = inst.lastUsed
+			}
+			if victim == "" || used.Before(oldest) {
+				victim, oldest = n, used
+			}
+		}
+		if victim != "" {
+			delete(m.instances, victim)
+		}
+		m.mu.Unlock()
+		if victim == "" {
+			return errUserLimit
+		}
+		if err := m.docker.Remove(ctx, victim); err != nil {
+			return err
+		}
+		log.Printf("deleted %s to make room for a new sandbox", victim)
+		for i, n := range mine {
+			if n == victim {
+				mine = append(mine[:i], mine[i+1:]...)
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func (m *manager) create(ctx context.Context, name, userID, policyName string, pol Policy, cfg string) error {
+	labels := map[string]string{naming.LabelUser: userID, naming.LabelPolicy: policyName}
+	mounts := []map[string]any{}
+	if pol.ephemeral() {
+		labels[naming.LabelStorage] = storageEphemeral
+	} else {
+		home := pol.Home
+		if home == "" {
+			home = policyName
+		}
+		volume := naming.Volume(userID, home)
+		if err := m.docker.CreateVolume(ctx, volume, labels); err != nil {
+			return fmt.Errorf("create volume: %w", err)
+		}
+		labels[naming.LabelStorage] = storagePersistent
+		mounts = append(mounts, map[string]any{"Type": "volume", "Source": volume, "Target": naming.HomeDir})
+	}
+	labels[naming.LabelConfig] = cfg
+	spec := map[string]any{
+		"Image": m.image,
+		"Env": []string{
+			"OPEN_TERMINAL_API_KEY=" + m.containerKey(name),
+		},
+		"Labels": labels,
+		"HostConfig": map[string]any{
+			"Runtime":     pol.Runtime,
+			"NetworkMode": m.network,
+			"Memory":      pol.MemoryMB << 20,
+			"NanoCpus":    int64(pol.CPUs * 1e9),
+			"PidsLimit":   pol.Pids,
+			"Mounts":      mounts,
+		},
+	}
+	if err := m.docker.Create(ctx, name, spec); err != nil {
+		return fmt.Errorf("create container: %w", err)
+	}
+	log.Printf("created %s (policy %s, runtime %s, storage %s)", name, policyName, pol.Runtime, labels[naming.LabelStorage])
+	return nil
+}
+
+func (m *manager) waitReady(ctx context.Context, inst *instance) error {
+	ctx, cancel := context.WithTimeout(ctx, m.startWait)
+	defer cancel()
+	client := &http.Client{Timeout: 2 * time.Second}
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+inst.addr+"/health", nil)
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%s did not become ready: %w", inst.name, ctx.Err())
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+}
+
+func (m *manager) invalidate(name string) {
+	m.mu.Lock()
+	if inst := m.instances[name]; inst != nil {
+		inst.ready = false
+	}
+	m.mu.Unlock()
+}
+
+func (m *manager) touch(inst *instance, connDelta int) {
+	m.mu.Lock()
+	inst.lastUsed = time.Now()
+	inst.conns += connDelta
+	m.mu.Unlock()
+}
+
+// adopt registers already running managed containers after a gateway restart
+// so the reaper can stop them once idle.
+func (m *manager) adopt(ctx context.Context) {
+	list, err := m.docker.List(ctx)
+	if err != nil {
+		log.Printf("adopt: %v", err)
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range list {
+		if c.State != "running" || len(c.Names) == 0 {
+			continue
+		}
+		name := strings.TrimPrefix(c.Names[0], "/")
+		if !naming.IsManagedContainer(name) {
+			continue
+		}
+		if _, ok := m.instances[name]; !ok {
+			pol := m.policies[c.Labels[naming.LabelPolicy]]
+			m.instances[name] = &instance{
+				name:      name,
+				userHash:  naming.UserHash(name),
+				ephemeral: naming.EphemeralName.MatchString(name),
+				idle:      m.idleFor(pol),
+				lastUsed:  time.Now(),
+			}
+		}
+	}
+}
+
+// reap stops persistent containers and deletes ephemeral ones once they have
+// been idle longer than their idle timeout. Persistent volumes stay, so the
+// next request simply starts the container again.
+func (m *manager) reap(ctx context.Context) {
+	now := time.Now()
+	var victims []string
+	m.mu.Lock()
+	for name, inst := range m.instances {
+		if inst.conns == 0 && now.Sub(inst.lastUsed) > inst.idle {
+			victims = append(victims, name)
+		}
+	}
+	m.mu.Unlock()
+	for _, name := range victims {
+		l := m.lockFor(name)
+		l.Lock()
+		m.mu.Lock()
+		inst := m.instances[name]
+		still := inst != nil && inst.conns == 0 && time.Since(inst.lastUsed) > inst.idle
+		if still {
+			delete(m.instances, name)
+		}
+		m.mu.Unlock()
+		switch {
+		case still && inst.ephemeral:
+			if err := m.docker.Remove(ctx, name); err != nil {
+				log.Printf("remove %s: %v", name, err)
+			} else {
+				log.Printf("deleted idle sandbox %s", name)
+			}
+		case still:
+			if err := m.docker.Stop(ctx, name, 10); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
+				log.Printf("stop %s: %v", name, err)
+			} else {
+				log.Printf("stopped idle %s", name)
+			}
+		}
+		l.Unlock()
+	}
+}
+
+func (m *manager) runReaper(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.reap(ctx)
+		}
+	}
+}

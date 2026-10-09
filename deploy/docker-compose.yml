@@ -1,0 +1,72 @@
+# Run on a dedicated VM. Open WebUI reaches the gateway over the "owui"
+# network (or any network you attach); terminals live on ot-sandbox.
+name: termiplus
+
+x-shared: &shared
+  TERMINAL_IMAGE: ${TERMINAL_IMAGE:?set TERMINAL_IMAGE, ideally name@sha256:digest}
+  SANDBOX_NETWORK: ot-sandbox
+  PROXY_TOKEN_FILE: /run/secrets/proxy_token
+
+services:
+  sockproxy:
+    build: { context: .., target: sockproxy }
+    image: termiplus-sockproxy
+    restart: unless-stopped
+    environment:
+      <<: *shared
+      ALLOWED_RUNTIMES: runsc,sysbox-runc
+      MAX_MEMORY_MB: "8192"
+      MAX_CPUS: "4"
+      MAX_PIDS: "2048"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets: [proxy_token]
+    networks: [ot-control]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  gateway:
+    build: { context: .., target: gateway }
+    image: termiplus-gateway
+    restart: unless-stopped
+    depends_on: [sockproxy]
+    environment:
+      <<: *shared
+      DOCKER_API: http://sockproxy:2375
+      GATEWAY_API_KEY_FILE: /run/secrets/gateway_api_key
+      KEY_SECRET_FILE: /run/secrets/key_secret
+      POLICIES_FILE: /etc/termiplus/policies.json
+      IDLE_TIMEOUT: 30m
+      MAX_RUNNING: "50"
+    volumes:
+      - ./policies.json:/etc/termiplus/policies.json:ro
+    secrets: [proxy_token, gateway_api_key, key_secret]
+    networks:
+      ot-control: {}
+      ot-sandbox:
+        ipv4_address: 172.30.0.2   # referenced by firewall.sh
+      owui: {}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  ot-control:
+    internal: true
+  ot-sandbox:
+    name: ot-sandbox
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: ot-sandbox
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  owui:
+    external: true
+    name: ${OWUI_NETWORK:-owui}
+
+secrets:
+  proxy_token: { file: ./secrets/proxy_token }
+  gateway_api_key: { file: ./secrets/gateway_api_key }
+  key_secret: { file: ./secrets/key_secret }

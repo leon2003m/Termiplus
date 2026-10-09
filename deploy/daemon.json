@@ -1,0 +1,8 @@
+{
+  "runtimes": {
+    "runsc": { "path": "/usr/local/bin/runsc" },
+    "sysbox-runc": { "path": "/usr/bin/sysbox-runc" }
+  },
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
