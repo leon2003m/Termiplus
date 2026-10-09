@@ -46,9 +46,16 @@ RUN useradd -m -u 1000 -s /bin/bash user \
         >> /home/user/.bashrc \
     && chown -R user:user /home/user
 
+# Interactive terminals: Open Terminal starts $SHELL and falls back to
+# /bin/sh. bash-ctty starts bash with the PTY as controlling terminal, so job
+# control works. Commands run by the model use /bin/sh -c and are unaffected.
+COPY bash-ctty /usr/local/libexec/termiplus/bash
+RUN chmod 0755 /usr/local/libexec/termiplus/bash
+
 USER 1000:1000
 WORKDIR /home/user
-ENV HOME=/home/user
+ENV HOME=/home/user \
+    SHELL=/usr/local/libexec/termiplus/bash
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
