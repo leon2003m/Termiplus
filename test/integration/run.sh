@@ -21,6 +21,11 @@ CREATED_OWUI=0
 
 log() { printf '\n==> %s\n' "$*"; }
 
+# Stages after the stack is up do not abort the run: a failing functional
+# check must not hide the hardening, runtime and socket proxy checks.
+FAILED=()
+failed() { echo "FAIL: $*"; FAILED+=("$*"); }
+
 cleanup() {
   log "cleanup"
   docker rm -f tp-it-client >/dev/null 2>&1 || true
@@ -34,11 +39,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log "runtime: $RUNTIME"
-if [ "$RUNTIME" != runc ] && ! docker info --format '{{json .Runtimes}}' | grep -q "\"$RUNTIME\""; then
-  echo "Docker does not know runtime $RUNTIME" >&2
-  exit 1
-fi
 # The test stack uses fixed names (network ot-sandbox, gateway 172.30.0.2,
 # container names derived from user ids) and its cleanup removes every
 # termiplus container and home volume. Refuse to run next to anything that
@@ -54,6 +54,11 @@ if [ "$existing_ctrs" -gt 0 ] || [ "$existing_vols" -gt 0 ] || docker network in
   exit 1
 fi
 
+log "runtime: $RUNTIME"
+if [ "$RUNTIME" != runc ] && ! docker info --format '{{json .Runtimes}}' | grep -q "\"$RUNTIME\""; then
+  echo "Docker does not know runtime $RUNTIME" >&2
+  exit 1
+fi
 
 if [ "${BUILD:-1}" = 1 ]; then
 log "build images"
@@ -107,7 +112,7 @@ for svc in gateway sockproxy; do
   caps="$(docker inspect -f '{{.HostConfig.CapDrop}}' "$id")"
   echo "$svc: user=$user readonly=$ro capdrop=$caps"
   if [ "$user" != "65534:65534" ] || [ "$ro" != true ] || [[ "$caps" != *ALL* ]]; then
-    echo "FAIL: $svc not hardened"; exit 1
+    failed "$svc not hardened"
   fi
 done
 
@@ -122,23 +127,27 @@ docker run -d --name tp-it-client --network owui \
   "$TERMINAL_IMAGE" sleep infinity >/dev/null
 
 log "functional and isolation checks"
-docker exec -e RUNTIME="$RUNTIME" tp-it-client python3 /t/checks.py
+docker exec -e RUNTIME="$RUNTIME" tp-it-client python3 /t/checks.py || failed "functional and isolation checks"
 
 log "terminal containers use runtime $RUNTIME"
 mapfile -t terms < <(docker ps -q --filter label=termiplus.managed=true)
-[ "${#terms[@]}" -gt 0 ] || { echo "FAIL: no terminal containers"; exit 1; }
+[ "${#terms[@]}" -gt 0 ] || failed "no terminal containers"
 for c in "${terms[@]}"; do
   rt="$(docker inspect -f '{{.HostConfig.Runtime}}' "$c")"
   priv="$(docker inspect -f '{{.HostConfig.Privileged}}' "$c")"
   echo "$(docker inspect -f '{{.Name}}' "$c"): runtime=$rt privileged=$priv"
-  if [ "$rt" != "$RUNTIME" ] || [ "$priv" != false ]; then echo "FAIL"; exit 1; fi
+  if [ "$rt" != "$RUNTIME" ] || [ "$priv" != false ]; then failed "$c runs as runtime=$rt privileged=$priv"; fi
 done
 
 log "persistent home survives container recreation"
 alice="$(docker ps -q --filter label=termiplus.user=alice-it --filter label=termiplus.storage=persistent)"
-docker rm -f "$alice" >/dev/null
-sleep 11   # gateway re-probes instances idle for more than 10s
-docker exec -e RUNTIME="$RUNTIME" tp-it-client python3 /t/checks.py persistence
+if [ -n "$alice" ]; then
+  docker rm -f "$alice" >/dev/null
+  sleep 11   # gateway re-probes instances idle for more than 10s
+  docker exec -e RUNTIME="$RUNTIME" tp-it-client python3 /t/checks.py persistence || failed "persistent home"
+else
+  failed "no persistent container for alice-it to recreate"
+fi
 
 log "socket proxy refuses escape attempts"
 docker run --rm --network "${PROJECT}_ot-control" -v "$WORK/deploy/secrets:/s:ro" \
@@ -153,6 +162,11 @@ docker run --rm --network "${PROJECT}_ot-control" -v "$WORK/deploy/secrets:/s:ro
     expect 403 "image build" -H "$T" -X POST $P/build
     expect 403 "inspect unmanaged container" -H "$T" $P/containers/termiplus-it-gateway-1/json
     expect 403 "path traversal" -H "$T" --path-as-is $P/containers/../images/json
-    exit $fail'
+    exit $fail' || failed "socket proxy escape attempts"
 
+if [ "${#FAILED[@]}" -gt 0 ]; then
+  log "${#FAILED[@]} stage(s) failed (runtime $RUNTIME):"
+  printf '  - %s\n' "${FAILED[@]}"
+  exit 1
+fi
 log "all integration checks passed (runtime $RUNTIME)"

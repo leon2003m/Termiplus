@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format is based on 
 ### Changed
 
 - `test/integration/run.sh` refuses to run on a host that already has termiplus containers, home volumes or the `ot-sandbox` network, because its cleanup removes all of them.
+- `test/integration/run.sh` runs every stage and reports all failures at the end.
 
 ### Security
 
