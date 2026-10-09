@@ -1,5 +1,9 @@
 # termiplus
 
+[![CI](https://github.com/leon2003m/termiplus/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/leon2003m/termiplus/actions/workflows/ci.yml)
+[![Security](https://github.com/leon2003m/termiplus/actions/workflows/security.yml/badge.svg?branch=dev)](https://github.com/leon2003m/termiplus/actions/workflows/security.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+
 Per-user Open Terminal containers for Open WebUI. Every user gets their own isolated terminal, started on demand and stopped when idle. Users can pick a **persistent** terminal (home directory survives) or a **throwaway sandbox** per chat. A self-hosted replacement for the paid Open WebUI "Terminals" orchestrator.
 
 ```
@@ -196,6 +200,14 @@ Not yet verified:
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
 - Disk usage is not capped: neither home volumes nor ephemeral container layers. Use a filesystem with project quotas or monitor.
 - No per-user audit log beyond the gateway and proxy logs.
+
+## Development
+
+- Branches: work happens on `dev`; `main` only changes through reviewed pull requests from `dev`. Releases are tags `vX.Y.Z` on `main`.
+- `make check` runs everything CI checks. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- AI agents follow [AGENTS.md](AGENTS.md).
+- Security issues: see [SECURITY.md](SECURITY.md), please report privately.
+- Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Licensing
 

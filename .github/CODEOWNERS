@@ -1,0 +1,8 @@
+# Every change needs review by the maintainer.
+*                       @leon2003m
+
+# Security boundary: see AGENTS.md
+/internal/sockproxy/    @leon2003m
+/internal/gateway/      @leon2003m
+/deploy/                @leon2003m
+/.github/               @leon2003m

@@ -1,0 +1,14 @@
+title = "termiplus gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Obviously fake values used in tests and docs"
+paths = [
+  '''internal/.*_test\.go''',
+]
+regexes = [
+  '''owui-to-gateway-key-0123456789abcdef''',
+  '''per-container-key-secret-0123456789ab''',
+]
