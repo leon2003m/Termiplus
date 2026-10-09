@@ -40,12 +40,25 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: staticcheck
-        run: go run "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}" ./...
+        if: success() || failure()
+        run: |
+          set +e
+          go run "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}" -f json ./... > staticcheck.json 2> staticcheck.err
+          rc=$?
+          # Findings as annotations on the changed lines
+          jq -r --arg ws "$GITHUB_WORKSPACE/" \
+            '"::error file=\(.location.file | ltrimstr($ws)),line=\(.location.line),col=\(.location.column),title=staticcheck \(.code)::\(.message)"' \
+            staticcheck.json
+          while IFS= read -r line; do echo "::error title=staticcheck::$line"; done < staticcheck.err
+          exit "$rc"
       - name: shellcheck
-        run: shellcheck deploy/firewall.sh test/integration/run.sh .github/scripts/*.sh
+        if: success() || failure()
+        run: shellcheck --format=gcc deploy/firewall.sh test/integration/run.sh .github/scripts/*.sh
       - name: hadolint
-        run: hadolint Dockerfile image/Dockerfile
+        if: success() || failure()
+        run: hadolint --format tty Dockerfile image/Dockerfile
       - name: actionlint
+        if: success() || failure()
         run: actionlint
 
   test:
