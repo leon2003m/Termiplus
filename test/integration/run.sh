@@ -91,7 +91,9 @@ for svc in gateway sockproxy; do
   ro="$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$id")"
   caps="$(docker inspect -f '{{.HostConfig.CapDrop}}' "$id")"
   echo "$svc: user=$user readonly=$ro capdrop=$caps"
-  [ "$user" = "65534:65534" ] && [ "$ro" = true ] && [[ "$caps" == *ALL* ]] || { echo "FAIL: $svc not hardened"; exit 1; }
+  if [ "$user" != "65534:65534" ] || [ "$ro" != true ] || [[ "$caps" != *ALL* ]]; then
+    echo "FAIL: $svc not hardened"; exit 1
+  fi
 done
 
 if [ "${SKIP_FIREWALL:-0}" != 1 ]; then
@@ -114,7 +116,7 @@ for c in "${terms[@]}"; do
   rt="$(docker inspect -f '{{.HostConfig.Runtime}}' "$c")"
   priv="$(docker inspect -f '{{.HostConfig.Privileged}}' "$c")"
   echo "$(docker inspect -f '{{.Name}}' "$c"): runtime=$rt privileged=$priv"
-  [ "$rt" = "$RUNTIME" ] && [ "$priv" = false ] || { echo "FAIL"; exit 1; }
+  if [ "$rt" != "$RUNTIME" ] || [ "$priv" != false ]; then echo "FAIL"; exit 1; fi
 done
 
 log "persistent home survives container recreation"
