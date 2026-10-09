@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format is based on 
 - Project standards: agent rules, security policy, contribution guide, issue and pull request templates.
 - CI: lint, tests, image builds, secret and vulnerability scanning with reports, gVisor integration tests, signed releases with SBOMs.
 
+### Changed
+
+- `test/integration/run.sh` refuses to run on a host that already has termiplus containers, home volumes or the `ot-sandbox` network, because its cleanup removes all of them.
+
 ### Security
 
 - Gateway and socket proxy run as non-root with read-only filesystems, all capabilities dropped and `no-new-privileges`.

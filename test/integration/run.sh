@@ -39,6 +39,21 @@ if [ "$RUNTIME" != runc ] && ! docker info --format '{{json .Runtimes}}' | grep 
   echo "Docker does not know runtime $RUNTIME" >&2
   exit 1
 fi
+# The test stack uses fixed names (network ot-sandbox, gateway 172.30.0.2,
+# container names derived from user ids) and its cleanup removes every
+# termiplus container and home volume. Refuse to run next to anything that
+# already exists, so a real deployment's homes can never be deleted.
+existing_ctrs="$(docker ps -aq --filter label=termiplus.managed=true | wc -l)"
+existing_vols="$(docker volume ls -q --filter label=termiplus.managed=true | wc -l)"
+if [ "$existing_ctrs" -gt 0 ] || [ "$existing_vols" -gt 0 ] || docker network inspect ot-sandbox >/dev/null 2>&1; then
+  echo "Refusing to run: found $existing_ctrs termiplus container(s), $existing_vols home volume(s)" >&2
+  echo "or the ot-sandbox network on this host. The integration test needs a host without a" >&2
+  echo "termiplus deployment, because its cleanup removes all of them." >&2
+  trap - EXIT
+  rm -rf "$WORK"
+  exit 1
+fi
+
 
 if [ "${BUILD:-1}" = 1 ]; then
 log "build images"
