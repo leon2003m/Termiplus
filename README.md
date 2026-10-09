@@ -207,19 +207,36 @@ curl -H "Authorization: Bearer $KEY" -H "X-User-Id: alice" -H "Content-Type: app
 
 ## Status
 
-Verified against Docker 29 with the real Open Terminal 0.14.0 image, using runc:
+Last verified 2026-10-09 on a single Linux host (kernel 6.12 LTS): Docker 29.2.1 with the containerd image store, gVisor `release-20260921.0`, Sysbox CE 0.7.1, Open Terminal 0.14.0, Open WebUI 0.11.4. Earlier runs against Docker 29 with runc covered the same functions without a sandbox runtime.
 
-- users isolated from each other, sudo works inside
-- persistent homes survive container recreation; homes are shared across policies with the same `home`
-- interactive terminal over WebSocket; wrong token rejected before any container starts
-- ephemeral sandboxes per chat, LRU eviction at the cap, deleted when idle without leftover volumes
-- firewall rules; escape attempts against the proxy all refused
+### Integration tests (`test/integration/run.sh`)
 
-Not yet verified:
+| Runtime | Result |
+|---|---|
+| `sysbox-runc` | **all checks pass**: auth, user isolation, sudo inside, firewall (private ranges and host blocked, internet reachable), ephemeral sandboxes, terminal WebSocket, runtime and `Privileged:false` on every terminal, persistent home survives recreation, all proxy escape attempts refused |
+| `runsc` (gVisor) | **fails 2 of 16 functional checks**, so the later steps (runtime, persistence, proxy) do not run |
 
-1. gVisor (`runsc`) and Sysbox runtimes
-2. a real Open WebUI in front (file browser, interactive terminal, tool calls)
-3. whether Open WebUI's file browser always sends `X-Session-Id`; if not, ephemeral file browsing falls back to the user's `nochat` sandbox
+The two gVisor failures are runtime behaviour, not termiplus bugs, and are reproducible with a plain `docker run --runtime runsc` of the terminal image:
+
+1. **`sudo` does not work.** gVisor ignores setuid bits unless runsc is started with `--allow-suid` (off by default). With `"runtimeArgs": ["--allow-suid"]` on the `runsc` runtime the check passes. `deploy/daemon.json` does not set it; enabling it lets processes become root inside the sandbox, which is what the image and this README intend, but it is a change to the runtime configuration and needs a maintainer decision.
+2. **No DNS on the `ot-sandbox` network.** gVisor's network stack cannot reach Docker's embedded resolver `127.0.0.11` on user-defined networks ([google/gvisor#7469](https://github.com/google/gvisor/issues/7469)). Direct DNS to public resolvers and connections by IP work. runsc's `--reproduce-nat` needs the legacy iptables API and fails to start containers on an `nf_tables` host; `--reproduce-nftables` did not restore DNS. The known workarounds (own `resolv.conf` mount, `--network=host`, a resolver on another runtime) touch the proxy or network isolation and were not applied.
+
+### Real Open WebUI in front
+
+Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Open WebUI on the same host reaching the gateway on a private bridge address. Two admin terminal connections with Bearer auth: the root URL (persistent) and `/p/scratch` (sandbox per chat). Tested through the real web UI (headless Chromium) as two regular users, terminals running under gVisor (`runsc` with `--allow-suid`, see above):
+
+- **File browser**: lists the home directory, shows files written from the terminal or by the model
+- **Interactive terminal**: works over the WebSocket; commands run, `sudo` gives uid 0 (with `--allow-suid`)
+- **Model running commands**: tool calls (`run_command`) execute in the user's own terminal and the output is returned
+- **Isolation**: each user gets their own container and home volume; neither user sees the other's files
+- **Sandbox per chat**: the model's tool calls send `X-Session-Id` (the chat id) and get a fresh sandbox per chat
+- **`X-Session-Id` from the file browser**: sent once the chat is saved (after the first message). In a new, unsaved chat the file browser sends no session id and lands in the user's `nochat` sandbox, so it shows a different sandbox than the model will use until the first message is sent
+- Gateway and proxy logs showed no errors and no denials during normal use
+
+### Known issues found
+
+- **No job control in the interactive terminal.** Open Terminal starts `$SHELL` (falling back to `/bin/sh`, the image does not set `SHELL`) with `start_new_session=True` but does not make the PTY the controlling terminal, so the shell prints `can't access tty; job control turned off`. This is Open Terminal behaviour and happens under every runtime. Setting `ENV SHELL=/bin/bash` in `image/Dockerfile` would at least give users bash.
+- **gVisor DNS and sudo**, see above. Until decided, Sysbox is the runtime that passes the full integration test.
 
 ## Known limits
 
