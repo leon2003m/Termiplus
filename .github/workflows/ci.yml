@@ -16,6 +16,10 @@ concurrency:
 
 env:
   GO_VERSION: "1.27"
+  # staticcheck 2026.2.1 cannot read Go 1.27 export data yet. The code targets
+  # Go 1.24, so linting with the previous release is equivalent. Bump both
+  # together once staticcheck supports 1.27.
+  LINT_GO_VERSION: "1.26"
   STATICCHECK_VERSION: "2026.2.1"
 
 jobs:
@@ -29,7 +33,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: ${{ env.LINT_GO_VERSION }}
           cache: false
       - name: Install pinned linters
         run: .github/scripts/install-tools.sh actionlint hadolint
