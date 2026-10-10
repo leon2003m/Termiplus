@@ -30,7 +30,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y -qq runsc
-          sudo runsc install
+          # --allow-suid: sudo inside the sandbox, as deploy/daemon.json configures it
+          sudo runsc install -- --allow-suid
           sudo systemctl restart docker
           runsc --version | head -1
           docker info --format '{{json .Runtimes}}' | jq -r 'keys[]'

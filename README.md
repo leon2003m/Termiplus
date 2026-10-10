@@ -51,6 +51,8 @@ Requirements: Linux VM, Docker 25+, Go 1.24 only if you want to run the tests.
 sudo cp deploy/daemon.json /etc/docker/daemon.json   # or merge into your existing one
 sudo systemctl restart docker
 docker info | grep -i runtimes                       # must list runsc and/or sysbox-runc
+#    deploy/daemon.json starts runsc with --allow-suid, without it sudo inside gVisor fails
+#    (gVisor ignores setuid bits by default). If you merge by hand, keep that runtimeArgs entry.
 
 # 2. Terminal image (push to your registry and pin by digest in production)
 docker build -t ot-terminal:0.14.0 image/
@@ -93,7 +95,7 @@ With 5a, Open WebUI must run in the `owui` network. With 5b the gateway speaks p
 |---|---|---|---|---|
 | gateway | 65534 (nobody) | read-only, image is `scratch` with one static binary | all dropped | `no-new-privileges`, memory/CPU/PID limits, healthcheck |
 | sockproxy | 65534 plus the socket's group (`DOCKER_GID`), not root | read-only, `scratch` | all dropped | `no-new-privileges`, limits, internal network only |
-| terminals | 1000 with sudo inside the sandbox | writable | Docker defaults | gVisor or Sysbox, default seccomp/AppArmor (overrides refused by the proxy), memory/CPU/PID limits, no ports, sandbox network behind `firewall.sh` |
+| terminals | 1000 with sudo inside the sandbox (gVisor: needs `--allow-suid`, root of the sandbox kernel only) | writable | Docker defaults | gVisor or Sysbox, default seccomp/AppArmor (overrides refused by the proxy), memory/CPU/PID limits, no ports, sandbox network behind `firewall.sh` |
 
 ## How it works with Open WebUI
 

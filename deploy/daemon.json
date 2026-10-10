@@ -1,6 +1,6 @@
 {
   "runtimes": {
-    "runsc": { "path": "/usr/local/bin/runsc" },
+    "runsc": { "path": "/usr/local/bin/runsc", "runtimeArgs": ["--allow-suid"] },
     "sysbox-runc": { "path": "/usr/bin/sysbox-runc" }
   },
   "log-driver": "json-file",

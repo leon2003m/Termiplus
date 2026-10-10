@@ -27,3 +27,4 @@ All notable changes to this project are documented here. The format is based on 
 ### Security
 
 - Gateway and socket proxy run as non-root with read-only filesystems, all capabilities dropped and `no-new-privileges`.
+- gVisor: `deploy/daemon.json` starts runsc with `--allow-suid` so sudo works inside the sandbox as documented. Elevation stays inside the gVisor sandbox (root of the sandbox kernel, not the host).
