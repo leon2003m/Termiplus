@@ -28,3 +28,4 @@ All notable changes to this project are documented here. The format is based on 
 
 - Gateway and socket proxy run as non-root with read-only filesystems, all capabilities dropped and `no-new-privileges`.
 - gVisor: `deploy/daemon.json` starts runsc with `--allow-suid` so sudo works inside the sandbox as documented. Elevation stays inside the gVisor sandbox (root of the sandbox kernel, not the host).
+- Socket proxy accepts `HostConfig.Dns` only if it is exactly the one configured resolver (`ALLOWED_DNS`, the internal forwarder); any other address, a second entry, `DnsSearch` or `DnsOptions` are refused. Empty keeps `Dns` refused as before. Part of #12.

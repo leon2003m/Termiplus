@@ -4,6 +4,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -25,6 +26,15 @@ func main() {
 		MaxMemory:   config.Int("MAX_MEMORY_MB", 8192) << 20,
 		MaxNanoCPUs: config.Int("MAX_CPUS", 4) * 1e9,
 		MaxPids:     config.Int("MAX_PIDS", 2048),
+		AllowedDNS:  config.Get("ALLOWED_DNS", ""),
+	}
+	// A terminal may be pinned to exactly this resolver (the internal
+	// forwarder) and no other. Empty disables the feature; any other value or
+	// a DnsSearch/DnsOptions field is refused by the proxy.
+	if rules.AllowedDNS != "" {
+		if _, err := netip.ParseAddr(rules.AllowedDNS); err != nil {
+			log.Fatalf("ALLOWED_DNS must be an IP address, got %q", rules.AllowedDNS)
+		}
 	}
 	for _, rt := range strings.Split(config.Get("ALLOWED_RUNTIMES", "runsc,sysbox-runc"), ",") {
 		if rt = strings.TrimSpace(rt); rt != "" {

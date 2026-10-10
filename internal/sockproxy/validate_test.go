@@ -98,10 +98,13 @@ func TestCreateRejected(t *testing.T) {
 		"port bindings": func(m map[string]any) {
 			hc(m)["PortBindings"] = map[string]any{"8000/tcp": []any{map[string]string{"HostPort": "8000"}}}
 		},
-		"sysctls":        func(m map[string]any) { hc(m)["Sysctls"] = map[string]string{"net.ipv4.ip_forward": "1"} },
-		"userns host":    func(m map[string]any) { hc(m)["UsernsMode"] = "host" },
-		"cgroup parent":  func(m map[string]any) { hc(m)["CgroupParent"] = "/" },
-		"volumes driver": func(m map[string]any) { hc(m)["VolumeDriver"] = "x" },
+		"sysctls":         func(m map[string]any) { hc(m)["Sysctls"] = map[string]string{"net.ipv4.ip_forward": "1"} },
+		"userns host":     func(m map[string]any) { hc(m)["UsernsMode"] = "host" },
+		"cgroup parent":   func(m map[string]any) { hc(m)["CgroupParent"] = "/" },
+		"volumes driver":  func(m map[string]any) { hc(m)["VolumeDriver"] = "x" },
+		"dns default off": func(m map[string]any) { hc(m)["Dns"] = []string{"172.30.0.3"} },
+		"dns search":      func(m map[string]any) { hc(m)["DnsSearch"] = []string{"evil.lan"} },
+		"dns options":     func(m map[string]any) { hc(m)["DnsOptions"] = []string{"rotate"} },
 	}
 	for label, mutate := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -109,6 +112,50 @@ func TestCreateRejected(t *testing.T) {
 			mutate(m)
 			if _, err := testRules.ValidateCreate(name, body(t, m)); err == nil {
 				t.Fatalf("%s: expected rejection", label)
+			}
+		})
+	}
+}
+
+func TestCreateDNS(t *testing.T) {
+	name := naming.Container("u1", "default")
+	rules := testRules
+	rules.AllowedDNS = "172.30.0.3"
+
+	// the one configured forwarder is accepted and forwarded through
+	m := goodCreate(name)
+	hc(m)["Dns"] = []string{"172.30.0.3"}
+	out, err := rules.ValidateCreate(name, body(t, m))
+	if err != nil {
+		t.Fatalf("configured Dns rejected: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(out, &got)
+	dns, _ := got["HostConfig"].(map[string]any)["Dns"].([]any)
+	if len(dns) != 1 || dns[0] != "172.30.0.3" {
+		t.Fatalf("Dns not forwarded: %v", got["HostConfig"])
+	}
+
+	// anything but the one configured address is refused, even with the feature on
+	reject := map[string]func(map[string]any){
+		"other resolver": func(m map[string]any) { hc(m)["Dns"] = []string{"1.1.1.1"} },
+		"extra resolver": func(m map[string]any) { hc(m)["Dns"] = []string{"172.30.0.3", "1.1.1.1"} },
+		"empty resolver": func(m map[string]any) { hc(m)["Dns"] = []string{""} },
+		"dns search": func(m map[string]any) {
+			hc(m)["Dns"] = []string{"172.30.0.3"}
+			hc(m)["DnsSearch"] = []string{"evil.lan"}
+		},
+		"dns options": func(m map[string]any) {
+			hc(m)["Dns"] = []string{"172.30.0.3"}
+			hc(m)["DnsOptions"] = []string{"rotate"}
+		},
+	}
+	for label, mutate := range reject {
+		t.Run(label, func(t *testing.T) {
+			m := goodCreate(name)
+			mutate(m)
+			if _, err := rules.ValidateCreate(name, body(t, m)); err == nil {
+				t.Fatalf("%s accepted", label)
 			}
 		})
 	}

@@ -20,6 +20,11 @@ type Rules struct {
 	MaxMemory   int64           // bytes
 	MaxNanoCPUs int64
 	MaxPids     int64
+	// AllowedDNS is the single resolver address a terminal may be pinned to
+	// (the internal forwarder). Empty means HostConfig.Dns is refused, as
+	// before. Any other value, more than one entry, DnsSearch or DnsOptions
+	// are always refused.
+	AllowedDNS string
 }
 
 const maxBody = 64 << 10
@@ -47,6 +52,9 @@ type createHostConfig struct {
 	NanoCpus    int64         `json:"NanoCpus"`
 	PidsLimit   *int64        `json:"PidsLimit"`
 	Mounts      []createMount `json:"Mounts"`
+	// Dns, when present, must be exactly [Rules.AllowedDNS]. DnsSearch and
+	// DnsOptions are intentionally absent, so DisallowUnknownFields refuses them.
+	Dns []string `json:"Dns,omitempty"`
 }
 
 type createRequest struct {
@@ -89,6 +97,16 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 	if hc.PidsLimit == nil || *hc.PidsLimit <= 0 || *hc.PidsLimit > r.MaxPids {
 		return nil, fmt.Errorf("pids limit missing or above %d", r.MaxPids)
 	}
+	// A terminal may be pinned to exactly the configured forwarder and nothing
+	// else. This is the only place a resolver address can enter a container.
+	if len(hc.Dns) > 0 {
+		if r.AllowedDNS == "" {
+			return nil, fmt.Errorf("dns not allowed")
+		}
+		if len(hc.Dns) != 1 || hc.Dns[0] != r.AllowedDNS {
+			return nil, fmt.Errorf("dns must be exactly [%q]", r.AllowedDNS)
+		}
+	}
 	var mounts []map[string]any
 	if ephemeral {
 		// Ephemeral sandboxes get no storage at all: everything lives in the
@@ -125,6 +143,10 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 	}
 
 	pids := *hc.PidsLimit
+	var dns []string
+	if len(hc.Dns) == 1 {
+		dns = []string{hc.Dns[0]}
+	}
 	out := map[string]any{
 		"Image":    r.Image,
 		"Env":      req.Env,
@@ -140,6 +162,7 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 			"Privileged":     false,
 			"ReadonlyRootfs": false,
 			"Mounts":         mounts,
+			"Dns":            dns,
 			// Ephemeral containers are deleted by Docker as soon as they stop.
 			"AutoRemove":    ephemeral,
 			"RestartPolicy": map[string]any{"Name": "no"},
