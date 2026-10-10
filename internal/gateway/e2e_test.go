@@ -377,6 +377,41 @@ func TestUserlessSpecRequests(t *testing.T) {
 	}
 }
 
+func TestSpecContainerSharedPerRuntime(t *testing.T) {
+	h := newHarness(t)
+	for _, path := range []string{"/openapi.json", "/p/scratch/openapi.json", "/p/sysbox/openapi.json"} {
+		if code, body := h.get(t, path, "", testAPIKey); code != 200 {
+			t.Fatalf("%s: %d %s", path, code, body)
+		}
+	}
+	// default and scratch both use runsc: one shared spec container in the
+	// preferred "default" policy, no ephemeral spec sandbox. sysbox keeps its own.
+	if h.ctr(naming.Container(specUser, "default")) == nil || h.ctr(naming.Container(specUser, "sysbox")) == nil {
+		t.Fatal("expected spec containers for default (runsc) and sysbox")
+	}
+	if h.ctr(naming.Ephemeral(specUser, "spec", "scratch")) != nil {
+		t.Fatal("scratch must reuse the runsc spec container")
+	}
+	if h.docker.creates != 2 {
+		t.Fatalf("want 2 spec containers, got %d creates", h.docker.creates)
+	}
+}
+
+func TestSpecPolicies(t *testing.T) {
+	got := specPolicies(map[string]Policy{
+		"default": {Runtime: "runsc"},
+		"scratch": {Runtime: "runsc", Storage: storageEphemeral},
+		"zz":      {Runtime: "sysbox-runc", Storage: storageEphemeral},
+		"desk":    {Runtime: "sysbox-runc", Storage: storagePersistent},
+	})
+	want := map[string]string{"default": "default", "scratch": "default", "zz": "desk", "desk": "desk"}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("spec policy for %s: got %q want %q (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
 func TestPolicySharesHome(t *testing.T) {
 	h := newHarness(t)
 	if code, b := h.get(t, "/p/sysbox/files/cwd", "alice", testAPIKey); code != 200 {

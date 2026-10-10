@@ -19,6 +19,7 @@ All notable changes to this project are documented here. The format is based on 
 - `test/integration/run.sh` refuses to run on a host that already has termiplus containers, home volumes or the `ot-sandbox` network, because its cleanup removes all of them.
 - `test/integration/run.sh` runs every stage and reports all failures at the end.
 - Interactive terminals start bash with the PTY as controlling terminal (job control works); the image sets `SHELL`.
+- User-less spec requests (connection check, OpenAPI, system prompt) share one container per runtime instead of starting one per policy.
 
 ### Security
 

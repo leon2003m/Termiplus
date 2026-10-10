@@ -100,7 +100,7 @@ Open WebUI's admin terminal connection already sends who the user is:
 
 The gateway verifies the connection key, then calls the user's container with that container's own key (HMAC of `KEY_SECRET` and the container name). For the WebSocket it reads the auth message, checks it, and resends it upstream with the container key. No container is started before authentication succeeds.
 
-Open WebUI also sends a few requests without a user (connection check, OpenAPI spec, system prompt). Those go to a shared read-only "spec" container and only `GET /openapi.json`, `/api/config` and `/system` are allowed. `/health` is answered by the gateway. `/api/v1/*` returns 404, so Open WebUI treats the gateway as a normal terminal, not as an orchestrator. That is why plain Bearer auth is enough.
+Open WebUI also sends a few requests without a user (connection check, OpenAPI spec, system prompt). Those go to a "spec" container shared by all policies with the same runtime, and only `GET /openapi.json`, `/api/config` and `/system` are allowed. `/health` is answered by the gateway. `/api/v1/*` returns 404, so Open WebUI treats the gateway as a normal terminal, not as an orchestrator. That is why plain Bearer auth is enough.
 
 ## Policies and storage profiles
 

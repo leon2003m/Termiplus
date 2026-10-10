@@ -44,6 +44,9 @@ type Config struct {
 type Gateway struct {
 	cfg Config
 	mgr *manager
+	// specPolicy maps every policy to the policy whose container answers
+	// user-less spec requests for it (see specPolicies).
+	specPolicy map[string]string
 }
 
 // The user-less "spec" identity serves Open WebUI's connection checks and
@@ -106,7 +109,36 @@ func New(cfg Config) (*Gateway, error) {
 		instances:  map[string]*instance{},
 		locks:      map[string]*sync.Mutex{},
 	}
-	return &Gateway{cfg: cfg, mgr: m}, nil
+	return &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}, nil
+}
+
+// specPolicies picks, for each runtime, one policy whose container answers the
+// user-less spec requests of every policy with that runtime. Without this each
+// policy started its own full terminal container just for three read-only
+// GETs. Spec answers are shared per runtime, not globally, because /system
+// describes the kernel, which differs between gVisor and Sysbox. Preference:
+// "default", then persistent policies, then by name.
+func specPolicies(policies map[string]Policy) map[string]string {
+	rank := func(name string) string {
+		switch {
+		case name == "default":
+			return "0"
+		case !policies[name].ephemeral():
+			return "1" + name
+		}
+		return "2" + name
+	}
+	best := map[string]string{} // runtime -> policy name
+	for name, p := range policies {
+		if cur, ok := best[p.Runtime]; !ok || rank(name) < rank(cur) {
+			best[p.Runtime] = name
+		}
+	}
+	out := make(map[string]string, len(policies))
+	for name, p := range policies {
+		out[name] = best[p.Runtime]
+	}
+	return out
 }
 
 // Run starts background work (adopting running containers, idle reaper).
@@ -175,6 +207,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case userID == specUser:
 		sessionID = "spec"
+		if shared, ok := g.specPolicy[policyName]; ok {
+			policyName, pol = shared, g.cfg.Policies[shared]
+		}
 	case sessionID == "":
 		sessionID = "nochat"
 	case !naming.UserID.MatchString(sessionID):
