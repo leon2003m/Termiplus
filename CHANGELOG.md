@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format is based on 
 - Project standards: agent rules, security policy, contribution guide, issue and pull request templates.
 - CI: lint, tests, image builds, secret and vulnerability scanning with reports, gVisor integration tests, signed releases with SBOMs.
 - `deploy/termiplus-firewall.service`: example unit that reapplies the sandbox firewall at boot and after Docker restarts.
+- Internal `netpolicy` package: validates admin-set custom DNS entries and per-destination egress allow rules, and enforces a fixed deny-list (loopback, link-local incl. the metadata address, CGNAT, the sandbox subnet) that no entry can open. Groundwork for #12.
 
 ### Changed
 
