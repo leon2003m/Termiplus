@@ -57,7 +57,9 @@ docker info | grep -i runtimes                       # must list runsc and/or sy
 # 2. Terminal image (push to your registry and pin by digest in production)
 docker build -t ot-terminal:0.14.0 image/
 
-# 3. Secrets, each 64 hex chars
+# 3. Secrets, each 64 hex chars. gateway and sockproxy run as uid/gid 65534 and
+#    read them through Compose's file secrets, which keep the host file mode:
+#    readable for you and group 65534 only, independent of your umask.
 mkdir -p deploy/secrets
 for s in proxy_token gateway_api_key key_secret; do
   openssl rand -hex 32 | sudo install -m 0640 -o "$USER" -g 65534 /dev/stdin deploy/secrets/$s
@@ -77,14 +79,15 @@ cd deploy && docker compose up -d --build
 cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
   docker compose -f docker-compose.yml -f docker-compose.separate-vm.yml up -d --build
 
-# 6. Egress rules (rerun after every Docker restart, e.g. from a systemd unit)
+# 6. Egress rules. Rerun after every Docker restart; the example unit does that
+#    (adjust ExecStart if the repo is not in /opt/termiplus):
 sudo ./firewall.sh
+sudo cp termiplus-firewall.service /etc/systemd/system/ && sudo systemctl enable --now termiplus-firewall
 ```
 
 7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
    - URL `http://gateway:8080`, auth type **Bearer**, key = contents of `deploy/secrets/gateway_api_key`
    - Optionally a second one, `http://gateway:8080/p/scratch`, named e.g. "Sandbox (fresh per chat)"
-sudo cp termiplus-firewall.service /etc/systemd/system/ && sudo systemctl enable --now termiplus-firewall
    - Restrict who sees which with access grants
 
 With 5a, Open WebUI must run in the `owui` network. With 5b the gateway speaks plain HTTP on `GATEWAY_BIND`: put it on a private interface (VLAN, WireGuard) or behind a TLS reverse proxy, and allow only the Open WebUI host in the VM and Proxmox firewalls. Never expose the gateway key to browsers.
@@ -163,13 +166,13 @@ Also rejected: `exec`, `attach`, image pulls, builds, connection upgrades, encod
 - the gateway (172.30.0.2) can reach every terminal
 - no IPv6
 
+Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf-call-iptables=1`, so traffic on **every** Linux bridge of the host (VM bridges, LAN bridges) passes iptables `FORWARD` from then on, not only `ot-sandbox`. That is why termiplus expects a dedicated VM. On a shared host check your `FORWARD` policy and other bridges first.
+
 ## Settings
 
 | Variable | Used by | Default |
 |---|---|---|
 | `TERMINAL_IMAGE` | both | required, must be identical in both |
-Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf-call-iptables=1`, so traffic on **every** Linux bridge of the host (VM bridges, LAN bridges) passes iptables `FORWARD` from then on, not only `ot-sandbox`. That is why termiplus expects a dedicated VM. On a shared host check your `FORWARD` policy and other bridges first.
-
 | `SANDBOX_NETWORK` | both | `ot-sandbox` |
 | `PROXY_TOKEN` / `PROXY_TOKEN_FILE` | both | optional, recommended |
 | `ALLOWED_RUNTIMES` | sockproxy | `runsc,sysbox-runc` |
