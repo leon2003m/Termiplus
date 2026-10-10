@@ -1,0 +1,18 @@
+# Applies deploy/firewall.sh at boot and again after every Docker restart.
+#
+#   sudo cp deploy/termiplus-firewall.service /etc/systemd/system/
+#   sudo systemctl edit termiplus-firewall   # only if the path below differs
+#   sudo systemctl enable --now termiplus-firewall
+[Unit]
+Description=termiplus sandbox egress rules
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/termiplus/deploy/firewall.sh
+
+[Install]
+WantedBy=docker.service

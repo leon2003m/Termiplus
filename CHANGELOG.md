@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format is based on 
 - Deploy files: Docker Compose, runtime config, sandbox firewall script.
 - Project standards: agent rules, security policy, contribution guide, issue and pull request templates.
 - CI: lint, tests, image builds, secret and vulnerability scanning with reports, gVisor integration tests, signed releases with SBOMs.
+- `deploy/termiplus-firewall.service`: example unit that reapplies the sandbox firewall at boot and after Docker restarts.
 
 ### Changed
 
@@ -20,6 +21,7 @@ All notable changes to this project are documented here. The format is based on 
 - `test/integration/run.sh` runs every stage and reports all failures at the end.
 - Interactive terminals start bash with the PTY as controlling terminal (job control works); the image sets `SHELL`.
 - User-less spec requests (connection check, OpenAPI, system prompt) share one container per runtime instead of starting one per policy.
+- Quick start creates the secrets readable for the owner and the services' group only, independent of the umask.
 
 ### Security
 

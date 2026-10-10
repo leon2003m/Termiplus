@@ -38,7 +38,8 @@ internal/naming/            container/volume naming shared by gateway and proxy
 internal/config/            env and *_FILE secret helpers
 image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
-deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh
+deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
+                            termiplus-firewall.service
 ```
 
 ## Quick start (dedicated VM)
@@ -56,7 +57,9 @@ docker build -t ot-terminal:0.14.0 image/
 
 # 3. Secrets, each 64 hex chars
 mkdir -p deploy/secrets
-for s in proxy_token gateway_api_key key_secret; do openssl rand -hex 32 > deploy/secrets/$s; done
+for s in proxy_token gateway_api_key key_secret; do
+  openssl rand -hex 32 | sudo install -m 0640 -o "$USER" -g 65534 /dev/stdin deploy/secrets/$s
+done
 
 # 4. Settings for compose (deploy/.env is gitignored)
 cat > deploy/.env <<ENV
@@ -79,6 +82,7 @@ sudo ./firewall.sh
 7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
    - URL `http://gateway:8080`, auth type **Bearer**, key = contents of `deploy/secrets/gateway_api_key`
    - Optionally a second one, `http://gateway:8080/p/scratch`, named e.g. "Sandbox (fresh per chat)"
+sudo cp termiplus-firewall.service /etc/systemd/system/ && sudo systemctl enable --now termiplus-firewall
    - Restrict who sees which with access grants
 
 With 5a, Open WebUI must run in the `owui` network. With 5b the gateway speaks plain HTTP on `GATEWAY_BIND`: put it on a private interface (VLAN, WireGuard) or behind a TLS reverse proxy, and allow only the Open WebUI host in the VM and Proxmox firewalls. Never expose the gateway key to browsers.
@@ -162,6 +166,8 @@ Also rejected: `exec`, `attach`, image pulls, builds, connection upgrades, encod
 | Variable | Used by | Default |
 |---|---|---|
 | `TERMINAL_IMAGE` | both | required, must be identical in both |
+Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf-call-iptables=1`, so traffic on **every** Linux bridge of the host (VM bridges, LAN bridges) passes iptables `FORWARD` from then on, not only `ot-sandbox`. That is why termiplus expects a dedicated VM. On a shared host check your `FORWARD` policy and other bridges first.
+
 | `SANDBOX_NETWORK` | both | `ot-sandbox` |
 | `PROXY_TOKEN` / `PROXY_TOKEN_FILE` | both | optional, recommended |
 | `ALLOWED_RUNTIMES` | sockproxy | `runsc,sysbox-runc` |
