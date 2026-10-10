@@ -54,6 +54,38 @@ func TestDenyListNeverOpens(t *testing.T) {
 	}
 }
 
+func TestMappedIPv6CannotBypassDenyList(t *testing.T) {
+	// IPv4-mapped IPv6 spellings of deny-list targets must be refused, not
+	// slipped through on an address-family mismatch. Pure IPv6 egress is also
+	// refused (the sandbox is IPv4-only).
+	for name, cidr := range map[string]string{
+		"mapped metadata":       "::ffff:169.254.169.254/128",
+		"mapped metadata range": "::ffff:169.254.0.0/112",
+		"mapped loopback":       "::ffff:127.0.0.1/128",
+		"mapped sandbox gw":     "::ffff:172.30.0.2/128",
+		"pure v6":               "2001:db8::/32",
+		"v6 default":            "::/0",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Validate(Policy{Egress: []EgressRule{{CIDR: cidr, Port: 443, Proto: TCP}}}); err == nil {
+				t.Fatalf("%s (%s) was accepted", name, cidr)
+			}
+		})
+	}
+	// A DNS entry may not point a name at a deny-listed address, in either spelling.
+	for name, ip := range map[string]string{
+		"metadata":        "169.254.169.254",
+		"mapped metadata": "::ffff:169.254.169.254",
+		"sandbox gateway": "172.30.0.2",
+	} {
+		t.Run("dns "+name, func(t *testing.T) {
+			if _, err := Validate(Policy{DNS: []DNSEntry{{Name: "x.internal", IP: ip}}}); err == nil {
+				t.Fatalf("dns entry to %s (%s) was accepted", name, ip)
+			}
+		})
+	}
+}
+
 func TestExtraDeny(t *testing.T) {
 	mgmt := netip.MustParsePrefix("10.9.0.0/16")
 	// allowed without the extra deny

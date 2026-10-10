@@ -82,8 +82,17 @@ func Validate(p Policy, extraDeny ...netip.Prefix) (*Validated, error) {
 			return nil, fmt.Errorf("dns_entries[%d]: duplicate name %q", i, name)
 		}
 		seenName[strings.ToLower(name)] = true
-		if _, err := netip.ParseAddr(e.IP); err != nil {
+		ip, err := netip.ParseAddr(e.IP)
+		if err != nil {
 			return nil, fmt.Errorf("dns_entries[%d]: invalid ip %q", i, e.IP)
+		}
+		// Unmap so an IPv4-mapped IPv6 form (::ffff:a.b.c.d) is compared as the
+		// IPv4 address it denotes, not skipped on an address-family mismatch.
+		ip = ip.Unmap()
+		for _, d := range deny {
+			if d.Contains(ip) {
+				return nil, fmt.Errorf("dns_entries[%d]: ip %s is in the never-allowed range %s", i, ip, d)
+			}
 		}
 	}
 
@@ -91,6 +100,14 @@ func Validate(p Policy, extraDeny ...netip.Prefix) (*Validated, error) {
 		pfx, err := netip.ParsePrefix(r.CIDR)
 		if err != nil {
 			return nil, fmt.Errorf("egress_allow[%d]: invalid cidr %q", i, r.CIDR)
+		}
+		// The sandbox network is IPv4-only, and an IPv4-mapped IPv6 prefix
+		// (::ffff:a.b.c.d/n) does not overlap an IPv4 deny entry under
+		// netip.Prefix.Overlaps (different address family), which would let a
+		// mapped spelling of a never-allowed target slip through. Require plain
+		// IPv4, which is what the deny-list and the firewall both speak.
+		if !pfx.Addr().Is4() {
+			return nil, fmt.Errorf("egress_allow[%d]: cidr %q must be plain IPv4 (the sandbox is IPv4-only; IPv4-mapped IPv6 is refused)", i, r.CIDR)
 		}
 		if pfx.Addr() != pfx.Masked().Addr() {
 			return nil, fmt.Errorf("egress_allow[%d]: cidr %q has host bits set, use %s", i, r.CIDR, pfx.Masked())
