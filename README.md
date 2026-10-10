@@ -164,7 +164,7 @@ Also rejected: `exec`, `attach`, image pulls, builds, connection upgrades, encod
 - terminals reach the internet
 - terminals cannot reach each other, private ranges (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16) or the VM itself
 - the gateway (172.30.0.2) can reach every terminal
-- no IPv6
+- no IPv6: v6 is dropped on FORWARD, INPUT and (via the v6 bridge-netfilter sysctl) container-to-container, so terminals have no IPv6 to each other, the host or beyond
 
 Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf-call-iptables=1`, so traffic on **every** Linux bridge of the host (VM bridges, LAN bridges) passes iptables `FORWARD` from then on, not only `ot-sandbox`. That is why termiplus expects a dedicated VM. On a shared host check your `FORWARD` policy and other bridges first.
 
