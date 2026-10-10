@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,6 +155,16 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.RawPath != "" && strings.Contains(strings.ToLower(r.URL.RawPath), "%2f") {
 		httpError(w, http.StatusBadRequest, "encoded slashes not allowed")
+		return
+	}
+	// Reject non-canonical paths (".." segments, "//") before the policy split
+	// and the /api/v1 denylist below. net/http does not collapse "..", so
+	// "/x/../api/v1/policies" would otherwise skip the denylist and be
+	// forwarded verbatim to the terminal, which may normalize it back to the
+	// blocked admin path. A single trailing slash is allowed. Mirrors the
+	// sibling check in the socket proxy.
+	if clean := path.Clean(r.URL.Path); clean != r.URL.Path && clean+"/" != r.URL.Path {
+		httpError(w, http.StatusBadRequest, "non-canonical path")
 		return
 	}
 

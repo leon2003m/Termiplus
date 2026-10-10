@@ -377,6 +377,26 @@ func TestUserlessSpecRequests(t *testing.T) {
 	}
 }
 
+func TestRejectsNonCanonicalPath(t *testing.T) {
+	h := newHarness(t)
+	// ".." and "//" must be refused before routing, so a terminal that
+	// normalizes them cannot be reached at the blocked /api/v1 admin path.
+	for _, p := range []string{
+		"/x/../api/v1/policies",
+		"/p/default/x/../api/v1/x",
+		"/files//cwd",
+		"/..",
+	} {
+		if code, _ := h.get(t, p, "alice", testAPIKey); code != 400 {
+			t.Fatalf("%s: got %d, want 400", p, code)
+		}
+	}
+	// a single trailing slash is still allowed (not a 400 from the guard)
+	if code, _ := h.get(t, "/files/cwd/", "alice", testAPIKey); code == 400 {
+		t.Fatal("legitimate trailing slash was rejected")
+	}
+}
+
 func TestSpecContainerSharedPerRuntime(t *testing.T) {
 	h := newHarness(t)
 	for _, path := range []string{"/openapi.json", "/p/scratch/openapi.json", "/p/sysbox/openapi.json"} {
