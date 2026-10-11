@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format is based on 
 - `netpolicy` store that persists the policy to disk and atomically renders the forwarder records (`dnsmasq` `address=` lines) and the firewall's allowed internal destinations from validated values only.
 - Gateway admin API `GET`/`PUT /admin/netpolicy`: set custom DNS entries and per-destination internal egress at runtime. Gated by a dedicated `ADMIN_API_KEY` on the `X-Admin-Key` header (never the per-user connection key); off and returning 404 unless that key is configured. Part of #12.
 - Gateway pins terminals to the internal resolver via `HostConfig.Dns` when `ALLOWED_DNS` is set; the socket proxy independently accepts only that one address.
+- Internal DNS forwarder image (`deploy/dns-forwarder/`, dnsmasq) that forwards to the operator's resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the admin-set records from a watched `hostsdir` (auto-reload, no signal).
+- Opt-in Compose overlay `deploy/docker-compose.netpolicy.yml` that adds the forwarder and wires the admin API, the rendered-policy volume and the DNS pin. Without it the base deployment is unchanged (no forwarder, admin API returns 404).
+- `deploy/termiplus-firewall.path`: reapplies the sandbox firewall when the rendered egress rules change.
 
 ### Changed
 
@@ -26,6 +29,7 @@ All notable changes to this project are documented here. The format is based on 
 - Interactive terminals start bash with the PTY as controlling terminal (job control works); the image sets `SHELL`.
 - User-less spec requests (connection check, OpenAPI, system prompt) share one container per runtime instead of starting one per policy.
 - Quick start creates the secrets readable for the owner and the services' group only, independent of the umask.
+- `deploy/firewall.sh` applies the admin-set internal egress allowances from `deploy/netpolicy/egress.rules`: each validated `CIDR PORT PROTO` line becomes a `RETURN` rule placed after the fixed deny-list drops (loopback, link-local/metadata, CGNAT, the sandbox subnet), which it also re-checks, so no entry can open a never-allowed range. Private ranges stay default-deny; public egress stays default-allow.
 
 ### Security
 

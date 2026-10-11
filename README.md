@@ -39,7 +39,9 @@ internal/config/            env and *_FILE secret helpers
 image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
-                            termiplus-firewall.service
+                            termiplus-firewall.service, termiplus-firewall.path,
+                            docker-compose.netpolicy.yml (opt-in), dns-forwarder/
+internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
 
 ## Quick start (dedicated VM)
@@ -168,6 +170,49 @@ Also rejected: `exec`, `attach`, image pulls, builds, connection upgrades, encod
 
 Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf-call-iptables=1`, so traffic on **every** Linux bridge of the host (VM bridges, LAN bridges) passes iptables `FORWARD` from then on, not only `ot-sandbox`. That is why termiplus expects a dedicated VM. On a shared host check your `FORWARD` policy and other bridges first.
 
+## Custom DNS and internal egress (admin network policy)
+
+An optional, opt-in feature lets an operator set, at runtime and without a redeploy:
+
+- **custom DNS entries** (internal names, split-horizon) resolvable inside terminals, and
+- **per-destination internal egress**: allow a terminal to reach one internal service (e.g. a database at `10.0.0.5:5432`).
+
+The egress model is unchanged for the internet and tightened for everything else: **public egress stays allowed by default; private/internal destinations are denied by default** and opened only by an explicit entry. A **fixed deny-list can never be opened** by any entry — loopback, link-local including the metadata address `169.254.169.254`, the CGNAT range, and the sandbox subnet itself (other terminals, the gateway, the forwarder, the host bridge).
+
+How it fits together:
+
+- An internal **DNS forwarder** (`dnsmasq`) forwards to *your* resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the custom records. The gateway renders the records into the forwarder's watched `hostsdir`, which reloads automatically. Terminals are pinned to this forwarder via `HostConfig.Dns`; the socket proxy accepts no other resolver address. This is also what gives terminals a working resolver under gVisor.
+- The gateway renders the egress allowances into `deploy/netpolicy/egress.rules`; `firewall.sh` turns each validated line into a `RETURN` rule placed **after** the fixed deny-list drops, so no entry can reach a never-allowed range. `termiplus-firewall.path` reapplies the firewall when the file changes.
+
+Enable it (adds the overlay to either base compose):
+
+```sh
+# in deploy/
+mkdir -p netpolicy && sudo chown 65534:65534 netpolicy       # the gateway writes here
+openssl rand -hex 32 > secrets/admin_api_key                 # distinct from gateway_api_key
+echo "DNS_UPSTREAM=192.168.1.1" >> .env                       # your resolver
+
+docker compose -f docker-compose.yml -f docker-compose.netpolicy.yml up -d
+
+sudo cp termiplus-firewall.path /etc/systemd/system/
+sudo systemctl enable --now termiplus-firewall.path
+```
+
+The admin API lives on the gateway and is gated by `ADMIN_API_KEY` on the `X-Admin-Key` header (never the connection key; it must differ). It returns 404 unless the key and store are configured.
+
+```sh
+# read the current policy
+curl -H "X-Admin-Key: $ADMIN_API_KEY" http://gateway:8080/admin/netpolicy
+
+# set DNS records and internal egress (a rejected policy changes nothing)
+curl -X PUT -H "X-Admin-Key: $ADMIN_API_KEY" http://gateway:8080/admin/netpolicy -d '{
+  "dns_entries":  [{"name": "db.internal", "ip": "10.0.0.5"}],
+  "egress_allow": [{"cidr": "10.0.0.5/32", "port": 5432, "proto": "tcp"}]
+}'
+```
+
+`cidr` is a single host (`/32`) or a subnet; `port` `0` means every port; `proto` is `tcp` or `udp`. An entry overlapping the deny-list is refused with a 400 and nothing changes.
+
 ## Settings
 
 | Variable | Used by | Default |
@@ -186,6 +231,11 @@ Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf
 | `MAX_RUNNING` | gateway | `50` running containers in total |
 | `START_TIMEOUT` | gateway | `90s` |
 | `TERMINAL_PORT` | gateway | `8000` |
+| `ALLOWED_DNS` | both | empty; the forwarder address terminals are pinned to (set by the netpolicy overlay) |
+| `ADMIN_API_KEY` / `_FILE` | gateway | empty (admin API off); min. 32 chars, must differ from `GATEWAY_API_KEY` |
+| `NETPOLICY_FILE`, `NETPOLICY_DNSMASQ_FILE`, `NETPOLICY_EGRESS_FILE` | gateway | under `/data/netpolicy/` |
+| `DNS_UPSTREAM` | dns-forwarder | required with the overlay; your resolver(s), comma-separated, never public |
+| `FORWARDER_IP` | overlay | `172.30.0.3` (must be inside `172.30.0.0/24`) |
 
 ## Testing
 

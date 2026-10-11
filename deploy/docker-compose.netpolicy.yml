@@ -1,0 +1,63 @@
+# Opt-in overlay: internal DNS forwarder + admin network-policy API (#12).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.netpolicy.yml up -d
+#   (add -f docker-compose.separate-vm.yml too for the separate-VM layout)
+#
+# Without this overlay the base deployment is unchanged: no forwarder, terminals
+# keep Docker's embedded resolver, and the /admin API returns 404.
+#
+# Prerequisites:
+#   - deploy/.env sets DNS_UPSTREAM to your internal resolver (never public).
+#   - deploy/secrets/admin_api_key holds a >=32 char key, distinct from
+#     gateway_api_key:  openssl rand -hex 32 > deploy/secrets/admin_api_key
+#   - deploy/netpolicy exists and is writable by uid 65534 (the gateway):
+#       mkdir -p deploy/netpolicy && sudo chown 65534:65534 deploy/netpolicy
+#   - on the host, enable the egress reload:
+#       sudo cp deploy/termiplus-firewall.path /etc/systemd/system/
+#       sudo systemctl enable --now termiplus-firewall.path
+name: termiplus
+
+services:
+  dns-forwarder:
+    image: ghcr.io/leon2003m/termiplus-dns-forwarder:${TERMIPLUS_VERSION:-latest}
+    build: { context: ./dns-forwarder }
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE] # bind :53 as non-root
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65534:65534"
+    environment:
+      DNS_UPSTREAM: ${DNS_UPSTREAM:?set DNS_UPSTREAM to your internal resolver (never a public one)}
+    volumes:
+      - ./netpolicy:/data/netpolicy:ro # reads the gateway-rendered hostsdir
+    networks:
+      ot-sandbox:
+        ipv4_address: ${FORWARDER_IP:-172.30.0.3}
+    mem_limit: 64m
+    cpus: 0.5
+    pids_limit: 64
+
+  sockproxy:
+    environment:
+      # Pin terminals to exactly the forwarder; any other Dns is refused.
+      ALLOWED_DNS: ${FORWARDER_IP:-172.30.0.3}
+
+  gateway:
+    depends_on:
+      dns-forwarder: { condition: service_started }
+    environment:
+      ALLOWED_DNS: ${FORWARDER_IP:-172.30.0.3}
+      ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+      NETPOLICY_FILE: /data/netpolicy/policy.json
+      NETPOLICY_EGRESS_FILE: /data/netpolicy/egress.rules
+      NETPOLICY_DNSMASQ_FILE: /data/netpolicy/hosts/managed
+    volumes:
+      - ./netpolicy:/data/netpolicy # gateway writes the policy + rendered files
+    secrets: [admin_api_key]
+
+secrets:
+  admin_api_key: { file: ./secrets/admin_api_key }
