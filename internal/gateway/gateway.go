@@ -23,6 +23,7 @@ import (
 
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/naming"
+	"termiplus/internal/netpolicy"
 )
 
 type Config struct {
@@ -36,6 +37,18 @@ type Config struct {
 	IdleTimeout time.Duration
 	MaxRunning  int
 	Docker      *dockerapi.Client
+
+	// AdminKey gates the /admin network-policy API. It must differ from APIKey
+	// and be at least 32 characters. Empty, together with a nil NetPolicy,
+	// disables the admin surface (it returns 404).
+	AdminKey string
+	// NetPolicy is the runtime network-policy store the admin API reads and
+	// writes. Required if AdminKey is set, forbidden otherwise.
+	NetPolicy *netpolicy.Store
+	// ForwarderDNS, when set, pins every terminal to this resolver address via
+	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
+	// this one address. Empty leaves terminals on Docker's embedded resolver.
+	ForwarderDNS string
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
@@ -63,6 +76,17 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	if _, ok := cfg.Policies["default"]; !ok {
 		return nil, errors.New(`a policy named "default" is required`)
+	}
+	if (cfg.AdminKey == "") != (cfg.NetPolicy == nil) {
+		return nil, errors.New("admin API needs both an admin key and a netpolicy store, or neither")
+	}
+	if cfg.AdminKey != "" {
+		if len(cfg.AdminKey) < 32 {
+			return nil, errors.New("admin API key must be at least 32 characters")
+		}
+		if subtle.ConstantTimeCompare([]byte(cfg.AdminKey), []byte(cfg.APIKey)) == 1 {
+			return nil, errors.New("admin API key must differ from the connection API key")
+		}
 	}
 	for name, p := range cfg.Policies {
 		if !naming.PolicyName.MatchString(name) {
@@ -97,18 +121,19 @@ func New(cfg Config) (*Gateway, error) {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }
 	}
 	m := &manager{
-		docker:     cfg.Docker,
-		image:      cfg.Image,
-		network:    cfg.Network,
-		port:       cfg.Port,
-		keySecret:  []byte(cfg.KeySecret),
-		startWait:  cfg.StartWait,
-		idle:       cfg.IdleTimeout,
-		maxRunning: cfg.MaxRunning,
-		policies:   cfg.Policies,
-		addrFor:    cfg.AddrFor,
-		instances:  map[string]*instance{},
-		locks:      map[string]*sync.Mutex{},
+		docker:       cfg.Docker,
+		image:        cfg.Image,
+		network:      cfg.Network,
+		port:         cfg.Port,
+		keySecret:    []byte(cfg.KeySecret),
+		startWait:    cfg.StartWait,
+		idle:         cfg.IdleTimeout,
+		maxRunning:   cfg.MaxRunning,
+		policies:     cfg.Policies,
+		addrFor:      cfg.AddrFor,
+		forwarderDNS: cfg.ForwarderDNS,
+		instances:    map[string]*instance{},
+		locks:        map[string]*sync.Mutex{},
 	}
 	return &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}, nil
 }
@@ -165,6 +190,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// sibling check in the socket proxy.
 	if clean := path.Clean(r.URL.Path); clean != r.URL.Path && clean+"/" != r.URL.Path {
 		httpError(w, http.StatusBadRequest, "non-canonical path")
+		return
+	}
+
+	// The admin network-policy API has its own key and is not a terminal
+	// policy; handle it before the policy split and the per-user bearer check.
+	if g.serveAdmin(w, r) {
 		return
 	}
 

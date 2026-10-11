@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format is based on 
 - CI: lint, tests, image builds, secret and vulnerability scanning with reports, gVisor integration tests, signed releases with SBOMs.
 - `deploy/termiplus-firewall.service`: example unit that reapplies the sandbox firewall at boot and after Docker restarts.
 - Internal `netpolicy` package: validates admin-set custom DNS entries and per-destination egress allow rules, and enforces a fixed deny-list (loopback, link-local incl. the metadata address, CGNAT, the sandbox subnet) that no entry can open. Groundwork for #12.
+- `netpolicy` store that persists the policy to disk and atomically renders the forwarder records (`dnsmasq` `address=` lines) and the firewall's allowed internal destinations from validated values only.
+- Gateway admin API `GET`/`PUT /admin/netpolicy`: set custom DNS entries and per-destination internal egress at runtime. Gated by a dedicated `ADMIN_API_KEY` on the `X-Admin-Key` header (never the per-user connection key); off and returning 404 unless that key is configured. Part of #12.
+- Gateway pins terminals to the internal resolver via `HostConfig.Dns` when `ALLOWED_DNS` is set; the socket proxy independently accepts only that one address.
 
 ### Changed
 

@@ -62,16 +62,17 @@ type instance struct {
 }
 
 type manager struct {
-	docker     *dockerapi.Client
-	image      string
-	network    string
-	port       int
-	keySecret  []byte
-	startWait  time.Duration
-	idle       time.Duration
-	maxRunning int
-	policies   map[string]Policy
-	addrFor    func(name string, port int) string // overridable in tests
+	docker       *dockerapi.Client
+	image        string
+	network      string
+	port         int
+	keySecret    []byte
+	startWait    time.Duration
+	idle         time.Duration
+	maxRunning   int
+	policies     map[string]Policy
+	addrFor      func(name string, port int) string // overridable in tests
+	forwarderDNS string                             // resolver to pin terminals to, or ""
 
 	mu        sync.Mutex
 	instances map[string]*instance
@@ -311,20 +312,27 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 		mounts = append(mounts, map[string]any{"Type": "volume", "Source": volume, "Target": naming.HomeDir})
 	}
 	labels[naming.LabelConfig] = cfg
+	hostConfig := map[string]any{
+		"Runtime":     pol.Runtime,
+		"NetworkMode": m.network,
+		"Memory":      pol.MemoryMB << 20,
+		"NanoCpus":    int64(pol.CPUs * 1e9),
+		"PidsLimit":   pol.Pids,
+		"Mounts":      mounts,
+	}
+	// Pin the terminal to the internal forwarder when one is configured. The
+	// socket proxy independently accepts only this one address, so a tampered
+	// gateway cannot point a terminal at any other resolver.
+	if m.forwarderDNS != "" {
+		hostConfig["Dns"] = []string{m.forwarderDNS}
+	}
 	spec := map[string]any{
 		"Image": m.image,
 		"Env": []string{
 			"OPEN_TERMINAL_API_KEY=" + m.containerKey(name),
 		},
-		"Labels": labels,
-		"HostConfig": map[string]any{
-			"Runtime":     pol.Runtime,
-			"NetworkMode": m.network,
-			"Memory":      pol.MemoryMB << 20,
-			"NanoCpus":    int64(pol.CPUs * 1e9),
-			"PidsLimit":   pol.Pids,
-			"Mounts":      mounts,
-		},
+		"Labels":     labels,
+		"HostConfig": hostConfig,
 	}
 	if err := m.docker.Create(ctx, name, spec); err != nil {
 		return fmt.Errorf("create container: %w", err)

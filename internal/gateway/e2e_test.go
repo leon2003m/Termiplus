@@ -225,7 +225,18 @@ type harness struct {
 	proxy  *httptest.Server
 }
 
-func newHarness(t *testing.T) *harness {
+// harnessOpts lets a test tweak the socket-proxy rules and gateway config
+// before they are constructed (e.g. to enable the DNS forwarder).
+type harnessOpts struct {
+	rules   func(*sockproxy.Rules)
+	gateway func(*Config)
+}
+
+func newHarness(t *testing.T, opts ...func(*harnessOpts)) *harness {
+	var o harnessOpts
+	for _, fn := range opts {
+		fn(&o)
+	}
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "docker.sock")
 	l, err := net.Listen("unix", sock)
@@ -251,10 +262,13 @@ func newHarness(t *testing.T) *harness {
 		Image: testImage, Runtimes: map[string]bool{"runsc": true, "sysbox-runc": true},
 		Network: "ot-sandbox", MaxMemory: 8 << 30, MaxNanoCPUs: 4e9, MaxPids: 2048,
 	}
+	if o.rules != nil {
+		o.rules(&rules)
+	}
 	proxy := httptest.NewServer(sockproxy.New(rules, sock, "proxy-token"))
 	t.Cleanup(proxy.Close)
 
-	g, err := New(Config{
+	cfg := Config{
 		APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Network: "ot-sandbox", Port: 8000,
 		Policies: map[string]Policy{
 			"default": {Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256},
@@ -268,7 +282,11 @@ func newHarness(t *testing.T) *harness {
 			defer fd.mu.Unlock()
 			return fd.addrs[name]
 		},
-	})
+	}
+	if o.gateway != nil {
+		o.gateway(&cfg)
+	}
+	g, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

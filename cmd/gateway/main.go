@@ -14,6 +14,7 @@ import (
 	"termiplus/internal/config"
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/gateway"
+	"termiplus/internal/netpolicy"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -36,17 +37,37 @@ func main() {
 		}
 	}
 
+	// The admin network-policy API is on only when ADMIN_API_KEY is set. The
+	// store persists the policy and renders the forwarder and firewall files to
+	// a shared volume (defaults live under /data/netpolicy).
+	adminKey := config.Secret("ADMIN_API_KEY", false)
+	var store *netpolicy.Store
+	if adminKey != "" {
+		var err error
+		store, err = netpolicy.NewStore(
+			config.Get("NETPOLICY_FILE", "/data/netpolicy/policy.json"),
+			config.Get("NETPOLICY_DNSMASQ_FILE", "/data/netpolicy/dnsmasq.hosts"),
+			config.Get("NETPOLICY_EGRESS_FILE", "/data/netpolicy/egress.rules"),
+		)
+		if err != nil {
+			log.Fatalf("netpolicy store: %v", err)
+		}
+	}
+
 	g, err := gateway.New(gateway.Config{
-		APIKey:      config.Secret("GATEWAY_API_KEY", true),
-		KeySecret:   config.Secret("KEY_SECRET", true),
-		Image:       config.Must("TERMINAL_IMAGE"),
-		Network:     config.Get("SANDBOX_NETWORK", "ot-sandbox"),
-		Port:        int(config.Int("TERMINAL_PORT", 8000)),
-		Policies:    policies,
-		StartWait:   config.Duration("START_TIMEOUT", 90*time.Second),
-		IdleTimeout: config.Duration("IDLE_TIMEOUT", 30*time.Minute),
-		MaxRunning:  int(config.Int("MAX_RUNNING", 50)),
-		Docker:      dockerapi.New(config.Get("DOCKER_API", "http://sockproxy:2375"), config.Secret("PROXY_TOKEN", false)),
+		APIKey:       config.Secret("GATEWAY_API_KEY", true),
+		KeySecret:    config.Secret("KEY_SECRET", true),
+		Image:        config.Must("TERMINAL_IMAGE"),
+		Network:      config.Get("SANDBOX_NETWORK", "ot-sandbox"),
+		Port:         int(config.Int("TERMINAL_PORT", 8000)),
+		Policies:     policies,
+		StartWait:    config.Duration("START_TIMEOUT", 90*time.Second),
+		IdleTimeout:  config.Duration("IDLE_TIMEOUT", 30*time.Minute),
+		MaxRunning:   int(config.Int("MAX_RUNNING", 50)),
+		Docker:       dockerapi.New(config.Get("DOCKER_API", "http://sockproxy:2375"), config.Secret("PROXY_TOKEN", false)),
+		AdminKey:     adminKey,
+		NetPolicy:    store,
+		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
 	})
 	if err != nil {
 		log.Fatal(err)
