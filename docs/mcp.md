@@ -1,0 +1,190 @@
+# termiplus MCP control plane (v1.0 — `alpha` track)
+
+> Status: **design contract**, not yet implemented. This is the agreed shape of
+> the v1.0 "Kasm rebuild as an MCP" work that lives on the `alpha` branch. The
+> hardened terminal core ships separately as v0.1.0 from `dev`.
+
+## 1. What this is
+
+termiplus today gives Open WebUI (OWUI) per-user sandboxed terminals. v1.0 turns
+it into a **Kasm-style workspace control plane exposed over MCP**: an agent (or a
+human, through OWUI) can provision, manage and hand off isolated desktop/terminal
+sessions, with persistence and network reach governed per user.
+
+Design principles:
+
+- **Control plane, not a file proxy.** The MCP exposes *provisioning and
+  lifecycle*, not `read_file`/`write_file`/`exec`. The agent already has native
+  filesystem and terminal access *inside* its session, so re-proxying those as
+  tools is redundant.
+- **Verified identity, not a trusted header.** Every call is tied to a
+  cryptographically verified OAuth/OIDC identity. This retires termiplus's
+  current "trusted `X-User-Id`" limitation.
+- **Agent proposes, human disposes.** Every destructive or security-sensitive
+  action requires an explicit human confirmation in OWUI, on top of RBAC.
+
+## 2. Architecture
+
+```
+  Keycloak (OIDC)                   (any OIDC IdP; Keycloak first)
+       │ SSO
+       ▼
+  Open WebUI ── native "termiplus" Tool plugin
+       │            │  - raises __event_call__ confirmation modals
+       │            │  - forwards user's __oauth_token__ (Bearer)
+       │            │  - renders DE preview embeds + management-UI link
+       ▼            ▼
+  termiplus MCP server  ── validates JWT (JWKS), resolves (user_id, roles/groups)
+       │  (sole setter of the gateway X-User-Id, over the API-key link)
+       ▼
+  gateway ── sockproxy ── Docker ── session containers (runsc / sysbox)
+       │                                   │
+       │                                   └── KasmVNC / Guacamole stream
+       └── management UI (web console, OAuth-protected)
+```
+
+Mapping to Kasm's components: gateway ≈ API/connection-proxy, the gateway
+manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker access.
+
+## 3. Identity & authentication
+
+- **Protocol:** OAuth2 / OIDC, written **generically** — standard OIDC discovery
+  (`/.well-known/openid-configuration`) + JWKS signature verification, with
+  configurable issuer, audience and claim names. **Keycloak is the first
+  configured issuer; any OIDC IdP works.**
+- **Flow:**
+  1. The user signs in to OWUI via Keycloak SSO.
+  2. The native OWUI plugin receives the user's token via the injected
+     **`__oauth_token__`** parameter (`access_token`, `id_token`; auto-refreshed,
+     encrypted at rest by OWUI) and sends it as `Authorization: Bearer …` to the
+     MCP server.
+  3. The **MCP server validates the JWT** (signature via JWKS, `iss`/`aud`/`exp`)
+     and extracts `sub` → `user_id` and the role/group claims.
+  4. The MCP server is the **only** component that sets the gateway's
+     `X-User-Id`, over the existing API-key-authenticated, private MCP↔gateway
+     link. The gateway therefore receives a trustworthy identity.
+- **Persistent homes** are templated per `user_id` (Kasm-style), never shared by
+  name alone (see also audit fix #16 on the core).
+
+**Deployment requirements / gotchas:**
+
+- OWUI **≥ 0.8.6** (CVE-2026-88005: earlier versions could invoke server tools
+  with the server's own token).
+- Set `OAUTH_SESSION_TOKEN_ENCRYPTION_KEY` (shared across OWUI replicas).
+- Keycloak places roles in the **access token** by default while OWUI reads the
+  **ID token** — add a client role mapper emitting the `roles` claim where OWUI
+  expects it. Enable `ENABLE_OAUTH_ROLE_MANAGEMENT` / `ENABLE_OAUTH_GROUP_MANAGEMENT`
+  with the matching `OAUTH_ROLES_CLAIM` / `OAUTH_GROUPS_CLAIM`.
+
+## 4. Authorization — the two-layer gate
+
+Both layers are required for a consequential action:
+
+1. **RBAC (entitlement), from token claims.** Roles/groups decide what a user is
+   *allowed* to do at all:
+   - `termiplus-persist` → may create **persistent** sessions (else ephemeral only).
+   - `termiplus-admin` → may use the network-policy and user/group admin tools.
+   - a resource-tier role/group → memory/CPU/session-count caps.
+2. **Human-in-the-loop (consent), in OWUI.** **Every** destructive or
+   security-sensitive action pauses on an OWUI `__event_call__` **confirmation
+   modal** and only proceeds on an explicit human *yes*. The agent can *propose*;
+   it cannot self-approve.
+
+Actions requiring the gate (entitled **and** confirmed): creating a persistent
+session, destroying a session, changing network policy, and any admin
+user/group change. Listing and creating a throwaway *ephemeral* session within
+one's entitlement are autonomous.
+
+## 5. MCP tool surface (control plane)
+
+| Tool | Purpose | Annotations | Gate |
+|------|---------|-------------|------|
+| `list_workspaces` | Workspaces/profiles the caller's groups may launch | readOnly | none |
+| `request_session(workspace, persistent?=false, label?)` | Provision (or attach to) a session; returns an **access handle** | — | **persistent → entitlement + confirm** |
+| `list_sessions()` | The caller's active sessions | readOnly | none |
+| `destroy_session(session_id)` | Tear a session down | destructive | **confirm** |
+| `set_network_policy(custom_dns[], egress[])` *(admin)* | Custom DNS + egress whitelist (wraps the core admin API) | destructive | **admin entitlement + confirm** |
+| `manage_user` / `manage_group` *(admin)* | User/group/entitlement administration | destructive | **admin entitlement + confirm** |
+
+Deliberately **absent**: `read_file`, `write_file`, `list_dir`, `exec` — done
+natively inside the session.
+
+**Access handle** returned by `request_session`:
+
+```json
+{
+  "session_id": "…",
+  "workspace": "…",
+  "persistent": false,
+  "terminal_url": "https://…/p/<policy>/…",   // text/WS session (first spike)
+  "stream_url": null                            // KasmVNC/Guacamole (next spike)
+}
+```
+
+## 6. Session lifecycle (Kasm model)
+
+- **Ephemeral by default.** A session is a throwaway container unless persistence
+  is requested *and* entitled *and* confirmed.
+- **Persistent** sessions mount the user's `{user_id}`-templated home; the user
+  may use it, start throwaway, or reset it — admins may enforce persistence per
+  workspace.
+- Idle reaping and capacity limits are inherited from the gateway manager.
+
+## 7. OWUI integration — the native plugin
+
+A native OWUI **Tool/Function plugin** (admin-installed; only native tools get
+`__oauth_token__`). Responsibilities:
+
+- Call the MCP server for each tool, forwarding the user's bearer token.
+- Raise the **confirmation modal** (`__event_call__`, type `confirmation`) before
+  any gated action; abort on cancel.
+- Render **DE previews** and the **management-UI link** (below).
+- Surface progress/errors via `__event_emitter__` status/notification.
+
+Plugin UI reach (normal plugin, no frontend fork): inline iframe
+(`HTMLResponse`), `embeds` events (HTML/URL + `replace`), the artifacts side
+panel, modals, toasts, toolbar buttons, and `execute` JS. New top-level
+screens/routes/sidebar items would require forking the OWUI frontend and are out
+of scope.
+
+## 8. Management UI
+
+A standalone **web console** served by termiplus (OAuth/OIDC-protected, same IdP;
+RBAC-aware) for sessions, workspaces, entitlements and network policy — the v1.0
+successor to the #12 admin API's planned small web UI. Surfaced in OWUI two ways:
+
+- **Direct link:** an Action/toolbar button that opens the full console in a new
+  tab for rich admin work (robust, unconstrained by the iframe sandbox).
+- **Inline embed:** focused views (e.g. a single session's management panel)
+  embedded as an iframe where that is more useful than a context switch.
+
+## 9. Desktop-environment previews
+
+Where useful (on `request_session`, and in `list_sessions`), the plugin shows a
+**live DE preview**: an `embeds` panel with an `<iframe src="<stream_url>">` to
+the session's KasmVNC/Guacamole stream, updated in place via `replace`.
+
+- **iOS is explicitly out of scope** for previews/streaming (sandboxed iframes
+  can't stream/download well there) — we target desktop browsers.
+- The stream endpoint must set `frame-ancestors` to the OWUI origin and OWUI's
+  `IFRAME_CSP` must allow it. termiplus owns the streamer, so this is configurable.
+
+## 10. Build order (spikes on `alpha`)
+
+1. **Control plane + identity + gated lifecycle** (this contract): MCP tools,
+   OAuth/OIDC+Keycloak, two-layer gate, ephemeral/persistent sessions, access
+   handle returning the existing terminal session.
+2. **Graphical streaming**: KasmVNC/Guacamole stream as the access handle + the
+   OWUI DE-preview panel.
+3. **Management UI** console + its OWUI link/embeds.
+4. **RBAC depth / SSO breadth**: richer entitlement model, more IdPs, group sync.
+
+## 11. Security notes & open items
+
+- `alpha` keeps all core boundaries (sockproxy, firewall, netpolicy) intact and
+  must keep `make check`/CI green; it does **not** gate on the live adversarial
+  validation that a human runs for the core (`test/integration/VALIDATION.md`).
+- Streaming/embedding runs in a sandboxed iframe — validate media/WebSocket
+  behavior on target desktop browsers.
+- The MCP↔gateway link must stay on a private network with the API key; the MCP
+  server's JWT validation is the trust anchor for all identity.
