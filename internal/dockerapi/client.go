@@ -107,6 +107,20 @@ func (c *Client) CreateVolume(ctx context.Context, name string, labels map[strin
 	return c.do(ctx, http.MethodPost, "/volumes/create", nil, map[string]any{"Name": name, "Labels": labels}, nil)
 }
 
+type Volume struct {
+	Name   string            `json:"Name"`
+	Labels map[string]string `json:"Labels"`
+}
+
+// InspectVolume returns an existing volume, or ErrNotFound if there is none.
+func (c *Client) InspectVolume(ctx context.Context, name string) (*Volume, error) {
+	var v Volume
+	if err := c.do(ctx, http.MethodGet, "/volumes/"+name, nil, nil, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
 func (c *Client) Create(ctx context.Context, name string, spec any) error {
 	return c.do(ctx, http.MethodPost, "/containers/create", url.Values{"name": {name}}, spec, nil)
 }

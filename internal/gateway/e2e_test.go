@@ -110,8 +110,8 @@ func readAnyClientFrame(r io.Reader) ([]byte, error) {
 type fakeDocker struct {
 	t       *testing.T
 	mu      sync.Mutex
-	ctrs    map[string]*fakeCtr // by name
-	volumes map[string]bool
+	ctrs    map[string]*fakeCtr          // by name
+	volumes map[string]map[string]string // name -> labels
 	creates int
 	addrs   map[string]string
 	seen    []string // raw create bodies received from the proxy
@@ -133,9 +133,24 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/volumes/create":
 		var v map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&v)
-		d.volumes[v["Name"].(string)] = true
+		labels := map[string]string{}
+		if l, ok := v["Labels"].(map[string]any); ok {
+			for k, val := range l {
+				labels[k], _ = val.(string)
+			}
+		}
+		d.volumes[v["Name"].(string)] = labels
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, "{}")
+	case strings.HasPrefix(p, "/volumes/"):
+		name := strings.TrimPrefix(p, "/volumes/")
+		labels, ok := d.volumes[name]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"message":"no such volume"}`)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Name": name, "Labels": labels})
 	case p == "/containers/create":
 		raw, _ := io.ReadAll(r.Body)
 		d.seen = append(d.seen, string(raw))
@@ -243,7 +258,7 @@ func newHarness(t *testing.T, opts ...func(*harnessOpts)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fd := &fakeDocker{t: t, ctrs: map[string]*fakeCtr{}, volumes: map[string]bool{}, addrs: map[string]string{}}
+	fd := &fakeDocker{t: t, ctrs: map[string]*fakeCtr{}, volumes: map[string]map[string]string{}, addrs: map[string]string{}}
 	dsrv := &http.Server{Handler: fd}
 	go dsrv.Serve(l)
 	t.Cleanup(func() {
@@ -463,6 +478,32 @@ func TestPolicySharesHome(t *testing.T) {
 	m := hc["Mounts"].([]any)[0].(map[string]any)
 	if hc["Runtime"] != "sysbox-runc" || m["Source"] != naming.Volume("alice", "default") {
 		t.Fatalf("unexpected sysbox container: %v", hc)
+	}
+}
+
+// A persistent volume whose name matches but whose owner label is a different
+// user (e.g. a 64-bit user-hash collision) must not be reused. Mirrors the
+// container ownership check. Regression test for #16.
+func TestPersistentVolumeOwnerMismatchRefused(t *testing.T) {
+	h := newHarness(t)
+	vol := naming.Volume("alice", "default")
+	h.docker.mu.Lock()
+	h.docker.volumes[vol] = map[string]string{naming.LabelUser: "mallory"}
+	h.docker.mu.Unlock()
+
+	if code, _ := h.get(t, "/p/sysbox/files/cwd", "alice", testAPIKey); code == 200 {
+		t.Fatalf("expected refusal reusing another user's volume, got 200")
+	}
+
+	h.docker.mu.Lock()
+	owner := h.docker.volumes[vol][naming.LabelUser]
+	_, created := h.docker.ctrs[naming.Container("alice", "sysbox")]
+	h.docker.mu.Unlock()
+	if owner != "mallory" {
+		t.Fatalf("foreign volume owner changed to %q", owner)
+	}
+	if created {
+		t.Fatal("container was created despite volume ownership mismatch")
 	}
 }
 

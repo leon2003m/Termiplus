@@ -305,6 +305,17 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 			home = policyName
 		}
 		volume := naming.Volume(userID, home)
+		// Defense in depth, mirroring the container ownership check above: if a
+		// volume of this name already exists, confirm it belongs to this user
+		// before reusing it. Guards against a 64-bit user-hash collision handing
+		// one user another's persistent home.
+		if existing, err := m.docker.InspectVolume(ctx, volume); err == nil {
+			if existing.Labels[naming.LabelUser] != userID {
+				return fmt.Errorf("volume %s belongs to another user", volume)
+			}
+		} else if !errors.Is(err, dockerapi.ErrNotFound) {
+			return fmt.Errorf("inspect volume: %w", err)
+		}
 		if err := m.docker.CreateVolume(ctx, volume, labels); err != nil {
 			return fmt.Errorf("create volume: %w", err)
 		}
