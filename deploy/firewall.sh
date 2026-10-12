@@ -59,6 +59,28 @@ apply_egress_allow() {
   done <"$EGRESS_RULES"
 }
 
+# Bridge-netfilter must be on BEFORE any DROP rule is installed. Same-bridge
+# container<->container traffic is bridged, not routed, so the terminal<->terminal
+# DROP only takes effect once bridge-nf-call-ip(6)tables=1. If the module can't
+# load or the sysctl won't take, fail closed and install no rules at all, rather
+# than leave DROP rules that look present while bridged traffic bypasses them.
+# (Persisted across reboot by deploy/sysctl.d/90-termiplus-bridge.conf.)
+ensure_bridge_netfilter() {
+  modprobe br_netfilter 2>/dev/null || true
+  for key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables; do
+    if ! sysctl -qw "$key=1" 2>/dev/null; then
+      echo "firewall: cannot set $key (br_netfilter unavailable) - refusing to install rules" >&2
+      exit 1
+    fi
+    val=$(sysctl -n "$key" 2>/dev/null || echo "")
+    if [ "$val" != 1 ]; then
+      echo "firewall: $key is '$val', not 1 - refusing to install rules (terminal<->terminal would fail open)" >&2
+      exit 1
+    fi
+  done
+}
+ensure_bridge_netfilter
+
 # Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
 iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
 iptables -A TERMIPLUS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
@@ -77,14 +99,6 @@ for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
   iptables -A TERMIPLUS -s "$SANDBOX" -d "$net" -j DROP
 done
 iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || iptables -I DOCKER-USER 1 -j TERMIPLUS
-
-# Same-bridge traffic between containers is bridged, not routed; make the
-# bridge hand it to ip(6)tables so the rules here apply to container<->container
-# traffic too (both v4 and v6; without the v6 sysctl two terminals could talk
-# over link-local IPv6 unfiltered).
-modprobe br_netfilter 2>/dev/null || true
-sysctl -qw net.bridge.bridge-nf-call-iptables=1
-sysctl -qw net.bridge.bridge-nf-call-ip6tables=1
 
 # Traffic from terminals to the VM itself (INPUT): drop. DNS still works,
 # Docker's embedded resolver (127.0.0.11) lives inside each container's
