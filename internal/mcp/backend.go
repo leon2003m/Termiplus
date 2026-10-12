@@ -50,8 +50,8 @@ func (b *StubBackend) RequestSession(_ context.Context, p Principal, workspace s
 	if ws == nil {
 		return Session{}, fmt.Errorf("unknown workspace %q", workspace)
 	}
-	if persistent && !ws.Persistent {
-		return Session{}, fmt.Errorf("workspace %q does not support persistence", workspace)
+	if persistent != ws.Persistent {
+		return Session{}, fmt.Errorf("%w: workspace %q has persistent=%t", ErrPersistenceMismatch, workspace, ws.Persistent)
 	}
 
 	id, err := randomID()
@@ -64,6 +64,7 @@ func (b *StubBackend) RequestSession(_ context.Context, p Principal, workspace s
 		UserID:      p.UserID,
 		Persistent:  persistent,
 		Label:       label,
+		Running:     true,
 		TerminalURL: fmt.Sprintf("%s/p/%s/", b.gatewayBase, workspace),
 	}
 	b.mu.Lock()

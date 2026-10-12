@@ -37,6 +37,7 @@ check: lint test ## Everything CI checks on code and config
 build: ## Build all images locally
 	docker build $(BUILD_ARGS) --target gateway   -t $(REGISTRY)/termiplus-gateway:$(VERSION) .
 	docker build $(BUILD_ARGS) --target sockproxy -t $(REGISTRY)/termiplus-sockproxy:$(VERSION) .
+	docker build $(BUILD_ARGS) --target mcp       -t $(REGISTRY)/termiplus-mcp:$(VERSION) .
 	docker build $(BUILD_ARGS) -t $(REGISTRY)/termiplus-terminal:$(VERSION) image/
 
 scan: ## Secret and vulnerability scans (needs gitleaks, govulncheck, trivy)

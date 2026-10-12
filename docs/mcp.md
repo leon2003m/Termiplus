@@ -1,8 +1,8 @@
 # termiplus MCP control plane (v1.0 — `alpha` track)
 
-> Status: **design contract**, not yet implemented. This is the agreed shape of
-> the v1.0 "Kasm rebuild as an MCP" work that lives on the `alpha` branch. The
-> hardened terminal core ships separately as v0.1.0 from `dev`.
+> Status: **design contract, partly implemented** (see §12). This is the agreed
+> shape of the v1.0 "Kasm rebuild as an MCP" work that lives on the `alpha`
+> branch. The hardened terminal core ships separately as v0.1.0 from `dev`.
 
 ## 1. What this is
 
@@ -188,3 +188,43 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
   behavior on target desktop browsers.
 - The MCP↔gateway link must stay on a private network with the API key; the MCP
   server's JWT validation is the trust anchor for all identity.
+
+## 12. Implementation status
+
+| Piece | State |
+|-------|-------|
+| MCP server (`cmd/mcp`, `internal/mcp`): JSON-RPC/HTTP, control-plane tools, RBAC + confirmation-required gate | **done** |
+| Gateway control API (`/control/v1`, `X-Control-Key`) + `GatewayBackend` | **done** |
+| Opt-in deployment (`deploy/docker-compose.mcp.yml`, `mcp` image target) | **done** |
+| OIDC/JWKS authenticator (Keycloak first) | todo — caller auth is a **dev-only static token** |
+| Native OWUI plugin (confirmation modal, `__oauth_token__`, previews, management link) | todo |
+| Graphical streaming (KasmVNC/Guacamole) + `stream_url` | todo |
+| Management UI | todo |
+| Workspace entitlements per role/group (which workspaces a user may launch) | todo |
+
+### Gateway control API
+
+Enabled only when the gateway has `CONTROL_API_KEY` (≥32 chars, distinct from
+the connection and admin keys); otherwise every `/control/v1` path is 404. Every
+request needs `X-Control-Key`; the session endpoints also need `X-User-Id`, which
+only the MCP server sets after authenticating the caller.
+
+| Method & path | Does |
+|---|---|
+| `GET /control/v1/workspaces` | policies as workspaces (`name`, `runtime`, `persistent`) |
+| `GET /control/v1/sessions` | the user's sessions, running or stopped |
+| `POST /control/v1/sessions` `{"workspace": …}` | create/start a session; ephemeral ones get a fresh `mcp-…` session id |
+| `DELETE /control/v1/sessions/{id}` | remove one of the user's containers (home volume kept); another user's id is reported as 404 |
+
+Persistence is a property of the workspace (policy). `request_session` must
+state `persistent: true` for a persistent workspace and is refused otherwise, so
+a persistent session can never be obtained without passing the RBAC +
+confirmation gate.
+
+Known limits: the `terminal_session` handle of an ephemeral session created via
+the control API is kept in gateway memory only (lost on a gateway restart, which
+is acceptable for throwaway sandboxes). Open WebUI chat ids are never returned.
+
+Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
+isolated throwaway stack: ephemeral and persistent creation, the mismatch and
+confirmation refusals, listing, confirmed destroy keeping the home volume.

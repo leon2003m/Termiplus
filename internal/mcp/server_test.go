@@ -83,6 +83,20 @@ func TestInitialize(t *testing.T) {
 	}
 }
 
+func TestHealthzAndMethod(t *testing.T) {
+	s := newTestServer()
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"ok"`)) {
+		t.Fatalf("healthz: %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET / should be 405, got %d", w.Code)
+	}
+}
+
 func TestToolsListNoFsOrExec(t *testing.T) {
 	s := newTestServer()
 	resp := call(t, s, "", "tools/list", nil)

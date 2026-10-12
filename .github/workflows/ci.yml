@@ -109,6 +109,9 @@ jobs:
           - image: sockproxy
             context: .
             target: sockproxy
+          - image: mcp
+            context: .
+            target: mcp
           - image: terminal
             context: image
             target: ""

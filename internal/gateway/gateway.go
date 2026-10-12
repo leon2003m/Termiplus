@@ -45,6 +45,10 @@ type Config struct {
 	// NetPolicy is the runtime network-policy store the admin API reads and
 	// writes. Required if AdminKey is set, forbidden otherwise.
 	NetPolicy *netpolicy.Store
+	// ControlKey gates the /control/v1 provisioning API used by the termiplus
+	// MCP server. It must be at least 32 characters and differ from APIKey and
+	// AdminKey. Empty disables the control surface (it returns 404).
+	ControlKey string
 	// ForwarderDNS, when set, pins every terminal to this resolver address via
 	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
@@ -86,6 +90,15 @@ func New(cfg Config) (*Gateway, error) {
 		}
 		if subtle.ConstantTimeCompare([]byte(cfg.AdminKey), []byte(cfg.APIKey)) == 1 {
 			return nil, errors.New("admin API key must differ from the connection API key")
+		}
+	}
+	if cfg.ControlKey != "" {
+		if len(cfg.ControlKey) < 32 {
+			return nil, errors.New("control API key must be at least 32 characters")
+		}
+		if subtle.ConstantTimeCompare([]byte(cfg.ControlKey), []byte(cfg.APIKey)) == 1 ||
+			(cfg.AdminKey != "" && subtle.ConstantTimeCompare([]byte(cfg.ControlKey), []byte(cfg.AdminKey)) == 1) {
+			return nil, errors.New("control API key must differ from the connection and admin keys")
 		}
 	}
 	for name, p := range cfg.Policies {
@@ -196,6 +209,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The admin network-policy API has its own key and is not a terminal
 	// policy; handle it before the policy split and the per-user bearer check.
 	if g.serveAdmin(w, r) {
+		return
+	}
+	// Likewise the MCP control API: its own key, handled before routing.
+	if g.serveControl(w, r) {
 		return
 	}
 

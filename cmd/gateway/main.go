@@ -54,6 +54,7 @@ func main() {
 		}
 	}
 
+	// The MCP control API (/control/v1) is on only when CONTROL_API_KEY is set.
 	g, err := gateway.New(gateway.Config{
 		APIKey:       config.Secret("GATEWAY_API_KEY", true),
 		KeySecret:    config.Secret("KEY_SECRET", true),
@@ -67,6 +68,7 @@ func main() {
 		Docker:       dockerapi.New(config.Get("DOCKER_API", "http://sockproxy:2375"), config.Secret("PROXY_TOKEN", false)),
 		AdminKey:     adminKey,
 		NetPolicy:    store,
+		ControlKey:   config.Secret("CONTROL_API_KEY", false),
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
 	})
 	if err != nil {

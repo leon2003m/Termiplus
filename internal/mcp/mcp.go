@@ -59,9 +59,19 @@ type Session struct {
 	UserID      string `json:"-"`
 	Persistent  bool   `json:"persistent"`
 	Label       string `json:"label,omitempty"`
+	Running     bool   `json:"running"`
 	TerminalURL string `json:"terminal_url,omitempty"`
-	StreamURL   string `json:"stream_url,omitempty"`
+	// TerminalSession must be sent as X-Session-Id to reach an ephemeral
+	// session through TerminalURL; empty for persistent sessions.
+	TerminalSession string `json:"terminal_session,omitempty"`
+	StreamURL       string `json:"stream_url,omitempty"`
 }
+
+// ErrPersistenceMismatch is returned when a request's persistent flag does not
+// match the workspace. Persistence is a property of the workspace, so a caller
+// can never obtain a persistent session without asking for one explicitly -
+// which is what triggers the RBAC + confirmation gate.
+var ErrPersistenceMismatch = errors.New("persistent flag does not match the workspace")
 
 // Backend performs the actual control-plane operations against the gateway. The
 // skeleton ships an in-memory StubBackend; a gateway-backed implementation

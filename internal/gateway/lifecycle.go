@@ -59,6 +59,10 @@ type instance struct {
 	ready     bool
 	lastUsed  time.Time
 	conns     int // open WebSocket sessions
+	// controlSession is the session id of an ephemeral sandbox created through
+	// the control API, so it can be listed with a usable handle. In memory only
+	// (ephemerals are throwaway); never set for Open WebUI chat sandboxes.
+	controlSession string
 }
 
 type manager struct {
@@ -186,6 +190,9 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 		idle:      m.idleFor(pol),
 		addr:      m.addrFor(name, m.port),
 		key:       m.containerKey(name),
+	}
+	if pol.ephemeral() && strings.HasPrefix(sessionID, controlSessionPrefix) {
+		inst.controlSession = sessionID
 	}
 	if err := m.waitReady(ctx, inst); err != nil {
 		return nil, err
