@@ -79,6 +79,10 @@ jobs:
           cache: false
       - name: go test -race
         run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Open WebUI plugin tests (against the real mcp binary)
+        run: |
+          go build -o "$RUNNER_TEMP/mcp" ./cmd/mcp
+          TERMIPLUS_MCP_BIN="$RUNNER_TEMP/mcp" python3 -I -B integrations/openwebui/test_termiplus_workspaces.py -v
       - name: Coverage report
         if: always()
         run: |

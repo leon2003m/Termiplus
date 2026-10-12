@@ -20,3 +20,6 @@ coverage.*
 .vscode/
 *.swp
 .DS_Store
+
+# Python bytecode from the Open WebUI plugin tests
+__pycache__/

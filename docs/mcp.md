@@ -206,7 +206,8 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Gateway control API (`/control/v1`, `X-Control-Key`) + `GatewayBackend` | **done** |
 | Opt-in deployment (`deploy/docker-compose.mcp.yml`, `mcp` image target) | **done** |
 | OIDC authentication via oauth2-proxy v7.15.5 (Keycloak first, any OIDC IdP) + `MCP_AUTH=proxy` | **done** — verified against a real Keycloak by `test/integration/oidc/run.sh` |
-| Native OWUI plugin (confirmation modal, `__oauth_token__`, previews, management link) | todo |
+| Native OWUI plugin: confirmation dialog, `__oauth_token__` forwarding (`integrations/openwebui/`) | **done** — tested against the real `mcp` binary in CI |
+| OWUI plugin: DE previews and management-UI link | todo (needs streaming / management UI) |
 | Graphical streaming (KasmVNC/Guacamole) + `stream_url` | todo |
 | Management UI | todo |
 | Workspace entitlements per role/group (which workspaces a user may launch) | todo |
