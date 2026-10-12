@@ -28,7 +28,7 @@ cover: ## Tests with coverage report
 	go tool cover -func=coverage.out | tail -1
 
 lint: fmt-check vet staticcheck ## Go linters
-	shellcheck deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh
+	shellcheck deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh
 	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile
 	actionlint
 

@@ -1,8 +1,9 @@
 // Command mcp runs the termiplus control-plane MCP server (see docs/mcp.md).
 //
-// Sessions are provisioned through the gateway's /control/v1 API. Caller
-// authentication is still a dev-only static bearer token; OIDC/JWKS
-// validation replaces it in a later spike.
+// Sessions are provisioned through the gateway's /control/v1 API. Callers are
+// authenticated by an OIDC proxy (oauth2-proxy) in front of the server
+// (MCP_AUTH=proxy); termiplus never verifies tokens itself. MCP_AUTH=dev selects
+// a static bearer token for local development.
 package main
 
 import (
@@ -37,17 +38,27 @@ func main() {
 		log.Fatal("CONTROL_API_KEY is required (or MCP_STUB_BACKEND=1 for local development)")
 	}
 
-	// Dev-only static auth until the OIDC/JWKS authenticator lands.
-	tok := config.Secret("MCP_DEV_TOKEN", false)
-	if tok == "" {
-		log.Fatal("MCP_DEV_TOKEN is required (dev-only static auth; OIDC/JWKS not implemented yet)")
+	var auth mcp.Authenticator
+	authDesc := ""
+	switch mode := config.Get("MCP_AUTH", ""); mode {
+	case "proxy":
+		if config.Secret("MCP_DEV_TOKEN", false) != "" {
+			log.Fatal("MCP_DEV_TOKEN must not be set with MCP_AUTH=proxy")
+		}
+		auth, authDesc = mcp.ProxyHeaderAuthenticator{}, "identity from the OIDC proxy"
+	case "dev":
+		tok := config.Secret("MCP_DEV_TOKEN", true)
+		log.Print("WARNING: MCP_AUTH=dev - every caller with MCP_DEV_TOKEN acts as MCP_DEV_USER; never use this in production")
+		auth = mcp.NewStaticAuthenticator(map[string]mcp.Principal{
+			tok: {UserID: config.Get("MCP_DEV_USER", "dev"), Roles: splitRoles(config.Get("MCP_DEV_ROLES", ""))},
+		})
+		authDesc = "DEV static token"
+	default:
+		log.Fatalf("MCP_AUTH must be \"proxy\" (behind oauth2-proxy) or \"dev\", got %q", mode)
 	}
-	auth := mcp.NewStaticAuthenticator(map[string]mcp.Principal{
-		tok: {UserID: config.Get("MCP_DEV_USER", "dev"), Roles: splitRoles(config.Get("MCP_DEV_ROLES", ""))},
-	})
 
 	srv := mcp.NewServer(auth, backend, version)
-	log.Printf("termiplus mcp %s listening on %s, gateway %s (DEV static auth; OIDC pending)", version, addr, gatewayURL)
+	log.Printf("termiplus mcp %s listening on %s, gateway %s, auth: %s", version, addr, gatewayURL, authDesc)
 	s := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(s.ListenAndServe())
 }

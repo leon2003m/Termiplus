@@ -9,9 +9,9 @@ import (
 	"sync"
 )
 
-// StubBackend is an in-memory Backend for the skeleton: it tracks sessions per
-// user and fabricates a terminal URL from gatewayBase, without touching Docker
-// or the gateway. The gateway-backed Backend replaces it in a later spike.
+// StubBackend is an in-memory Backend for local development and tests: it
+// tracks sessions per user and fabricates a terminal URL from gatewayBase,
+// without touching Docker or the gateway (GatewayBackend is the real one).
 type StubBackend struct {
 	gatewayBase string
 	workspaces  []Workspace
@@ -76,7 +76,7 @@ func (b *StubBackend) RequestSession(_ context.Context, p Principal, workspace s
 func (b *StubBackend) ListSessions(_ context.Context, p Principal) ([]Session, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	var out []Session
+	out := []Session{}
 	for _, s := range b.sessions {
 		if s.UserID == p.UserID {
 			out = append(out, s)

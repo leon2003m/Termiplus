@@ -34,7 +34,10 @@ Design principles:
        │            │  - forwards user's __oauth_token__ (Bearer)
        │            │  - renders DE preview embeds + management-UI link
        ▼            ▼
-  termiplus MCP server  ── validates JWT (JWKS), resolves (user_id, roles/groups)
+  oauth2-proxy  ── validates the JWT (JWKS, iss, aud, exp); forwards sub + groups
+       │  (internal network ot-mcp-auth: the only way to reach the MCP server)
+       ▼
+  termiplus MCP server  ── reads the proxy's identity headers -> (user_id, roles)
        │  (sole setter of the gateway X-User-Id, over the API-key link)
        ▼
   gateway ── sockproxy ── Docker ── session containers (runsc / sysbox)
@@ -58,8 +61,14 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      **`__oauth_token__`** parameter (`access_token`, `id_token`; auto-refreshed,
      encrypted at rest by OWUI) and sends it as `Authorization: Bearer …` to the
      MCP server.
-  3. The **MCP server validates the JWT** (signature via JWKS, `iss`/`aud`/`exp`)
-     and extracts `sub` → `user_id` and the role/group claims.
+  3. **oauth2-proxy validates the JWT** in front of the MCP server (signature via
+     the issuer's JWKS, `iss`/`aud`/`exp`; no login redirects, no cookie
+     sessions) and forwards `X-Forwarded-User` (`sub` → `user_id`) and
+     `X-Forwarded-Groups`, stripping any client-supplied copies. **termiplus
+     contains no token-verification code of its own**: authentication is
+     delegated to that established, independently maintained proxy, and the MCP
+     server only reads its headers. It is reachable solely through the proxy
+     (internal network `ot-mcp-auth`).
   4. The MCP server is the **only** component that sets the gateway's
      `X-User-Id`, over the existing API-key-authenticated, private MCP↔gateway
      link. The gateway therefore receives a trustworthy identity.
@@ -196,7 +205,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | MCP server (`cmd/mcp`, `internal/mcp`): JSON-RPC/HTTP, control-plane tools, RBAC + confirmation-required gate | **done** |
 | Gateway control API (`/control/v1`, `X-Control-Key`) + `GatewayBackend` | **done** |
 | Opt-in deployment (`deploy/docker-compose.mcp.yml`, `mcp` image target) | **done** |
-| OIDC/JWKS authenticator (Keycloak first) | todo — caller auth is a **dev-only static token** |
+| OIDC authentication via oauth2-proxy v7.15.5 (Keycloak first, any OIDC IdP) + `MCP_AUTH=proxy` | **done** — verified against a real Keycloak by `test/integration/oidc/run.sh` |
 | Native OWUI plugin (confirmation modal, `__oauth_token__`, previews, management link) | todo |
 | Graphical streaming (KasmVNC/Guacamole) + `stream_url` | todo |
 | Management UI | todo |
@@ -221,9 +230,32 @@ state `persistent: true` for a persistent workspace and is refused otherwise, so
 a persistent session can never be obtained without passing the RBAC +
 confirmation gate.
 
+### Authentication (oauth2-proxy)
+
+`deploy/docker-compose.mcp.yml` runs oauth2-proxy (`mcp-auth`, pinned by
+digest) with `--skip-jwt-bearer-tokens --api-route=^/`: a request with a valid
+bearer JWT for the configured client (audience) passes, everything else gets
+401. Keycloak setup: a client `termiplus-mcp` (standard flow off), an audience
+mapper on the client Open WebUI signs in with (so access tokens carry
+`aud=termiplus-mcp`), and a Group Membership mapper (claim `groups`, full path
+off). Membership in the groups `termiplus-persist` / `termiplus-admin` grants
+the MCP roles. `MCP_AUTH=dev` (static `MCP_DEV_TOKEN`) remains for local
+development only and cannot be combined with `proxy`.
+
+`test/integration/oidc/run.sh` starts a throwaway Keycloak, the proxy with the
+overlay's exact image and flags, and the real `mcp` image, and checks: no
+token, forged identity headers without a token, wrong audience, tampered
+signature, `alg=none` and expired tokens are rejected; forged
+`X-Forwarded-User`/`X-Forwarded-Groups` next to a valid token neither
+impersonate nor grant roles; group membership grants the persist role; the MCP
+server sits only on the internal auth network.
+
 Known limits: the `terminal_session` handle of an ephemeral session created via
 the control API is kept in gateway memory only (lost on a gateway restart, which
 is acceptable for throwaway sandboxes). Open WebUI chat ids are never returned.
+The MCP user id is the OIDC `sub`, while Open WebUI's own terminal connection
+keys homes by Open WebUI's user id, so a persistent home created through MCP is
+not yet the same volume as the user's Open WebUI terminal home (open decision).
 
 Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
 isolated throwaway stack: ephemeral and persistent creation, the mismatch and

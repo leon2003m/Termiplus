@@ -174,7 +174,7 @@ func (s *Server) listTools() []toolSpec {
 }
 
 func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *rpcError) {
-	p, err := s.auth.Authenticate(bearer(r))
+	p, err := s.auth.Authenticate(r)
 	if err != nil {
 		return nil, &rpcError{Code: codeUnauthenticated, Message: "unauthenticated"}
 	}

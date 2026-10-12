@@ -4,20 +4,66 @@
 #
 # Without this overlay the gateway's /control/v1 API stays off (404).
 #
+# Authentication is done by oauth2-proxy, not by termiplus: it validates the
+# caller's bearer JWT against the OIDC issuer (JWKS signature, iss, aud, exp)
+# and forwards X-Forwarded-User (the "sub" claim) and X-Forwarded-Groups, after
+# stripping any client-supplied copies. The MCP server trusts those headers, so
+# it must only be reachable through the proxy: it sits on ot-mcp-auth (shared
+# only with the proxy) and ot-mcp (shared only with the gateway), never on owui.
+# Verified against a real Keycloak by test/integration/oidc/run.sh.
+#
 # Prerequisites:
+#   - MCP_OIDC_ISSUER_URL, e.g. https://sso.example.com/realms/termiplus. The
+#     proxy must reach it (through the owui network's egress).
+#   - An OIDC client (default id "termiplus-mcp", standard flow disabled) and an
+#     audience mapper on the client Open WebUI signs in with, so the user's
+#     access token carries aud=termiplus-mcp. Group membership in a "groups"
+#     claim (Keycloak: Group Membership mapper, full path off); the groups
+#     termiplus-persist / termiplus-admin grant the MCP roles.
 #   - deploy/secrets/control_api_key: >=32 chars, distinct from gateway_api_key
 #     and admin_api_key:   openssl rand -hex 32 > deploy/secrets/control_api_key
-#   - deploy/secrets/mcp_dev_token: the bearer token MCP callers present.
-#     DEV ONLY: caller auth is a static token until OIDC/JWKS lands; every
-#     caller using it acts as MCP_DEV_USER.
-#
-# The MCP server sits on its own network with the gateway (ot-mcp) and on the
-# Open WebUI network so the OWUI plugin can reach it. It never touches the
-# Docker socket or holds the proxy token. For the separate-VM layout (which
-# drops the owui network) publish the port instead, e.g. ports: ["127.0.0.1:8090:8090"].
+#   - deploy/secrets/mcp_oidc_client_secret: that client's secret (no newline).
+#   - deploy/secrets/mcp_oidc_cookie_secret: openssl rand -hex 16 (unused for
+#     bearer calls, but oauth2-proxy requires it).
 name: termiplus
 
 services:
+  mcp-auth:
+    # oauth2-proxy v7.15.5
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on: [mcp]
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${MCP_OIDC_CLIENT_ID:-termiplus-mcp}
+      - --client-secret-file=/run/secrets/mcp_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/mcp_oidc_cookie_secret
+      # Bearer JWTs only: verified tokens pass, anything else gets 401 (no
+      # login redirect, no cookie sessions).
+      - --skip-jwt-bearer-tokens=true
+      - --api-route=^/
+      - --email-domain=*
+      # X-Forwarded-User = the token subject (deprecated alias, still honoured
+      # in v7.15; the integration test pins this behaviour).
+      - --user-id-claim=sub
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      - --upstream=http://mcp:8090
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [mcp_oidc_client_secret, mcp_oidc_cookie_secret]
+    networks: [ot-mcp-auth, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
   mcp:
     image: ghcr.io/leon2003m/termiplus-mcp:${TERMIPLUS_VERSION:-latest}
     build: { context: .., target: mcp }
@@ -32,14 +78,12 @@ services:
     depends_on:
       gateway: { condition: service_healthy }
     environment:
+      MCP_AUTH: proxy
       GATEWAY_URL: http://gateway:8080
       GATEWAY_PUBLIC_URL: ${MCP_GATEWAY_PUBLIC_URL:-http://gateway:8080}
       CONTROL_API_KEY_FILE: /run/secrets/control_api_key
-      MCP_DEV_TOKEN_FILE: /run/secrets/mcp_dev_token
-      MCP_DEV_USER: ${MCP_DEV_USER:-dev}
-      MCP_DEV_ROLES: ${MCP_DEV_ROLES:-}
-    secrets: [control_api_key, mcp_dev_token]
-    networks: [ot-mcp, owui]
+    secrets: [control_api_key]
+    networks: [ot-mcp, ot-mcp-auth]
     mem_limit: 128m
     cpus: 0.5
     pids_limit: 64
@@ -54,7 +98,10 @@ services:
 networks:
   ot-mcp:
     internal: true
+  ot-mcp-auth:
+    internal: true
 
 secrets:
   control_api_key: { file: ./secrets/control_api_key }
-  mcp_dev_token: { file: ./secrets/mcp_dev_token }
+  mcp_oidc_client_secret: { file: ./secrets/mcp_oidc_client_secret }
+  mcp_oidc_cookie_secret: { file: ./secrets/mcp_oidc_cookie_secret }

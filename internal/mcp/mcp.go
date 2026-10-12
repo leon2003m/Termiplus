@@ -13,6 +13,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"net/http"
 )
 
 // Principal is the authenticated caller, resolved from a bearer token by an
@@ -32,11 +33,13 @@ func (p Principal) HasRole(r string) bool {
 	return false
 }
 
-// Authenticator turns a bearer token into a Principal. The production
-// implementation validates an OIDC JWT (JWKS); a static implementation is used
-// for development and tests.
+// Authenticator resolves the caller of a request to a Principal. termiplus does
+// not verify tokens itself: in production an OIDC proxy (oauth2-proxy) in front
+// of the server validates the bearer JWT and ProxyHeaderAuthenticator reads the
+// identity it forwards. A static token implementation exists for development
+// and tests.
 type Authenticator interface {
-	Authenticate(bearer string) (Principal, error)
+	Authenticate(r *http.Request) (Principal, error)
 }
 
 // ErrUnauthenticated is returned by an Authenticator when the token is missing
@@ -73,9 +76,8 @@ type Session struct {
 // which is what triggers the RBAC + confirmation gate.
 var ErrPersistenceMismatch = errors.New("persistent flag does not match the workspace")
 
-// Backend performs the actual control-plane operations against the gateway. The
-// skeleton ships an in-memory StubBackend; a gateway-backed implementation
-// follows in a later spike.
+// Backend performs the actual control-plane operations: GatewayBackend drives
+// the gateway's /control/v1 API, StubBackend is in-memory for development.
 type Backend interface {
 	ListWorkspaces(ctx context.Context, p Principal) ([]Workspace, error)
 	RequestSession(ctx context.Context, p Principal, workspace string, persistent bool, label string) (Session, error)
