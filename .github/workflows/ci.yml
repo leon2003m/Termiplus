@@ -57,10 +57,10 @@ jobs:
           exit "$rc"
       - name: shellcheck
         if: success() || failure()
-        run: shellcheck --format=gcc deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/oidc/run.sh .github/scripts/*.sh
+        run: shellcheck --format=gcc deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/oidc/run.sh image/desktop/start-desktop.sh .github/scripts/*.sh
       - name: hadolint
         if: success() || failure()
-        run: hadolint --format tty Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile
+        run: hadolint --format tty Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
       - name: actionlint
         if: success() || failure()
         run: actionlint

@@ -208,7 +208,8 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OIDC authentication via oauth2-proxy v7.15.5 (Keycloak first, any OIDC IdP) + `MCP_AUTH=proxy` | **done** — verified against a real Keycloak by `test/integration/oidc/run.sh` |
 | Native OWUI plugin: confirmation dialog, `__oauth_token__` forwarding (`integrations/openwebui/`) | **done** — tested against the real `mcp` binary in CI |
 | OWUI plugin: DE previews and management-UI link | todo (needs streaming / management UI) |
-| Graphical streaming (KasmVNC/Guacamole) + `stream_url` | todo |
+| Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
+| Stream routing through the gateway + `stream_url` | todo — **open decision**: how the gateway authenticates and forwards the stream |
 | Management UI | todo |
 | Workspace entitlements per role/group (which workspaces a user may launch) | todo |
 
@@ -230,6 +231,29 @@ Persistence is a property of the workspace (policy). `request_session` must
 state `persistent: true` for a persistent workspace and is refused otherwise, so
 a persistent session can never be obtained without passing the RBAC +
 confirmation gate.
+
+### Desktop streaming spike (KasmVNC)
+
+`image/desktop/` builds on the terminal image and adds XFCE plus KasmVNC (the
+open-source Kasm streaming server), serving the desktop over HTTP/WebSocket on
+port 6901 with KasmVNC's own basic auth (user `user`, password `VNC_PW`, at
+least 32 characters, write permission only, no admin API). Checked by hand on
+this host (2026-10-12):
+
+| | gVisor (runsc) | Sysbox |
+|---|---|---|
+| XFCE renders (screenshot via the KasmVNC API) | yes | yes |
+| HTTP without / with credentials | 401 / 200 | 401 / 200 |
+| WebSocket `/websockify` (needs an `Origin` header) | 101 | 101 |
+| Idle memory | ~190 MiB | ~90 MiB |
+
+No firewall change is needed (the gateway may already reach any sandbox
+port). Not done yet, and an **open decision** because it is
+authentication-relevant: how the gateway routes `/stream/...` to port 6901 and
+supplies the per-container stream password (for example derived like the
+terminal key from `KEY_SECRET`), and how browser access is authenticated
+(oauth2-proxy cookie flow). `VNC_PW` is visible inside the container to the
+user it protects, so it must be unique per container.
 
 ### Authentication (oauth2-proxy)
 

@@ -33,8 +33,8 @@ cover: ## Tests with coverage report
 	go tool cover -func=coverage.out | tail -1
 
 lint: fmt-check vet staticcheck ## Go linters
-	shellcheck deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh
-	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile
+	shellcheck deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/desktop/start-desktop.sh
+	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
 	actionlint
 
 check: lint test test-plugin ## Everything CI checks on code and config
