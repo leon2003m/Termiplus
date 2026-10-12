@@ -45,7 +45,11 @@ func main() {
 		}
 	}
 
-	p := sockproxy.New(rules, config.Get("DOCKER_SOCKET", "/var/run/docker.sock"), config.Secret("PROXY_TOKEN", false))
+	// PROXY_TOKEN is mandatory: the proxy is the only thing standing between a
+	// sandboxed terminal and the Docker socket, so it must never run without
+	// authenticating its one caller (the gateway). Secret(required) fails
+	// closed and rejects tokens shorter than 32 characters.
+	p := sockproxy.New(rules, config.Get("DOCKER_SOCKET", "/var/run/docker.sock"), config.Secret("PROXY_TOKEN", true))
 	addr := config.Get("LISTEN_ADDR", ":2375")
 	log.Printf("termiplus sockproxy %s listening on %s, image=%s runtimes=%v network=%s", version, addr, rules.Image, keys(rules.Runtimes), rules.Network)
 	srv := &http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 10 * time.Second}
