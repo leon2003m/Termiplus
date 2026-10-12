@@ -6,7 +6,11 @@
 #   - no other terminals on the same bridge
 #   - no private ranges (your LAN, Proxmox, customer networks)
 #   - no services on the VM itself
-# The gateway (172.30.0.2) may reach every terminal.
+# The gateway (172.30.0.2) may reach every terminal. That allow is pinned to the
+# gateway's real MAC at L2 (ebtables) so a sandboxed root cannot spoof the
+# gateway's source IP to reach another terminal (#13), and the sandbox bridge
+# runs with enable_icc:false so terminal<->terminal isolation does not fail open
+# if these rules are ever missing (#14).
 #
 # Admin-set exceptions: the gateway renders deploy/netpolicy/egress.rules from
 # the validated network policy (admin API, #12). Each line "CIDR PORT PROTO"
@@ -81,10 +85,42 @@ ensure_bridge_netfilter() {
 }
 ensure_bridge_netfilter
 
+# ensure_gateway_antispoof pins the gateway IP (172.30.0.2) to the gateway
+# container's real MAC at L2. With enable_icc:false the gateway->terminal rule
+# below must be ACCEPT (to beat Docker's inter-container DROP), and ACCEPT on a
+# bare source IP is spoofable on the shared bridge - a sandboxed root could
+# forge src=172.30.0.2 and ride it to another terminal. This drops any frame
+# (IPv4 or ARP) claiming the gateway's IP from any other MAC, before iptables
+# sees it. Needs ebtables and the gateway container running; fails closed
+# (installs nothing) if either is missing, since the ACCEPT would be unsafe (#13).
+ensure_gateway_antispoof() {
+  if ! command -v ebtables >/dev/null 2>&1; then
+    echo "firewall: ebtables not found - refusing, gateway source IP would be spoofable (#13)" >&2
+    exit 1
+  fi
+  mac=$(docker network inspect "$BRIDGE" \
+    --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
+    | awk -v ip="$GATEWAY" '{split($1, a, "/"); if (a[1] == ip) print $2}')
+  if [ -z "$mac" ]; then
+    echo "firewall: no MAC for gateway $GATEWAY on $BRIDGE - is the gateway running? refusing (#13)" >&2
+    exit 1
+  fi
+  ebtables -t filter -N TERMIPLUS-AS 2>/dev/null || ebtables -t filter -F TERMIPLUS-AS
+  ebtables -t filter -A TERMIPLUS-AS -p IPv4 --ip-source "$GATEWAY" -s ! "$mac" -j DROP
+  ebtables -t filter -A TERMIPLUS-AS -p ARP --arp-ip-src "$GATEWAY" -s ! "$mac" -j DROP
+  ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || ebtables -t filter -I FORWARD 1 -j TERMIPLUS-AS
+}
+ensure_gateway_antispoof
+
 # Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
 iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
-iptables -A TERMIPLUS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-iptables -A TERMIPLUS -s "$GATEWAY" -d "$SANDBOX" -j RETURN
+# ESTABLISHED and the gateway->terminal allow are ACCEPT, not RETURN: ACCEPT
+# terminates traversal so Docker's enable_icc:false inter-container DROP (which
+# runs in FORWARD after DOCKER-USER) does not then drop these wanted flows. The
+# gateway source IP is made unspoofable by ensure_gateway_antispoof above.
+iptables -A TERMIPLUS -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A TERMIPLUS -s "$GATEWAY" -d "$SANDBOX" -j ACCEPT
+# terminal <-> terminal: dropped here (belt) and again by Docker's icc:false drop.
 iptables -A TERMIPLUS -s "$SANDBOX" -d "$SANDBOX" -j DROP
 # Fixed deny-list: dropped before any admin allow rule can match it, so these
 # ranges can never be opened by the network policy.

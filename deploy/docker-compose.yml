@@ -79,7 +79,10 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.name: ot-sandbox
-      com.docker.network.bridge.enable_icc: "true"   # filtered by firewall.sh
+      # Fail-closed isolation: Docker drops inter-container traffic on this
+      # bridge even if firewall.sh is not applied. firewall.sh re-permits only
+      # gateway->terminal (pinned to the gateway MAC via ebtables). See #14/#13.
+      com.docker.network.bridge.enable_icc: "false"
     ipam:
       config:
         - subnet: 172.30.0.0/24
