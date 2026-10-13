@@ -72,6 +72,12 @@ console can show their sessions (see `docs/mcp.md`, §8).
 
 ## Verification
 
+- `test/integration/alpha-e2e.sh` deploys exactly this (all four overlays,
+  `setup-alpha.sh`, Caddy as the TLS proxy) on a throwaway host and checks the
+  plugin path, the browser sign-in, the console, the desktop stream and the
+  shared home. Passed 2026-10-13 under Sysbox 0.7.1 and gVisor
+  release-20261005.0 (21/21 each).
+
 - `test/integration/oidc/run.sh` and `test/integration/oidc/desktop.sh` check
   the two oauth2-proxies against a real Keycloak.
 - `.github/scripts/desktop-smoke.sh` checks the desktop image.
