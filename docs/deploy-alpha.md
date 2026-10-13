@@ -64,6 +64,10 @@ answers; `docker restart` them to skip the back-off. Both run with
 them: keep them reachable only from your TLS proxy (they listen on 127.0.0.1
 and the Open WebUI network).
 
+Rerun `firewall.sh` whenever the gateway container is recreated (new image or
+config): the gateway gets a new MAC address, and until the firewall pins the
+new one, terminals cannot be reached.
+
 ## 5. Open WebUI
 
 Set the environment printed by `setup-alpha.sh` (OIDC client `owui`,
