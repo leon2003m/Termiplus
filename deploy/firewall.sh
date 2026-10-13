@@ -17,14 +17,26 @@
 # opens exactly one internal destination. They are applied AFTER the fixed
 # deny-list below and re-checked here, so no entry can ever open a never-allowed
 # range (loopback, link-local/metadata, CGNAT, the sandbox subnet itself).
+#
+# Internal DNS forwarder (netpolicy overlay): if a container holds the
+# forwarder address (172.30.0.3) on the bridge, terminals may send DNS (udp/tcp
+# 53) to it and nothing else, the forwarder may send DNS to its upstream
+# (DNS_UPSTREAM from the environment or deploy/.env) and nothing else, and its
+# address is pinned to its MAC like the gateway's. Without the forwarder none
+# of these rules exist.
 set -eu
 
 SANDBOX=172.30.0.0/24
 GATEWAY=172.30.0.2
+FORWARDER=${FORWARDER_IP:-172.30.0.3}
 BRIDGE=ot-sandbox
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 EGRESS_RULES=${EGRESS_RULES_FILE:-"$SCRIPT_DIR/netpolicy/egress.rules"}
+if [ -z "${DNS_UPSTREAM:-}" ] && [ -f "$SCRIPT_DIR/.env" ]; then
+  DNS_UPSTREAM=$(sed -n 's/^DNS_UPSTREAM=//p' "$SCRIPT_DIR/.env" | tail -n 1 | tr -d "\"' ")
+fi
+DNS_UPSTREAM=${DNS_UPSTREAM:-}
 
 # apply_egress_allow turns each validated line of the rendered rules file into a
 # RETURN rule (sandbox -> CIDR [dport PORT] -p PROTO). It re-validates the shape
@@ -93,24 +105,49 @@ ensure_bridge_netfilter
 # (IPv4 or ARP) claiming the gateway's IP from any other MAC, before iptables
 # sees it. Needs ebtables and the gateway container running; fails closed
 # (installs nothing) if either is missing, since the ACCEPT would be unsafe (#13).
+# mac_of prints the MAC of the container holding IP on the bridge, or nothing.
+mac_of() {
+  docker network inspect "$BRIDGE" \
+    --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
+    | awk -v ip="$1" '{split($1, a, "/"); if (a[1] == ip) print $2}'
+}
+
+# pin_ip drops every frame (IPv4 or ARP) that claims IP from any MAC but MAC.
+pin_ip() {
+  ebtables -t filter -A TERMIPLUS-AS -p IPv4 --ip-source "$1" -s ! "$2" -j DROP
+  ebtables -t filter -A TERMIPLUS-AS -p ARP --arp-ip-src "$1" -s ! "$2" -j DROP
+}
+
 ensure_gateway_antispoof() {
   if ! command -v ebtables >/dev/null 2>&1; then
     echo "firewall: ebtables not found - refusing, gateway source IP would be spoofable (#13)" >&2
     exit 1
   fi
-  mac=$(docker network inspect "$BRIDGE" \
-    --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
-    | awk -v ip="$GATEWAY" '{split($1, a, "/"); if (a[1] == ip) print $2}')
+  mac=$(mac_of "$GATEWAY")
   if [ -z "$mac" ]; then
     echo "firewall: no MAC for gateway $GATEWAY on $BRIDGE - is the gateway running? refusing (#13)" >&2
     exit 1
   fi
   ebtables -t filter -N TERMIPLUS-AS 2>/dev/null || ebtables -t filter -F TERMIPLUS-AS
-  ebtables -t filter -A TERMIPLUS-AS -p IPv4 --ip-source "$GATEWAY" -s ! "$mac" -j DROP
-  ebtables -t filter -A TERMIPLUS-AS -p ARP --arp-ip-src "$GATEWAY" -s ! "$mac" -j DROP
+  pin_ip "$GATEWAY" "$mac"
+  # The forwarder's address gets the same pin, so its DNS allowances below
+  # cannot be ridden by a terminal claiming to be the forwarder.
+  forwarder_mac=$(mac_of "$FORWARDER")
+  if [ -n "$forwarder_mac" ]; then
+    pin_ip "$FORWARDER" "$forwarder_mac"
+  fi
   ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || ebtables -t filter -I FORWARD 1 -j TERMIPLUS-AS
 }
 ensure_gateway_antispoof
+
+# The forwarder's upstream must be a plain IPv4 address outside the never-
+# allowed ranges; anything else gets no rule (DNS then fails closed).
+upstream_ok() {
+  echo "$DNS_UPSTREAM" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
+  case "$DNS_UPSTREAM" in
+    127.* | 169.254.* | 172.30.0.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*) return 1 ;;
+  esac
+}
 
 # Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
 iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
@@ -120,6 +157,20 @@ iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
 # gateway source IP is made unspoofable by ensure_gateway_antispoof above.
 iptables -A TERMIPLUS -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A TERMIPLUS -s "$GATEWAY" -d "$SANDBOX" -j ACCEPT
+# terminal -> forwarder DNS (only with the forwarder present). ACCEPT, as for the
+# gateway, to beat Docker's icc:false drop; the forwarder's address is MAC-pinned.
+if [ -n "${forwarder_mac:-}" ]; then
+  for p in udp tcp; do
+    iptables -A TERMIPLUS -s "$SANDBOX" -d "$FORWARDER" -p "$p" --dport 53 -j ACCEPT
+  done
+  if upstream_ok; then
+    for p in udp tcp; do
+      iptables -A TERMIPLUS -s "$FORWARDER" -d "$DNS_UPSTREAM" -p "$p" --dport 53 -j RETURN
+    done
+  else
+    echo "firewall: DNS_UPSTREAM '$DNS_UPSTREAM' unusable - the forwarder gets no upstream rule" >&2
+  fi
+fi
 # terminal <-> terminal: dropped here (belt) and again by Docker's icc:false drop.
 iptables -A TERMIPLUS -s "$SANDBOX" -d "$SANDBOX" -j DROP
 # Fixed deny-list: dropped before any admin allow rule can match it, so these
@@ -141,6 +192,12 @@ iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || iptables -I DOCKER-USER 1 -j
 # network namespace and is not affected by this rule.
 iptables -N TERMIPLUS-IN 2>/dev/null || iptables -F TERMIPLUS-IN
 iptables -A TERMIPLUS-IN -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+# An upstream resolver on this host itself: only the forwarder may ask it.
+if [ -n "${forwarder_mac:-}" ] && upstream_ok && ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$DNS_UPSTREAM"; then
+  for p in udp tcp; do
+    iptables -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -d "$DNS_UPSTREAM" -p "$p" --dport 53 -j RETURN
+  done
+fi
 iptables -A TERMIPLUS-IN -i "$BRIDGE" -j DROP
 iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || iptables -I INPUT 1 -j TERMIPLUS-IN
 

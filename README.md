@@ -279,8 +279,10 @@ Last verified 2026-10-09 on a single Linux host (kernel 6.12 LTS): Docker 29.2.1
 
 The two gVisor failures are runtime behaviour, not termiplus bugs, and are reproducible with a plain `docker run --runtime runsc` of the terminal image:
 
-1. **`sudo` does not work.** gVisor ignores setuid bits unless runsc is started with `--allow-suid` (off by default). With `"runtimeArgs": ["--allow-suid"]` on the `runsc` runtime the check passes. `deploy/daemon.json` does not set it; enabling it lets processes become root inside the sandbox, which is what the image and this README intend, but it is a change to the runtime configuration and needs a maintainer decision.
-2. **No DNS on the `ot-sandbox` network.** gVisor's network stack cannot reach Docker's embedded resolver `127.0.0.11` on user-defined networks ([google/gvisor#7469](https://github.com/google/gvisor/issues/7469)). Direct DNS to public resolvers and connections by IP work. runsc's `--reproduce-nat` needs the legacy iptables API and fails to start containers on an `nf_tables` host; `--reproduce-nftables` did not restore DNS. The known workarounds (own `resolv.conf` mount, `--network=host`, a resolver on another runtime) touch the proxy or network isolation and were not applied.
+1. **`sudo` does not work** unless runsc is started with `--allow-suid`; `deploy/daemon.json` now sets it (see Security in the changelog).
+2. **No DNS on the `ot-sandbox` network without the forwarder.** gVisor's network stack cannot reach Docker's embedded resolver `127.0.0.11` on user-defined networks ([google/gvisor#7469](https://github.com/google/gvisor/issues/7469)). Direct DNS to public resolvers and connections by IP work. runsc's `--reproduce-nat` needs the legacy iptables API and fails to start containers on an `nf_tables` host; `--reproduce-nftables` did not restore DNS. With the netpolicy overlay (internal DNS forwarder) DNS works under gVisor: the gateway passes the forwarder to the image, whose entrypoint writes it into `resolv.conf`.
+
+The full security acceptance set (`test/integration/VALIDATION.md`, automated by `validate.sh`) passed under both Sysbox and gVisor on 2026-10-13; see the results there.
 
 ### Real Open WebUI in front
 

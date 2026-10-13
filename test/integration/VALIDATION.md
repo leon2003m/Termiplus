@@ -18,6 +18,16 @@ The scenarios below are the **security acceptance set**; where the base harness
 does not yet exercise one it is marked **(manual)** with the commands to run by
 hand from the host (or from a throwaway container on `ot-sandbox`).
 
+The scenarios marked **(manual)** are automated by `validate.sh` (base stack +
+netpolicy overlay, an internal service at `10.99.0.5` in a network namespace
+routed like a LAN host). It needs root and changes the host firewall, so run it
+on a throwaway host or VM, after `run.sh`:
+
+```sh
+sudo BUILD=0 RUNTIME=sysbox-runc test/integration/validate.sh
+sudo BUILD=0 RUNTIME=runsc       test/integration/validate.sh
+```
+
 Host prerequisite: **ebtables** must be installed, or `firewall.sh` now exits
 non-zero by design (see V2).
 
@@ -152,3 +162,31 @@ confirm (a) terminals still cannot reach each other or spoof the gateway, and
 (b) the gateway→terminal control path and terminal→internet egress both still
 work. If ebtables negation syntax differs on the host's ebtables build
 (`-s ! <mac>`), adjust and note it.
+
+---
+
+## Results
+
+### 2026-10-13, throwaway VM
+
+Debian 13 VM (QEMU/KVM, user-mode networking), kernel 6.12.111, Docker 26.1.5,
+iptables/ebtables 1.8.11 (nf_tables), Sysbox CE 0.7.1, gVisor
+release-20261005.0 (`runsc install -- --allow-suid`, as `deploy/daemon.json`).
+
+| | Sysbox | gVisor |
+|---|---|---|
+| `run.sh` | all checks pass | all pass except "internet reachable" (no DNS without the forwarder, #3; IP connections work) |
+| V1–V7, V10, V12–V15 (`validate.sh`, V11 via `run.sh`) | PASS | PASS |
+| V8, V9 (DNS via the forwarder) | PASS with the firewall and resolver fixes below | PASS with the firewall and resolver fixes below |
+
+Found and fixed during this run:
+
+- With the netpolicy overlay, terminals could not reach the DNS forwarder at
+  all: the #13/#14 rework drops every sandbox->sandbox packet, the forwarder
+  included, and the forwarder's queries to a private upstream hit the private-
+  range drop. `firewall.sh` now allows exactly terminal -> forwarder:53 and
+  forwarder -> `DNS_UPSTREAM`:53, and pins the forwarder's IP to its MAC.
+- gVisor: `HostConfig.Dns` does not change `resolv.conf` (Docker keeps
+  `127.0.0.11`, which gVisor cannot reach). The gateway now also passes the
+  forwarder as `OPEN_TERMINAL_RESOLVER`, and the image's entrypoint writes it
+  into `resolv.conf`.

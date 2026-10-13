@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Changed
 
+- gVisor DNS with the netpolicy overlay works: the gateway passes the forwarder as `OPEN_TERMINAL_RESOLVER` and the terminal image's new entrypoint writes it into `/etc/resolv.conf`, because Docker keeps its embedded resolver there, which gVisor cannot reach (#3).
+- `test/integration/validate.sh` automates the live security scenarios V1-V15 of `VALIDATION.md`; `run.sh` also removes a leftover `ot-sandbox` network.
+
 - `test/integration/run.sh` refuses to run on a host that already has termiplus containers, home volumes or the `ot-sandbox` network, because its cleanup removes all of them.
 - `test/integration/run.sh` runs every stage and reports all failures at the end.
 - Interactive terminals start bash with the PTY as controlling terminal (job control works); the image sets `SHELL`.
@@ -44,3 +47,4 @@ All notable changes to this project are documented here. The format is based on 
 - `firewall.sh` loads `br_netfilter` and verifies `bridge-nf-call-ip(6)tables=1` before installing any DROP rule and exits without rules if it cannot; `deploy/sysctl.d/90-termiplus-bridge.conf` keeps the settings across reboots. Previously a missing module left the DROP rules in place but bypassed. (#17)
 - The gateway verifies a persistent home volume's owner label before reusing it, as it already did for containers, so a user-hash collision cannot hand one user another user's home. (#16)
 - The socket proxy refuses to start without `PROXY_TOKEN` (at least 32 characters) instead of running unauthenticated. (#15)
+- With the netpolicy overlay, `firewall.sh` lets terminals reach the DNS forwarder (udp/tcp 53 only) and the forwarder reach its `DNS_UPSTREAM` (port 53 only), and pins the forwarder's IP to its MAC like the gateway's. Before, the #13/#14 rework dropped all DNS to the forwarder. (live validation)
