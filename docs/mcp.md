@@ -247,6 +247,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | Management UI, admin part (entitlements, network policy) and OWUI link/embed | todo |
+| Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
 | Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
 
 ### Gateway control API
@@ -332,7 +333,7 @@ for cross-origin or missing `Origin`.
 
 Known limits: authorization to a desktop is knowing its password; the browser
 sign-in only proves a Keycloak user, not that it is the owner (the owner's
-identity is the Open WebUI user id). The desktop image is not built in CI.
+identity is the Open WebUI user id). The desktop image is built and smoke-tested in CI (runc only; gVisor and Sysbox were checked by hand).
 
 ### Workspace entitlements
 
