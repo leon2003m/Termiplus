@@ -1,0 +1,12 @@
+# Checks the sandbox firewall every 20 seconds; the service changes nothing
+# while the rules are current. See termiplus-firewall-watch.service.
+[Unit]
+Description=Check the termiplus sandbox firewall
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=20s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

@@ -118,6 +118,30 @@ pin_ip() {
   ebtables -t filter -A TERMIPLUS-AS -p ARP --arp-ip-src "$1" -s ! "$2" -j DROP
 }
 
+# --if-needed (for the termiplus-firewall-watch timer): only (re)apply when the
+# rules are missing or a pinned MAC no longer matches the running gateway or
+# forwarder, e.g. after a reboot or a recreated gateway. A full run briefly
+# rebuilds the chains, so it is not repeated while everything is current.
+rules_current() {
+  iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || return 1
+  iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || return 1
+  pinned=$(ebtables -t filter -L TERMIPLUS-AS 2>/dev/null) || return 1
+  for ip in "$GATEWAY" "$FORWARDER"; do
+    m=$(mac_of "$ip")
+    [ -z "$m" ] && continue
+    echo "$pinned" | grep -F -- "--ip-src $ip " | grep -qiF -- "$m" || return 1
+  done
+}
+if [ "${1:-}" = --if-needed ]; then
+  if [ -z "$(mac_of "$GATEWAY")" ]; then
+    exit 0 # gateway not (yet) running: nothing to pin, try again later
+  fi
+  if rules_current; then
+    exit 0
+  fi
+  echo "firewall: rules missing or outdated - applying"
+fi
+
 ensure_gateway_antispoof() {
   if ! command -v ebtables >/dev/null 2>&1; then
     echo "firewall: ebtables not found - refusing, gateway source IP would be spoofable (#13)" >&2
