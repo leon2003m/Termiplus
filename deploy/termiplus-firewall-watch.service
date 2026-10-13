@@ -1,0 +1,15 @@
+# Reapplies deploy/firewall.sh only when its rules are missing or a pinned MAC
+# is stale (after a reboot, a Docker restart or a recreated gateway, #13).
+# Run by termiplus-firewall-watch.timer.
+#
+#   sudo cp deploy/termiplus-firewall-watch.{service,timer} /etc/systemd/system/
+#   sudo systemctl edit termiplus-firewall-watch   # only if the path below differs
+#   sudo systemctl enable --now termiplus-firewall-watch.timer
+[Unit]
+Description=termiplus sandbox firewall: reapply when missing or outdated
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/termiplus/deploy/firewall.sh --if-needed

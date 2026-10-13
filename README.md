@@ -39,7 +39,7 @@ internal/config/            env and *_FILE secret helpers
 image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
-                            termiplus-firewall.service, termiplus-firewall.path,
+                            termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
                             docker-compose.netpolicy.yml (opt-in), dns-forwarder/
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
@@ -81,10 +81,13 @@ cd deploy && docker compose up -d --build
 cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
   docker compose -f docker-compose.yml -f docker-compose.separate-vm.yml up -d --build
 
-# 6. Egress rules. Rerun after every Docker restart; the example unit does that
-#    (adjust ExecStart if the repo is not in /opt/termiplus):
+# 6. Egress rules. They must be reapplied after every reboot, Docker restart and
+#    recreated gateway (its MAC is pinned). The watch timer checks every 20 s and
+#    reapplies only when something is missing or stale (adjust ExecStart if the
+#    repo is not in /opt/termiplus):
 sudo ./firewall.sh
-sudo cp termiplus-firewall.service /etc/systemd/system/ && sudo systemctl enable --now termiplus-firewall
+sudo cp termiplus-firewall-watch.service termiplus-firewall-watch.timer /etc/systemd/system/
+sudo systemctl enable --now termiplus-firewall-watch.timer
 ```
 
 7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
