@@ -21,6 +21,10 @@ import (
 type Principal struct {
 	UserID string
 	Roles  []string
+	// Subject is the OIDC subject when UserID is an Open WebUI user id named
+	// by the plugin (empty otherwise). The server records the pair for the
+	// management UI.
+	Subject string
 }
 
 // HasRole reports whether the principal carries role r.

@@ -83,6 +83,29 @@ func main() {
 		srv.WithEntitlements(ent)
 		entDesc = fmt.Sprintf("entitlements from %s (%d workspaces, default %s)", f, len(ent.Workspaces), ent.Default)
 	}
+
+	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
+	// calls; the management UI needs it.
+	var ids *mcp.IdentityStore
+	if f := config.Get("MCP_IDENTITY_FILE", ""); f != "" {
+		var err error
+		if ids, err = mcp.OpenIdentityStore(f); err != nil {
+			log.Fatal(err)
+		}
+		srv.WithIdentities(ids)
+	}
+
+	// The management UI trusts the sign-in proxy's identity headers, so it
+	// only runs behind it (MCP_AUTH=proxy) on its own listener.
+	if uiAddr := config.Get("UI_LISTEN_ADDR", ""); uiAddr != "" {
+		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil {
+			log.Fatal("UI_LISTEN_ADDR needs MCP_AUTH=proxy and MCP_IDENTITY_FILE")
+		}
+		ui := &http.Server{Addr: uiAddr, Handler: mcp.NewUI(srv, ids), ReadHeaderTimeout: 10 * time.Second}
+		go func() { log.Fatal(ui.ListenAndServe()) }()
+		log.Printf("management UI listening on %s", uiAddr)
+	}
+
 	log.Printf("termiplus mcp %s listening on %s, gateway %s, auth: %s, %s", version, addr, gatewayURL, authDesc, entDesc)
 	s := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(s.ListenAndServe())

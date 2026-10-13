@@ -178,6 +178,28 @@ successor to the #12 admin API's planned small web UI. Surfaced in OWUI two ways
 - **Inline embed:** focused views (e.g. a single session's management panel)
   embedded as an iframe where that is more useful than a context switch.
 
+**Implemented (user part, 2026-10-13).** The MCP server serves the console on
+its own listener (`UI_LISTEN_ADDR`, `/ui/`), reached only through `desk-auth`,
+the browser sign-in proxy of `deploy/docker-compose.desktop.yml`
+(`${DESKTOP_PUBLIC_URL}/ui/`). It lists the workspaces the user is entitled to
+and their sessions, starts and removes sessions (asking first) and shows the
+desktop link and password for their desktops. All actions go through the same
+tools, RBAC and entitlements as MCP calls; the person clicking is the human in
+the loop.
+
+- **Identity.** The browser sign-in yields only the Keycloak subject, while
+  sessions belong to the Open WebUI user. The MCP server therefore remembers
+  the pair whenever the Open WebUI plugin calls it (verified token + plugin
+  key + Open WebUI user id) in `MCP_IDENTITY_FILE` (ids only, no secrets;
+  decided 2026-10-13 over querying Open WebUI with an admin key). Until a user
+  has used the plugin once, the UI says so and shows nothing.
+- **CSRF.** The session cookie is SameSite=Lax; every write needs the
+  `X-Termiplus-UI: 1` header and a same-origin `Origin`. Strict CSP
+  (`default-src 'self'`, no framing), `no-store`, `nosniff`.
+- **Exposure.** The UI listener trusts the proxy's identity headers. Only
+  `desk-auth` forwards browser requests to it; `mcp-auth` and the gateway,
+  which share other networks with the MCP server, never do.
+
 ## 9. Desktop-environment previews
 
 Where useful (on `request_session`, and in `list_sessions`), the plugin shows a
@@ -223,7 +245,8 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0, runs Open Terminal too) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
 | Desktop streams: policy `"desktop": true`, gateway `/stream/<container>/`, per-container password, `stream_url` handle, browser sign-in (`deploy/docker-compose.desktop.yml`) | **done (experimental)** — gateway tests incl. a real KasmVNC; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
-| Management UI | todo — sign-in will reuse the desk-auth oauth2-proxy (browser cookie flow) |
+| Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
+| Management UI, admin part (entitlements, network policy) and OWUI link/embed | todo |
 | Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
 
 ### Gateway control API

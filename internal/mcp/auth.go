@@ -47,7 +47,7 @@ func (a ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, erro
 	if len(users) != 1 || !naming.UserID.MatchString(users[0]) {
 		return Principal{}, ErrUnauthenticated
 	}
-	userID := users[0]
+	userID, subject := users[0], ""
 	if a.OWUIKey != "" {
 		keys := r.Header.Values(owuiKeyHeader)
 		owui := r.Header.Values(owuiUserHeader)
@@ -55,7 +55,7 @@ func (a ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, erro
 			len(owui) != 1 || !naming.UserID.MatchString(owui[0]) {
 			return Principal{}, ErrUnauthenticated
 		}
-		userID = owui[0]
+		userID, subject = owui[0], users[0]
 	}
 	var roles []string
 	seen := map[string]bool{}
@@ -67,7 +67,7 @@ func (a ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, erro
 			}
 		}
 	}
-	return Principal{UserID: userID, Roles: roles}, nil
+	return Principal{UserID: userID, Roles: roles, Subject: subject}, nil
 }
 
 // StaticAuthenticator maps fixed bearer tokens to principals. It exists for

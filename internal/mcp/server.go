@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -19,6 +20,7 @@ type Server struct {
 	version string
 	tools   []tool
 	ent     *Entitlements
+	ids     *IdentityStore
 }
 
 // NewServer builds the server with its fixed tool surface.
@@ -32,6 +34,13 @@ func NewServer(auth Authenticator, backend Backend, version string) *Server {
 // Without it every workspace is open to every authenticated caller.
 func (s *Server) WithEntitlements(e *Entitlements) *Server {
 	s.ent = e
+	return s
+}
+
+// WithIdentities makes the server remember which Open WebUI user each OIDC
+// subject belongs to, for the management UI.
+func (s *Server) WithIdentities(ids *IdentityStore) *Server {
+	s.ids = ids
 	return s
 }
 
@@ -186,6 +195,11 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 	if err != nil {
 		return nil, &rpcError{Code: codeUnauthenticated, Message: "unauthenticated"}
 	}
+	if s.ids != nil && p.Subject != "" {
+		if err := s.ids.Record(p.Subject, p.UserID); err != nil {
+			log.Printf("identity: record %s: %v", p.Subject, err)
+		}
+	}
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -196,16 +210,22 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
-	t := s.findTool(params.Name)
+	return s.invoke(r.Context(), p, params.Name, params.Arguments)
+}
+
+// invoke runs one tool for an authenticated principal through the RBAC,
+// entitlement and confirmation gates.
+func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[string]any) (*toolResult, *rpcError) {
+	t := s.findTool(name)
 	if t == nil {
-		return nil, &rpcError{Code: codeInvalidParams, Message: "unknown tool " + params.Name}
+		return nil, &rpcError{Code: codeInvalidParams, Message: "unknown tool " + name}
 	}
 
-	needConfirm, gerr := t.gate(p, params.Arguments)
+	needConfirm, gerr := t.gate(p, args)
 	if gerr != nil {
 		return nil, &rpcError{Code: codeForbidden, Message: gerr.Error()}
 	}
-	if needConfirm && !confirmed(params.Arguments) {
+	if needConfirm && !confirmed(args) {
 		// The OWUI plugin must obtain an explicit human confirmation (a modal)
 		// and re-call with "_confirmed": true. The server will not run a gated
 		// action without it.
@@ -216,7 +236,7 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 		}
 	}
 
-	result, herr := t.handle(r.Context(), p, params.Arguments)
+	result, herr := t.handle(ctx, p, args)
 	if herr != nil {
 		return &toolResult{Content: []contentBlock{{Type: "text", Text: herr.Error()}}, IsError: true}, nil
 	}

@@ -16,7 +16,11 @@
      "directAccessGrantsEnabled": true, "standardFlowEnabled": false},
     {"clientId": "termiplus-desktop", "enabled": true, "publicClient": false, "secret": "desk-secret-it",
      "directAccessGrantsEnabled": true, "standardFlowEnabled": true, "redirectUris": ["http://127.0.0.1:*"],
-     "attributes": {"pkce.code.challenge.method": "S256"}}
+     "attributes": {"pkce.code.challenge.method": "S256"},
+     "protocolMappers": [
+       {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+        "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+     ]}
   ],
   "users": [
     {"username": "alice", "enabled": true, "email": "alice@example.test", "emailVerified": true, "firstName": "Alice", "lastName": "Test",

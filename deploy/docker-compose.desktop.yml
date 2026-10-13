@@ -1,14 +1,20 @@
-# Opt-in overlay: browser access to desktop workspaces (EXPERIMENTAL, alpha).
+# Opt-in overlay: browser access - desktop workspaces and the management UI
+# (EXPERIMENTAL, alpha).
 # Use together with the MCP overlay:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
 #     -f docker-compose.desktop.yml up -d
 #
 # Browsers sign in through oauth2-proxy (desk-auth, OIDC authorization code
-# flow with a session cookie) before they reach the gateway's /stream/ path;
-# nothing else of the gateway is exposed here. KasmVNC in the container then
-# asks for the per-container password, which the MCP server hands only to the
-# session's owner (the Open WebUI plugin shows it to the user, not the model).
+# flow with a session cookie) before they reach the gateway's /stream/ path or
+# the management UI (${DESKTOP_PUBLIC_URL}/ui/, served by the MCP server on its
+# own listener); nothing else of the gateway or the MCP server is exposed here.
+# The UI maps the signed-in subject to the Open WebUI user the plugin reported
+# for it, so a user has to use the Open WebUI tool once before the UI shows
+# their sessions.
+#
+# For a desktop, KasmVNC in the container then asks for the per-container
+# password, which the MCP server hands only to the session's owner (the Open WebUI plugin shows it to the user, not the model).
 # The gateway refuses cross-origin WebSockets to the stream.
 #
 # Prerequisites (in addition to the MCP overlay's):
@@ -21,7 +27,8 @@
 #     of desk-auth (127.0.0.1:${DESKTOP_PORT:-4181}). Also set it as
 #     STREAM_PUBLIC_URL for the MCP server (below).
 #   - An OIDC client (default id "termiplus-desktop", standard flow on,
-#     redirect URI ${DESKTOP_PUBLIC_URL}/oauth2/callback).
+#     redirect URI ${DESKTOP_PUBLIC_URL}/oauth2/callback) with the same Group
+#     Membership mapper as the MCP client (claim "groups", full path off).
 #   - deploy/secrets/desk_oidc_client_secret: that client's secret (no newline).
 #   - deploy/secrets/desk_oidc_cookie_secret: openssl rand -hex 16 (no newline).
 name: termiplus
@@ -55,8 +62,10 @@ services:
       - --skip-provider-button=true
       # Behind the TLS reverse proxy; trust its X-Forwarded-* headers.
       - --reverse-proxy=true
-      # Only the stream path; the rest of the gateway stays unreachable.
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      # Only the stream path and the UI; nothing else is reachable.
       - --upstream=http://gateway:8080/stream/
+      - --upstream=http://mcp:8091/ui/
       # The browser's KasmVNC basic auth must reach the container unchanged,
       # and no token or identity of ours is handed to it.
       - --pass-basic-auth=false
@@ -68,7 +77,7 @@ services:
     secrets: [desk_oidc_client_secret, desk_oidc_cookie_secret]
     ports:
       - "127.0.0.1:${DESKTOP_PORT:-4181}:4180"
-    networks: [ot-desk, owui]
+    networks: [ot-desk, ot-mcp-ui, owui]
     mem_limit: 128m
     cpus: 0.5
     pids_limit: 64
@@ -76,6 +85,12 @@ services:
   mcp:
     environment:
       STREAM_PUBLIC_URL: ${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL}
+      # Trusts desk-auth's identity headers. Besides desk-auth (ot-mcp-ui)
+      # only mcp-auth and the gateway share a network with the MCP server,
+      # and neither forwards browser requests to this port.
+      UI_LISTEN_ADDR: ":8091"
+    networks:
+      ot-mcp-ui: {}
 
   gateway:
     networks:
@@ -84,6 +99,9 @@ services:
 networks:
   # desk-auth <-> gateway only. desk-auth also joins owui to reach the issuer.
   ot-desk:
+    internal: true
+  # desk-auth <-> mcp management UI only.
+  ot-mcp-ui:
     internal: true
 
 secrets:

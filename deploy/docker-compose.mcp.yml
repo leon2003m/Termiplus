@@ -29,6 +29,9 @@
 #     also entered as the Open WebUI plugin's "plugin_key" valve. Sessions then
 #     belong to the Open WebUI user id, so they share homes with that user's
 #     Open WebUI terminals; the token still proves the sign-in and the groups.
+#   - deploy/mcp-data writable by uid 65534 (the MCP server remembers which
+#     Open WebUI user each Keycloak subject belongs to, for the management UI):
+#       mkdir -p deploy/mcp-data && sudo chown 65534:65534 deploy/mcp-data
 #   - deploy/entitlements.json: which groups may see and launch which workspace
 #     (docs/mcp.md, "Workspace entitlements"). The shipped file opens every
 #     workspace to every signed-in user.
@@ -91,6 +94,9 @@ services:
       CONTROL_API_KEY_FILE: /run/secrets/control_api_key
       MCP_ENTITLEMENTS_FILE: /etc/termiplus/entitlements.json
       MCP_OWUI_PLUGIN_KEY_FILE: /run/secrets/mcp_owui_plugin_key
+      MCP_IDENTITY_FILE: /data/identities.json
+    volumes:
+      - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]
     configs:
       - { source: mcp_entitlements, target: /etc/termiplus/entitlements.json }
