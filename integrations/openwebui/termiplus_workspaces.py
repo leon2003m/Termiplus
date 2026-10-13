@@ -19,20 +19,19 @@ license: see the termiplus repository
 #   confirmation flag: when the server answers "human confirmation required",
 #   the plugin asks the user in an Open WebUI dialog and only repeats the call
 #   with "_confirmed": true after an explicit yes.
-# - A desktop session's stream password is for the user, never the model: the
-#   plugin removes it from the tool result and shows it in an inline embed,
-#   which Open WebUI renders for the user but does not send to the model.
-# - Needs nothing beyond the standard library, pydantic and fastapi (which Open
-#   WebUI ships), so it installs without extra packages.
+# - Desktop, port and console links hold no secret: the browser signs in at
+#   the desktop/forward origin (oauth2-proxy) and the server lets only the
+#   session's owner in. The model hands them to the user as Markdown links.
+# - Needs nothing beyond the standard library and pydantic (which Open WebUI
+#   ships), so it installs without extra packages.
 
 import asyncio
-import html
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Awaitable, Callable, Optional
 
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 CODE_UNAUTHENTICATED = -32001
@@ -135,8 +134,9 @@ class Tools:
             return "termiplus: port must be between 1 and 65535."
         result = await self._run("list_sessions", {}, __oauth_token__, None, None, __user__)
         try:
-            sessions = json.loads(result) if isinstance(result, str) else json.loads(result[1].split("\n")[0])
-        except (ValueError, IndexError, TypeError):
+            # The JSON list is the first line; desktop links may follow.
+            sessions = json.loads(result.split("\n")[0])
+        except (ValueError, AttributeError):
             return result if isinstance(result, str) else "termiplus: could not list your sessions."
         match = [s for s in sessions if isinstance(s, dict) and s.get("session_id") == session_id]
         if not match:
@@ -144,32 +144,20 @@ class Tools:
         base = str(match[0].get("forward_url") or "")
         if not base.startswith(("https://", "http://")):
             return "termiplus: port forwarding is not configured on this server."
-        u = html.escape(f"{base}{port}/", quote=True)
-        page = (
-            "<!doctype html><meta charset='utf-8'><style>body{font:14px sans-serif;margin:8px}</style>"
-            f"<a href='{u}' target='_blank' rel='noopener noreferrer'>Open port {port}</a> <code>{u}</code>"
-        )
-        return (
-            HTMLResponse(content=page, headers={"Content-Disposition": "inline"}),
-            f"A link to port {port} of session {session_id} is shown to the user.",
-        )
+        link = _link(f"Open port {port}", f"{base}{port}/")
+        if not link:
+            return "termiplus: port forwarding is not configured on this server."
+        return f"Give the user this link exactly as written (only they can open it): {link}"
 
     async def open_console(self) -> Any:
         """
         Show the user a link to the termiplus management console, where they can see and manage their workspaces and sessions (and admins the entitlements and network policy).
         """
         url = self.valves.ui_url.strip()
-        if not url.startswith(("https://", "http://")):
+        link = _link("Open the termiplus console", url) if url.startswith(("https://", "http://")) else None
+        if not link:
             return "termiplus: the management console is not configured (ui_url valve)."
-        u = html.escape(url, quote=True)
-        page = (
-            "<!doctype html><meta charset='utf-8'><style>body{font:14px sans-serif;margin:8px}</style>"
-            f"<a href='{u}' target='_blank' rel='noopener noreferrer'>Open the termiplus console</a> <code>{u}</code>"
-        )
-        return (
-            HTMLResponse(content=page, headers={"Content-Disposition": "inline"}),
-            "A link to the termiplus management console is shown to the user.",
-        )
+        return f"Give the user this link exactly as written: {link}"
 
     # --- helpers (underscore: not exposed to the model) ---
 
@@ -219,7 +207,7 @@ class Tools:
             text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
             if result.get("isError"):
                 return f"termiplus: {tool} failed: {text}"
-            return _hide_stream_passwords(text)
+            return _with_desktop_links(text)
         except Exception as e:  # network, HTTP or decoding problems
             return f"termiplus: {tool} failed: {e}"
         finally:
@@ -289,42 +277,47 @@ def _describe_error(tool: str, err: dict) -> str:
     return f"termiplus: {tool} failed: {msg}"
 
 
-def _hide_stream_passwords(text: str) -> Any:
-    """Moves desktop stream passwords out of the model-visible result into an
-    inline embed for the user. Returns text unchanged when there are none."""
+# Links are handed to the model as Markdown; only plain http(s) URLs qualify.
+_SAFE_URL = re.compile(r"^https?://[^\s()<>\[\]'\"`\\]+$")
+
+
+def _link(label: str, url: str) -> Optional[str]:
+    return f"[{label}]({url})" if _SAFE_URL.match(url) else None
+
+
+def _with_desktop_links(text: str) -> str:
+    """Adds an "Open desktop" link for every desktop session in a result. The
+    links hold no secret: the desktop sign-in and the owner check happen on
+    the server. A stream_password from an older server is dropped."""
     try:
         data = json.loads(text)
     except ValueError:
         return text
     sessions = data if isinstance(data, list) else [data]
-    desktops = []
+    links, changed = [], False
     for s in sessions:
-        if isinstance(s, dict) and s.get("stream_password"):
-            desktops.append((str(s.get("session_id", "")), str(s.get("stream_url", "")), str(s.pop("stream_password"))))
-            s["stream_password"] = "(shown to the user, not to you)"
-    if not desktops:
+        if not isinstance(s, dict):
+            continue
+        if s.pop("stream_password", None) is not None:
+            changed = True
+        url = str(s.get("stream_url") or "")
+        if not url:
+            continue
+        link = _link(f"Open desktop ({s.get('workspace', 'desktop')})", url)
+        if link:
+            links.append(link)
+        else:
+            s.pop("stream_url")
+            changed = True
+    if not links and not changed:
         return text
-    rows = "".join(
-        "<div class='d'><b>{sid}</b><br>"
-        "<a href='{url}' target='_blank' rel='noopener noreferrer'>Open desktop</a> <code>{url}</code><br>"
-        "User <code>user</code>, password "
-        "<input readonly value='{pw}' size='70' onclick='this.select()'></div>".format(
-            sid=html.escape(sid), url=html.escape(url, quote=True), pw=html.escape(pw, quote=True)
+    out = json.dumps(data, separators=(",", ":"))
+    if links:
+        out += (
+            "\nGive the user these links exactly as written; they open the desktop in the browser after the "
+            "usual sign-in, with no password. Nothing else is needed to open the desktop.\n" + "\n".join(links)
         )
-        for sid, url, pw in desktops
-        if url.startswith(("https://", "http://"))
-    )
-    page = (
-        "<!doctype html><meta charset='utf-8'><style>body{font:14px sans-serif;margin:8px}"
-        ".d{margin:6px 0;padding:8px;border:1px solid #8884;border-radius:6px}code{font-size:12px}</style>"
-        + rows
-    )
-    context = json.dumps(data if isinstance(data, list) else sessions[0], separators=(",", ":"))
-    context += (
-        "\nThe desktop link and password are shown to the user in the chat; never ask for or repeat the password."
-        " Nothing else is needed to open the desktop."
-    )
-    return HTMLResponse(content=page, headers={"Content-Disposition": "inline"}), context
+    return out
 
 
 async def _emit(emitter: EventEmitter, event: dict) -> None:

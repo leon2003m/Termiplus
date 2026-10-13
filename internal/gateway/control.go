@@ -51,17 +51,15 @@ type sessionInfo struct {
 	// ephemeral session TerminalSession must be sent as X-Session-Id.
 	TerminalPath    string `json:"terminal_path,omitempty"`
 	TerminalSession string `json:"terminal_session,omitempty"`
-	// StreamPath and StreamPassword reach the desktop of a "desktop" policy
-	// (KasmVNC basic auth, user "user"). Only the session's owner gets them.
-	StreamPath     string `json:"stream_path,omitempty"`
-	StreamPassword string `json:"stream_password,omitempty"`
+	// StreamPath is the desktop of a "desktop" policy, relative to the public
+	// desktop origin (the MCP server's stream proxy, see stream.go).
+	StreamPath string `json:"stream_path,omitempty"`
 }
 
 // withStream fills the desktop stream handle for desktop policies.
 func (m *manager) withStream(s sessionInfo, pol Policy) sessionInfo {
 	if pol.Desktop {
-		s.StreamPath = streamPrefix + s.ID + "/"
-		s.StreamPassword = m.desktopPassword(s.ID)
+		s.StreamPath = "/" + streamPrefix + s.ID + "/"
 	}
 	return s
 }
@@ -104,6 +102,8 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case strings.HasPrefix(rest, forwardPrefix):
 		g.serveForward(w, r, userID, strings.TrimPrefix(rest, forwardPrefix))
+	case strings.HasPrefix(rest, streamPrefix):
+		g.serveStream(w, r, userID, strings.TrimPrefix(rest, streamPrefix))
 	case rest == "sessions" && r.Method == http.MethodGet:
 		list, err := g.mgr.listUser(r.Context(), userID)
 		if err != nil {

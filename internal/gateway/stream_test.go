@@ -2,14 +2,19 @@ package gateway
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,11 +74,13 @@ func withDesktop(hp **harness) func(*harnessOpts) {
 	}
 }
 
-func streamGet(t *testing.T, url, password string, hdr map[string]string) (int, string) {
+// streamGet calls the gateway's control stream route as the MCP server does.
+func streamGet(t *testing.T, base, path, user string, hdr map[string]string) (int, http.Header, string) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	if password != "" {
-		req.SetBasicAuth("user", password)
+	req, _ := http.NewRequest(http.MethodGet, base+"/control/v1/stream/"+path, nil)
+	req.Header.Set(controlKeyHeader, testControlKey)
+	if user != "" {
+		req.Header.Set("X-User-Id", user)
 	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
@@ -85,7 +92,7 @@ func streamGet(t *testing.T, url, password string, hdr map[string]string) (int, 
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(b)
+	return resp.StatusCode, resp.Header, string(b)
 }
 
 func TestDesktopStream(t *testing.T) {
@@ -96,20 +103,23 @@ func TestDesktopStream(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("create desk: %d %s", code, b)
 	}
+	if strings.Contains(b, "password") {
+		t.Fatalf("session hands out a password: %s", b)
+	}
 	var desk sessionInfo
 	_ = json.Unmarshal([]byte(b), &desk)
-	if desk.StreamPath != "/stream/"+desk.ID+"/" || len(desk.StreamPassword) != 64 {
+	if desk.StreamPath != "/stream/"+desk.ID+"/" {
 		t.Fatalf("desktop handle missing: %+v", desk)
 	}
-	if desk.StreamPassword == h.g.mgr.containerKey(desk.ID) {
-		t.Fatal("stream password equals the terminal key")
+	if h.g.mgr.desktopPassword(desk.ID) == h.g.mgr.containerKey(desk.ID) {
+		t.Fatal("desktop password equals the terminal key")
 	}
 
 	// A plain terminal gets neither a handle nor a desktop password.
 	_, b = h.control(t, http.MethodPost, "sessions", testControlKey, "alice", `{"workspace":"default"}`)
 	var plain sessionInfo
 	_ = json.Unmarshal([]byte(b), &plain)
-	if plain.StreamPath != "" || plain.StreamPassword != "" {
+	if plain.StreamPath != "" {
 		t.Fatalf("terminal got a stream handle: %+v", plain)
 	}
 	h.docker.mu.Lock()
@@ -118,24 +128,19 @@ func TestDesktopStream(t *testing.T) {
 	if strings.Contains(env, "DESKTOP") {
 		t.Fatalf("terminal got a desktop password: %s", env)
 	}
-
-	// Bob's desk gets a different password.
 	_, b = h.control(t, http.MethodPost, "sessions", testControlKey, "bob", `{"workspace":"desk"}`)
 	var bobDesk sessionInfo
 	_ = json.Unmarshal([]byte(b), &bobDesk)
-	if bobDesk.StreamPassword == desk.StreamPassword {
-		t.Fatal("two containers share a stream password")
+	if h.g.mgr.desktopPassword(bobDesk.ID) == h.g.mgr.desktopPassword(desk.ID) {
+		t.Fatal("two containers share a desktop password")
 	}
 
-	url := h.gw.URL + desk.StreamPath
-	if code, _ := streamGet(t, url, "", nil); code != http.StatusUnauthorized {
-		t.Fatalf("no credentials: want 401 from KasmVNC, got %d", code)
-	}
-	if code, _ := streamGet(t, url, bobDesk.StreamPassword, nil); code != http.StatusUnauthorized {
-		t.Fatalf("another container's password: want 401, got %d", code)
-	}
-	code, b = streamGet(t, url+"websockify", desk.StreamPassword,
-		map[string]string{"Cookie": "_oauth2_proxy=secret", "X-User-Id": "mallory"})
+	// The owner gets in without any password of their own: the gateway fills
+	// in KasmVNC's (fakeKasm rejects anything else), replacing whatever the
+	// client sent, and strips cookies and identity headers.
+	code, _, b = streamGet(t, h.gw.URL, desk.ID+"/websockify?x=1", "alice", map[string]string{
+		"Authorization": "Basic dXNlcjp3cm9uZw==", "Cookie": "_termiplus_desk=secret",
+		"X-Forwarded-User": "kc-alice"})
 	if code != http.StatusOK {
 		t.Fatalf("owner: want 200, got %d %s", code, b)
 	}
@@ -145,50 +150,39 @@ func TestDesktopStream(t *testing.T) {
 		t.Fatalf("forwarded request: %v", seen)
 	}
 
-	if code, _ := streamGet(t, strings.TrimSuffix(url, "/"), "", nil); code != http.StatusMovedPermanently {
-		t.Fatalf("missing slash: want 301, got %d", code)
-	}
-	for name, path := range map[string]string{
-		"terminal container": "/stream/" + plain.ID + "/",
-		"unknown container":  "/stream/ot-term-0000000000000000-desk/",
-		"not a container":    "/stream/gateway/",
-		"bare prefix":        "/stream/",
+	for name, c := range map[string]struct{ path, user string }{
+		"another user's desktop": {desk.ID + "/", "bob"},
+		"terminal container":     {plain.ID + "/", "alice"},
+		"unknown container":      {"ot-u-0000000000000000-desk/", "alice"},
+		"not a container":        {"gateway/", "alice"},
+		"bare prefix":            {"", "alice"},
 	} {
-		if code, _ := streamGet(t, h.gw.URL+path, desk.StreamPassword, nil); code != http.StatusNotFound {
+		if code, _, _ := streamGet(t, h.gw.URL, c.path, c.user, nil); code != http.StatusNotFound {
 			t.Errorf("%s: want 404, got %d", name, code)
 		}
 	}
-
-	// Listing returns the same handle.
-	_, b = h.control(t, http.MethodGet, "sessions", testControlKey, "alice", "")
-	if !strings.Contains(b, desk.StreamPassword) || strings.Contains(b, bobDesk.StreamPassword) {
-		t.Fatalf("listing: %s", b)
+	if code, _, _ := streamGet(t, h.gw.URL, desk.ID+"/", "", nil); code != http.StatusBadRequest {
+		t.Errorf("no user: want 400, got %d", code)
 	}
-}
+	// Without the control key, and on the old public path, nothing is served.
+	for _, u := range []string{h.gw.URL + "/control/v1/stream/" + desk.ID + "/", h.gw.URL + desk.StreamPath} {
+		req, _ := http.NewRequest(http.MethodGet, u, nil)
+		req.Header.Set("X-User-Id", "alice")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK || strings.Contains(string(body), "websockify") {
+			t.Errorf("%s without control key: %d %s", u, resp.StatusCode, body)
+		}
+	}
 
-func TestStreamSameOrigin(t *testing.T) {
-	for _, c := range []struct {
-		host    string
-		origins []string
-		want    bool
-	}{
-		{"desk.example", []string{"https://desk.example"}, true},
-		{"desk.example:8443", []string{"https://DESK.example:8443"}, true},
-		{"desk.example", nil, false},
-		{"desk.example", []string{"null"}, false},
-		{"desk.example", []string{"https://evil.example"}, false},
-		{"desk.example", []string{"https://desk.example.evil.example"}, false},
-		{"desk.example", []string{"https://desk.example:8443"}, false},
-		{"desk.example", []string{"https://desk.example", "https://desk.example"}, false},
-		{"desk.example", []string{"file://desk.example"}, false},
-	} {
-		r := httptest.NewRequest(http.MethodGet, "http://"+c.host+"/stream/x/websockify", nil)
-		for _, o := range c.origins {
-			r.Header.Add("Origin", o)
-		}
-		if got := sameOrigin(r); got != c.want {
-			t.Errorf("host %q origins %v: got %v, want %v", c.host, c.origins, got, c.want)
-		}
+	// Listing returns the handle and no password.
+	_, b = h.control(t, http.MethodGet, "sessions", testControlKey, "alice", "")
+	if !strings.Contains(b, desk.StreamPath) || strings.Contains(b, "password") {
+		t.Fatalf("listing: %s", b)
 	}
 }
 
@@ -197,13 +191,15 @@ func toJSON(v any) string {
 	return string(b)
 }
 
-// Full chain: the MCP handle for a desktop workspace opens that desktop.
+// Full chain: browser identity (as desk-auth forwards it) -> MCP UI listener
+// -> gateway -> the user's desktop, with no second password.
 func TestDesktopStreamThroughMCP(t *testing.T) {
 	var h *harness
 	h = newHarness(t, withDesktop(&h))
 	auth := mcp.NewStaticAuthenticator(map[string]mcp.Principal{"alice-tok": {UserID: "alice", Roles: []string{mcp.RolePersist}}})
-	backend := mcp.NewGatewayBackend(h.gw.URL, "https://terminals.example", testControlKey, "").WithStreamBase(h.gw.URL)
-	c := &mcpChain{h: h, srv: mcp.NewServer(auth, backend, "test")}
+	backend := mcp.NewGatewayBackend(h.gw.URL, "https://terminals.example", testControlKey, "").WithStreamBase("https://desk.example")
+	srv := mcp.NewServer(auth, backend, "test")
+	c := &mcpChain{h: h, srv: srv}
 
 	out := c.call(t, "alice-tok", "list_workspaces", nil)
 	if !strings.Contains(out.Result.Content[0].Text, `"name":"desk","description":"runtime runsc","persistent":true,"desktop":true`) {
@@ -213,28 +209,99 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	if out.Error != nil || out.Result.IsError {
 		t.Fatalf("request desk: %+v", out)
 	}
+	text := out.Result.Content[0].Text
 	var s mcp.Session
-	if err := json.Unmarshal([]byte(out.Result.Content[0].Text), &s); err != nil {
+	if err := json.Unmarshal([]byte(text), &s); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(s.StreamURL, h.gw.URL+"/stream/") || s.StreamPassword == "" {
-		t.Fatalf("no stream handle: %+v", s)
+	if s.StreamURL != "https://desk.example/stream/"+s.ID+"/" || strings.Contains(text, "password") {
+		t.Fatalf("stream handle: %s", text)
 	}
-	if code, b := streamGet(t, s.StreamURL, s.StreamPassword, nil); code != http.StatusOK {
-		t.Fatalf("open desktop: %d %s", code, b)
+	_, b := h.control(t, http.MethodPost, "sessions", testControlKey, "bob", `{"workspace":"desk"}`)
+	var bob sessionInfo
+	_ = json.Unmarshal([]byte(b), &bob)
+
+	ids, err := mcp.OpenIdentityStore(filepath.Join(t.TempDir(), "ids.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ids.Record("kc-alice", "alice")
+	ui, err := mcp.NewUI(srv, ids).WithStream(h.gw.URL, testControlKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(ui)
+	t.Cleanup(front.Close)
+	get := func(sub, path string, hdr map[string]string) (int, http.Header) {
+		req, _ := http.NewRequest(http.MethodGet, front.URL+path, nil)
+		if sub != "" {
+			req.Header.Set("X-Forwarded-User", sub)
+		}
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+	path := "/stream/" + s.ID + "/"
+	if code, hdr := get("kc-alice", path, map[string]string{"X-User-Id": "bob"}); code != http.StatusOK || hdr.Get("Www-Authenticate") != "" {
+		t.Fatalf("alice's desktop: %d %v", code, hdr)
+	}
+	if code, _ := get("kc-alice", "/stream/"+bob.ID+"/", nil); code != http.StatusNotFound {
+		t.Fatalf("bob's desktop for alice: %d", code)
+	}
+	if code, _ := get("kc-carol", path, nil); code != http.StatusForbidden {
+		t.Fatalf("unlinked user: %d", code)
+	}
+	if code, _ := get("", path, nil); code != http.StatusUnauthorized {
+		t.Fatalf("not signed in: %d", code)
+	}
+	if code, hdr := get("kc-alice", strings.TrimSuffix(path, "/"), nil); code != http.StatusFound || hdr.Get("Location") != path {
+		t.Fatalf("missing slash: %d %q", code, hdr.Get("Location"))
+	}
+	// WebSockets only from the desktop's own origin.
+	ws := map[string]string{"Connection": "Upgrade", "Upgrade": "websocket"}
+	for _, origin := range []string{"", "null", "https://evil.example"} {
+		hdr := map[string]string{"Origin": origin}
+		for k, v := range ws {
+			hdr[k] = v
+		}
+		if code, _ := get("kc-alice", path+"websockify", hdr); code != http.StatusForbidden {
+			t.Errorf("WebSocket from Origin %q: want 403, got %d", origin, code)
+		}
 	}
 }
 
 // TestDesktopStreamRealKasmVNC runs the stream route against a real desktop
 // container: TERMIPLUS_KASM_ADDR=host:port of its 6901 and
 // TERMIPLUS_KASM_PASSWORD its OPEN_TERMINAL_DESKTOP_PASSWORD. Skipped
-// otherwise. It checks basic auth and the WebSocket upgrade (KasmVNC's origin
-// check) through the gateway.
+// otherwise. It checks that the gateway's basic auth and the WebSocket upgrade
+// get through to KasmVNC.
 func TestDesktopStreamRealKasmVNC(t *testing.T) {
 	addr, pw := os.Getenv("TERMIPLUS_KASM_ADDR"), os.Getenv("TERMIPLUS_KASM_PASSWORD")
 	if addr == "" || pw == "" {
 		t.Skip("set TERMIPLUS_KASM_ADDR and TERMIPLUS_KASM_PASSWORD")
 	}
+	// Between gateway and KasmVNC: require the password the gateway derived
+	// for the session, then swap in the real container's.
+	var want atomic.Value
+	want.Store("")
+	kasm := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(&url.URL{Scheme: "http", Host: addr})
+		pr.Out.Host = addr
+		if pr.In.Header.Get("Authorization") == want.Load().(string) {
+			pr.Out.SetBasicAuth("user", pw)
+		} else {
+			pr.Out.Header.Del("Authorization")
+		}
+	}}
+	mid := httptest.NewServer(kasm)
+	t.Cleanup(mid.Close)
 	h := newHarness(t, func(o *harnessOpts) {
 		o.gateway = func(c *Config) {
 			c.ControlKey = testControlKey
@@ -242,7 +309,7 @@ func TestDesktopStreamRealKasmVNC(t *testing.T) {
 			orig := c.AddrFor
 			c.AddrFor = func(name string, port int) string {
 				if port == desktopPort {
-					return addr
+					return strings.TrimPrefix(mid.URL, "http://")
 				}
 				return orig(name, port)
 			}
@@ -251,13 +318,11 @@ func TestDesktopStreamRealKasmVNC(t *testing.T) {
 	_, b := h.control(t, http.MethodPost, "sessions", testControlKey, "alice", `{"workspace":"desk"}`)
 	var s sessionInfo
 	_ = json.Unmarshal([]byte(b), &s)
-	url := h.gw.URL + s.StreamPath
+	want.Store("Basic " + base64.StdEncoding.EncodeToString([]byte("user:"+h.g.mgr.desktopPassword(s.ID))))
+	target := h.gw.URL + "/control/v1/stream/" + s.ID + "/"
 
-	if code, _ := streamGet(t, url, "", nil); code != http.StatusUnauthorized {
-		t.Fatalf("no credentials: want 401, got %d", code)
-	}
-	if code, _ := streamGet(t, url, pw, nil); code != http.StatusOK {
-		t.Fatalf("with password: want 200, got %d", code)
+	if code, _, _ := streamGet(t, h.gw.URL, s.ID+"/", "alice", nil); code != http.StatusOK {
+		t.Fatalf("owner: want 200, got %d", code)
 	}
 	upgrade := func(origin string) int {
 		conn, err := net.Dial("tcp", strings.TrimPrefix(h.gw.URL, "http://"))
@@ -265,9 +330,9 @@ func TestDesktopStreamRealKasmVNC(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		req, _ := http.NewRequest(http.MethodGet, url+"websockify", nil)
-		req.SetBasicAuth("user", pw)
+		req, _ := http.NewRequest(http.MethodGet, target+"websockify", nil)
 		for k, v := range map[string]string{
+			controlKeyHeader: testControlKey, "X-User-Id": "alice",
 			"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13",
 			"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": "binary",
 		} {
@@ -286,12 +351,8 @@ func TestDesktopStreamRealKasmVNC(t *testing.T) {
 		}
 		return resp.StatusCode
 	}
-	if code := upgrade(h.gw.URL); code != http.StatusSwitchingProtocols {
-		t.Fatalf("same-origin WebSocket: want 101, got %d", code)
-	}
-	for _, origin := range []string{"https://evil.example", "", "null"} {
-		if code := upgrade(origin); code != http.StatusForbidden {
-			t.Fatalf("WebSocket with Origin %q: want 403, got %d", origin, code)
-		}
+	// KasmVNC wants an Origin but accepts any; the MCP server checks it.
+	if code := upgrade("https://desk.example"); code != http.StatusSwitchingProtocols {
+		t.Fatalf("WebSocket: want 101, got %d", code)
 	}
 }

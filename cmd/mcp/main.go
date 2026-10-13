@@ -29,13 +29,15 @@ func main() {
 	// The in-memory stub is only for local development and must be asked for.
 	var backend mcp.Backend
 	switch controlKey := config.Secret("CONTROL_API_KEY", false); {
+	case config.Get("MCP_STUB_BACKEND", "") == "1":
+		// Asked for explicitly; wins over CONTROL_API_KEY so that tests can
+		// combine it with the desktop stream proxy, which needs the key.
+		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
+		backend = mcp.NewStubBackend(publicURL)
 	case controlKey != "":
 		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false)).
 			WithStreamBase(config.Get("STREAM_PUBLIC_URL", "")).
 			WithForwardBase(config.Get("FORWARD_PUBLIC_URL", ""))
-	case config.Get("MCP_STUB_BACKEND", "") == "1":
-		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
-		backend = mcp.NewStubBackend(publicURL)
 	default:
 		log.Fatal("CONTROL_API_KEY is required (or MCP_STUB_BACKEND=1 for local development)")
 	}
@@ -94,7 +96,16 @@ func main() {
 		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil {
 			log.Fatal("UI_LISTEN_ADDR needs MCP_AUTH=proxy and MCP_IDENTITY_FILE")
 		}
-		ui := &http.Server{Addr: uiAddr, Handler: mcp.NewUI(srv, ids), ReadHeaderTimeout: 10 * time.Second}
+		handler := mcp.NewUI(srv, ids)
+		// Desktops (/stream/) go through the gateway's control API.
+		if controlKey := config.Secret("CONTROL_API_KEY", false); controlKey != "" {
+			h, err := handler.WithStream(gatewayURL, controlKey)
+			if err != nil {
+				log.Fatal(err)
+			}
+			handler = h
+		}
+		ui := &http.Server{Addr: uiAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 		go func() { log.Fatal(ui.ListenAndServe()) }()
 		log.Printf("management UI listening on %s", uiAddr)
 	}

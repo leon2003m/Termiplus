@@ -121,11 +121,6 @@ async function loadSessions() {
     }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
     items.push(el("span", { class: "meta", text: meta }));
-    if (url && s.stream_password) {
-      const pw = el("input", { class: "secret", readonly: "", value: s.stream_password, "aria-label": "Desktop password" });
-      pw.addEventListener("focus", () => pw.select());
-      items.push(el("span", { class: "meta", text: "Desktop sign-in: user \"user\", password:" }), pw);
-    }
     ul.append(el("li", {}, items));
   }
   $("sessions-section").hidden = false;

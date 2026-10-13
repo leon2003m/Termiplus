@@ -9,11 +9,13 @@
 # configures it (image and flags read from the overlay; only --cookie-secure
 # and --redirect-url are adapted to plain-HTTP localhost) and, in place of the
 # gateway, an echo server (echo.py, run with the terminal image's Python), plus
-# the real mcp image (stub backend) serving the management UI. It logs in like
-# a browser and checks that only signed-in browsers reach the stream path and
-# the UI, that nothing else is reachable, that the browser's KasmVNC basic
-# auth arrives unchanged while no token of ours does, and that the UI acts as
-# the Open WebUI user linked to the signed-in subject.
+# the real mcp image (stub backend) serving the management UI and the desktop
+# stream proxy. It logs in like a browser and checks that only signed-in
+# browsers reach the stream path and the UI, that nothing else is reachable,
+# that a desktop request reaches the gateway's control API as the linked Open
+# WebUI user with no credentials or tokens of the browser, that WebSockets pass
+# only from the desktop's own origin, and that the UI acts as the Open WebUI
+# user linked to the signed-in subject.
 # Everything it creates is named tp-dskauth-it-* and removed on exit.
 set -euo pipefail
 
@@ -28,7 +30,7 @@ WORK="$(mktemp -d)"
 
 cleanup() {
   docker rm -f "$P-kc" "$P-proxy" "$P-gw" "$P-mcp" >/dev/null 2>&1 || true
-  docker network rm "$P-net" "$P-desk" >/dev/null 2>&1 || true
+  docker network rm "$P-net" "$P-desk" "$P-gwnet" >/dev/null 2>&1 || true
 }
 trap 'cleanup; rm -rf "$WORK"' EXIT
 cleanup
@@ -57,7 +59,7 @@ for a in json.load(sys.stdin)["services"]["desk-auth"]["command"]:
     # Plain HTTP on localhost: the cookie cannot be Secure here.
     print("--cookie-secure=false" if a == "--cookie-secure=true" else a)
 ' <<<"$cfg")
-for up in --upstream=http://gateway:8080/stream/ --upstream=http://mcp:8091/ui/; do
+for up in --upstream=http://mcp:8091/stream/ --upstream=http://mcp:8091/ui/; do
   printf '%s\n' "${PROXY_ARGS[@]}" | grep -qx -- "$up" || { echo "overlay upstreams changed; update this test"; exit 1; }
 done
 
@@ -67,6 +69,7 @@ chmod 644 "$WORK/client_secret" "$WORK/cookie_secret"
 
 docker network create "$P-net" >/dev/null
 docker network create --internal "$P-desk" >/dev/null
+docker network create --internal "$P-gwnet" >/dev/null
 
 docker run -d --name "$P-kc" --network "$P-net" --network-alias keycloak -p 127.0.0.1::8080 \
   -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin-it \
@@ -75,7 +78,7 @@ docker run -d --name "$P-kc" --network "$P-net" --network-alias keycloak -p 127.
   "$KC_IMAGE" start-dev --import-realm >/dev/null
 KCPORT="$(docker port "$P-kc" 8080/tcp | head -1 | cut -d: -f2)"
 
-docker run -d --name "$P-gw" --network "$P-desk" --network-alias gateway \
+docker run -d --name "$P-gw" --network "$P-gwnet" --network-alias gateway \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   -v "$HERE/echo.py:/echo.py:ro" --entrypoint /opt/open-terminal/bin/python3 \
   "$ECHO_IMAGE" -I /echo.py >/dev/null
@@ -97,7 +100,9 @@ chmod 644 "$WORK/data/identities.json"
 docker run -d --name "$P-mcp" --network "$P-desk" --network-alias mcp \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true -v "$WORK/data:/data:ro" \
   -e MCP_AUTH=proxy -e MCP_STUB_BACKEND=1 -e MCP_IDENTITY_FILE=/data/identities.json -e UI_LISTEN_ADDR=:8091 \
+  -e CONTROL_API_KEY=control-key-it-0123456789abcdef0123456789 \
   "$MCP_IMAGE" >/dev/null
+docker network connect "$P-gwnet" "$P-mcp"
 
 docker create --name "$P-proxy" --network "$P-net" -p "127.0.0.1:$PORT:4180" \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
@@ -142,14 +147,15 @@ check "a bearer token does not replace the browser sign-in" "$([ "$code" = 302 ]
 JAR="$WORK/jar"
 if login "$JAR" alice alice-pw; then pass "browser sign-in via Keycloak sets the session cookie"; else fail "browser sign-in"; fi
 
-seen="$(browser -b "$JAR" -u user:kasm-pw "$PUBLIC/stream/ot-u-1-desk/websockify?x=1")"
+seen="$(browser -b "$JAR" -u user:kasm-pw -H "Cookie: other=1" "$PUBLIC/stream/ot-u-1-desk/websockify?x=1")"
 py() { python3 -c "import json,sys; d=json.loads(sys.argv[1]); print($1)" "$seen"; }
-check "signed in: request reaches the stream path" "$([ "$(py 'd["path"]')" = "/stream/ot-u-1-desk/websockify?x=1" ] && echo 0 || echo 1)" "$seen"
-basic="Basic $(printf 'user:kasm-pw' | base64)"
-check "KasmVNC basic auth arrives unchanged" "$([ "$(py 'd["headers"].get("authorization","")')" = "$basic" ] && echo 0 || echo 1)" "$seen"
+check "signed in: request reaches the gateway's control stream path" "$([ "$(py 'd["path"]')" = "/control/v1/stream/ot-u-1-desk/websockify?x=1" ] && echo 0 || echo 1)" "$seen"
+check "the gateway is called as the linked Open WebUI user, with the control key" \
+  "$([ "$(py 'd["headers"].get("x-user-id","") + " " + d["headers"].get("x-control-key","")')" = "owui-alice control-key-it-0123456789abcdef0123456789" ] && echo 0 || echo 1)" "$seen"
+check "the browser's basic auth and cookies are not passed on" \
+  "$([ "$(py 'd["headers"].get("authorization","") + d["headers"].get("cookie","")')" = "" ] && echo 0 || echo 1)" "$seen"
 check "no access token or id token is forwarded" \
-  "$([ "$(py '",".join(k for k in d["headers"] if "token" in k or k.startswith("x-auth-request"))')" = "" ] && echo 0 || echo 1)" "$seen"
-check "the browser's Host is forwarded (same-origin check)" "$([ "$(py 'd["headers"].get("host","")')" = "127.0.0.1:$PORT" ] && echo 0 || echo 1)" "$seen"
+  "$([ "$(py '",".join(k for k in d["headers"] if "token" in k or k.startswith("x-auth-request") or k.startswith("x-forwarded-"))')" = "" ] && echo 0 || echo 1)" "$seen"
 
 for path in /control/v1/workspaces /p/default/openapi.json /admin/v1/policy /healthz /; do
   out="$(browser -b "$JAR" -w ' %{http_code}' "$PUBLIC$path")"
@@ -164,6 +170,10 @@ ws="$(browser -i -o - -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-W
   -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $PUBLIC" -u user:kasm-pw \
   "$PUBLIC/stream/ot-u-1-desk/websockify" | head -1 | tr -d '\r' || true)"
 check "WebSocket upgrade without sign-in is refused" "$([[ "$ws" != *" 101 "* ]] && echo 0 || echo 1)" "$ws"
+ws="$(browser -b "$JAR" -i -o - -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: https://evil.example" \
+  "$PUBLIC/stream/ot-u-1-desk/websockify" | head -1 | tr -d '\r' || true)"
+check "cross-origin WebSocket upgrade is refused" "$([[ "$ws" == *" 403 "* ]] && echo 0 || echo 1)" "$ws"
 
 cookie="$(curl -s -o /dev/null -D - "$PUBLIC/oauth2/start?rd=/stream/x/" | grep -i '^set-cookie: _termiplus_desk' | tr -d '\r')"
 check "session cookies are HttpOnly and SameSite=Lax" "$([[ "$cookie" == *HttpOnly* && "$cookie" == *SameSite=Lax* ]] && echo 0 || echo 1)" "$cookie"
@@ -204,9 +214,11 @@ out="$(ui "$JARB" GET api/me)"
 check "UI: bob (never used the plugin) is not linked" "$([[ "$out" == *'"linked":false'* ]] && echo 0 || echo 1)" "$out"
 out="$(ui "$JARB" GET api/sessions "" -H "X-Forwarded-User: $SUB_A")"
 check "UI: a forged X-Forwarded-User does not make bob alice" "$(endswith "$out" 409)" "$out"
+out="$(browser -b "$JARB" -w ' %{http_code}' "$PUBLIC/stream/ot-u-1-desk/")"
+check "stream: unlinked bob does not reach the gateway" "$([[ "$out" != *'"path"'* && "$out" == *" 403" ]] && echo 0 || echo 1)" "$out"
 
 nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$P-gw")"
-check "the stream upstream sits only on the internal desk network" "$([ "$nets" = "$P-desk " ] && echo 0 || echo 1)" "$nets"
+check "the gateway sits only on the internal network shared with the MCP server" "$([ "$nets" = "$P-gwnet " ] && echo 0 || echo 1)" "$nets"
 
 if [ "$FAILED" -ne 0 ]; then
   echo "desktop sign-in test FAILED"

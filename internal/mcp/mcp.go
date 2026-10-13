@@ -74,14 +74,12 @@ type Session struct {
 	// TerminalSession must be sent as X-Session-Id to reach an ephemeral
 	// session through TerminalURL; empty for persistent sessions.
 	TerminalSession string `json:"terminal_session,omitempty"`
-	// StreamURL and StreamPassword open a desktop workspace in the browser
-	// (KasmVNC basic auth, user "user"). The password is for the user only:
-	// the Open WebUI plugin shows it to them and keeps it out of the model.
+	// StreamURL opens a desktop workspace in the browser (owner only, behind
+	// the desktop sign-in; no further password).
 	StreamURL string `json:"stream_url,omitempty"`
 	// ForwardURL + "<port>/" opens a port of this session in the browser
 	// (owner only, behind its own sign-in).
-	ForwardURL     string `json:"forward_url,omitempty"`
-	StreamPassword string `json:"stream_password,omitempty"`
+	ForwardURL string `json:"forward_url,omitempty"`
 }
 
 // ErrPersistenceMismatch is returned when a request's persistent flag does not

@@ -35,6 +35,7 @@ type UI struct {
 	srv    *Server
 	ids    *IdentityStore
 	static http.Handler
+	stream *streamProxy // nil: no desktops (WithStream)
 }
 
 // NewUI returns the management UI for srv. ids maps browser identities (OIDC
@@ -45,6 +46,11 @@ func NewUI(srv *Server, ids *IdentityStore) *UI {
 }
 
 func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if u.stream != nil && strings.HasPrefix(r.URL.Path, streamPathPrefix) {
+		// The desktop sets its own headers; the console's CSP would break it.
+		u.stream.ServeHTTP(w, r)
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	h.Set("X-Content-Type-Options", "nosniff")

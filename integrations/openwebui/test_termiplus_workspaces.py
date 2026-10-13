@@ -288,67 +288,58 @@ class OpenWebUIUserHeaders(unittest.TestCase):
 
 
 PW = "f" * 64
-DESK = {"session_id": "ot-u-1-desk", "workspace": "desk", "stream_url": "https://desk.example/stream/ot-u-1-desk/",
-        "stream_password": PW}
+DESK = {"session_id": "ot-u-1-desk", "workspace": "desk", "stream_url": "https://desk.example/stream/ot-u-1-desk/"}
 
 
-class StreamPasswordStaysWithTheUser(unittest.TestCase):
-    def test_password_only_in_embed(self):
+class DesktopLinks(unittest.TestCase):
+    def test_link_for_each_desktop(self):
         for reply in (DESK, [DESK, {"session_id": "t", "workspace": "default"}]):
             with self.subTest(reply=reply):
-                out = plugin._hide_stream_passwords(json.dumps(reply))
-                self.assertIsInstance(out, tuple)
-                embed, context = out
-                self.assertNotIn(PW, context)
-                self.assertIn("ot-u-1-desk", context)
-                self.assertIn(PW, embed.body.decode())
-                self.assertIn("https://desk.example/stream/ot-u-1-desk/", embed.body.decode())
-                self.assertIn("inline", embed.headers["Content-Disposition"])
+                out = plugin._with_desktop_links(json.dumps(reply))
+                self.assertIn("[Open desktop (desk)](https://desk.example/stream/ot-u-1-desk/)", out)
+                self.assertIn("no password", out)
+                self.assertEqual(json.loads(out.split("\n")[0]), reply)
 
-    def test_without_password_text_is_unchanged(self):
+    def test_without_desktop_text_is_unchanged(self):
         for text in ("[]", '{"session_id":"t"}', "not json", '"x"'):
-            self.assertEqual(plugin._hide_stream_passwords(text), text)
+            self.assertEqual(plugin._with_desktop_links(text), text)
 
-    def test_values_are_escaped(self):
-        evil = dict(DESK, session_id="<script>x</script>", stream_password="'><img src=x>")
-        embed, _ = plugin._hide_stream_passwords(json.dumps(evil))
-        page = embed.body.decode()
-        self.assertNotIn("<script>x", page)
-        self.assertNotIn("'><img", page)
+    def test_password_of_an_older_server_is_dropped(self):
+        out = plugin._with_desktop_links(json.dumps(dict(DESK, stream_password=PW)))
+        self.assertNotIn(PW, out)
+        self.assertIn("Open desktop", out)
 
-    def test_non_http_link_is_not_rendered(self):
-        embed, context = plugin._hide_stream_passwords(json.dumps(dict(DESK, stream_url="javascript:alert(1)")))
-        self.assertNotIn("javascript:", embed.body.decode())
-        self.assertNotIn(PW, embed.body.decode() + context)
+    def test_unsafe_links_are_not_given(self):
+        for url in ("javascript:alert(1)", "https://desk.example/x)[y](https://evil.example", "https://a b"):
+            with self.subTest(url=url):
+                out = plugin._with_desktop_links(json.dumps(dict(DESK, stream_url=url)))
+                self.assertNotIn("Open desktop", out)
+                self.assertNotIn(url, out)
 
 
 class Console(unittest.TestCase):
     def test_not_configured(self):
         self.assertIn("not configured", asyncio.run(plugin.Tools().open_console()))
 
-    def test_link_is_escaped_and_http_only(self):
+    def test_link_is_http_only_and_markdown_safe(self):
         t = plugin.Tools()
-        t.valves.ui_url = "https://desk.example/ui/?a='><script>"
-        embed, context = asyncio.run(t.open_console())
-        self.assertNotIn("<script>", embed.body.decode())
-        self.assertIn("https://desk.example/ui/", embed.body.decode())
-        self.assertNotIn("http", context)
-        t.valves.ui_url = "javascript:alert(1)"
-        self.assertIn("not configured", asyncio.run(t.open_console()))
+        t.valves.ui_url = "https://desk.example/ui/"
+        self.assertIn("[Open the termiplus console](https://desk.example/ui/)", asyncio.run(t.open_console()))
+        for bad in ("https://desk.example/ui/?a=')<script>", "javascript:alert(1)"):
+            t.valves.ui_url = bad
+            self.assertIn("not configured", asyncio.run(t.open_console()))
 
 
 class OpenPort(OpenWebUIUserHeaders):
     def test_link_for_own_session(self):
         HeaderRecorder.reply = json.dumps([{"session_id": "ot-u-1-default", "forward_url": "https://fwd.example/ot-u-1-default/"}])
-        embed, context = asyncio.run(self.tools("").open_port("ot-u-1-default", 3000, __oauth_token__=TOKEN))
-        self.assertIn("https://fwd.example/ot-u-1-default/3000/", embed.body.decode())
-        self.assertNotIn("https://", context)
+        out = asyncio.run(self.tools("").open_port("ot-u-1-default", 3000, __oauth_token__=TOKEN))
+        self.assertIn("[Open port 3000](https://fwd.example/ot-u-1-default/3000/)", out)
 
     def test_with_desktop_session_in_list(self):
         HeaderRecorder.reply = json.dumps([dict(DESK, forward_url="https://fwd.example/ot-u-1-desk/")])
-        embed, _ = asyncio.run(self.tools("").open_port("ot-u-1-desk", "5173", __oauth_token__=TOKEN))
-        self.assertIn("https://fwd.example/ot-u-1-desk/5173/", embed.body.decode())
-        self.assertNotIn(PW, embed.body.decode())
+        out = asyncio.run(self.tools("").open_port("ot-u-1-desk", "5173", __oauth_token__=TOKEN))
+        self.assertIn("(https://fwd.example/ot-u-1-desk/5173/)", out)
 
     def test_refusals(self):
         HeaderRecorder.reply = json.dumps([{"session_id": "s1", "forward_url": "javascript:alert(1)//"}])
@@ -359,13 +350,12 @@ class OpenPort(OpenWebUIUserHeaders):
         self.assertIn("not configured", asyncio.run(t.open_port("s1", 3000, __oauth_token__=TOKEN)))
 
 
-class StreamPasswordThroughRun(OpenWebUIUserHeaders):
-    def test_run_returns_embed(self):
-        HeaderRecorder.reply = json.dumps([DESK])
+class DesktopLinksThroughRun(OpenWebUIUserHeaders):
+    def test_run_adds_links(self):
+        HeaderRecorder.reply = json.dumps([dict(DESK, stream_password=PW)])
         out = asyncio.run(self.tools("").list_sessions(__oauth_token__=TOKEN))
-        embed, context = out
-        self.assertNotIn(PW, context)
-        self.assertIn(PW, embed.body.decode())
+        self.assertIn("Open desktop", out)
+        self.assertNotIn(PW, out)
 
 
 if __name__ == "__main__":

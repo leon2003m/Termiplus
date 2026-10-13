@@ -182,8 +182,8 @@ successor to the #12 admin API's planned small web UI. Surfaced in OWUI two ways
 its own listener (`UI_LISTEN_ADDR`, `/ui/`), reached only through `desk-auth`,
 the browser sign-in proxy of `deploy/docker-compose.desktop.yml`
 (`${DESKTOP_PUBLIC_URL}/ui/`). It lists the workspaces the user is entitled to
-and their sessions, starts and removes sessions (asking first) and shows the
-desktop link and password for their desktops. All actions go through the same
+and their sessions, starts and removes sessions (asking first) and links their
+desktops. All actions go through the same
 tools, RBAC and entitlements as MCP calls; the person clicking is the human in
 the loop.
 
@@ -245,8 +245,8 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OWUI plugin: desktop and console links (open in a new tab) | **done** |
 | OWUI plugin: inline desktop preview (iframe in the chat) | **not planned for now** — the browser sign-in cookie is SameSite=Lax, so it is not sent inside a cross-site iframe; allowing that (SameSite=None + `frame-ancestors` for Open WebUI) would weaken the CSRF protection of the console |
 | Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0, runs Open Terminal too) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
-| Desktop streams: policy `"desktop": true`, gateway `/stream/<container>/`, per-container password, `stream_url` handle, browser sign-in (`deploy/docker-compose.desktop.yml`) | **done (experimental)** — gateway tests incl. a real KasmVNC; `test/integration/oidc/desktop.sh` against a real Keycloak |
-| OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
+| Desktop streams: policy `"desktop": true`, owner-only `/stream/<container>/` behind the browser sign-in (one login, the gateway fills in KasmVNC's per-container password), `stream_url` handle (`deploy/docker-compose.desktop.yml`) | **done (experimental)** — gateway tests incl. a real KasmVNC; `test/integration/oidc/desktop.sh` against a real Keycloak |
+| OWUI plugin gives desktop, port and console links as Markdown links (no secrets in them) | **done** |
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
 | OWUI plugin `open_console` tool (link to the management UI, `ui_url` valve) | **done** |
@@ -294,7 +294,9 @@ port).
 ### Desktop streams
 
 Decided 2026-10-13: per-container password derived like the terminal key,
-browser sign-in through oauth2-proxy. How it fits together:
+browser sign-in through oauth2-proxy; changed the same day to one login (the
+password stays inside the gateway) after the second basic-auth prompt proved
+unusable. How it fits together:
 
 1. **Image.** The socket proxy allows exactly one image, so the desktop image
    is used as `TERMINAL_IMAGE` (no socket-proxy change). Every container runs
@@ -309,35 +311,42 @@ browser sign-in through oauth2-proxy. How it fits together:
    brute-force blacklist is off: every browser comes through the gateway's
    single IP, so it would let anyone lock the owner out, and the password has
    256 random bits.
-3. **Routing.** The gateway serves `/stream/<container>/` for running desktop
-   containers only (anything else is 404) and never starts a container for a
-   stream request. It forwards the browser's basic auth, drops cookies and
-   `X-User-Id`, counts open streams so the idle reaper keeps the desktop, and
-   refuses **cross-origin WebSockets** (KasmVNC does not check `Origin`, and
-   browsers send cached basic-auth credentials cross-site).
-4. **Handle.** The control API returns `stream_path` + `stream_password` to the
-   session's owner only; the MCP server turns it into `stream_url`
-   (`STREAM_PUBLIC_URL`). The OWUI plugin removes the password from the tool
-   result and shows link and password to the user in an inline embed, which
-   Open WebUI does not send to the model.
-5. **Browser sign-in.** `deploy/docker-compose.desktop.yml` adds `desk-auth`
+3. **One login.** Browsers reach a desktop at
+   `${DESKTOP_PUBLIC_URL}/stream/<container>/` behind `desk-auth`
    (oauth2-proxy, authorization code flow with PKCE, HttpOnly SameSite=Lax
-   cookie) whose only upstream is the gateway's `/stream/`. It passes no token
-   of its own and keeps the browser's basic auth and Host.
+   cookie). Its upstream is the MCP server's UI listener, which maps the
+   signed-in OIDC subject to the Open WebUI user (IdentityStore, as for the
+   console) and calls the gateway's control API
+   `/control/v1/stream/<container>/<path>` with the control key and that
+   user's `X-User-Id`. The gateway passes the request on only to a running
+   desktop container of exactly that user (anything else is 404), fills in
+   KasmVNC's basic auth with the per-container password and drops the
+   browser's `Authorization`, cookies and identity headers. The password never
+   leaves the gateway, so there is no second prompt.
+4. **WebSockets.** KasmVNC wants an `Origin` but does not check it, so the MCP
+   server refuses WebSocket upgrades whose `Origin` is not the desktop's own
+   origin (cross-site WebSocket hijacking with the Lax cookie).
+5. **Handle.** The control API returns `stream_path` to the session's owner;
+   the MCP server turns it into `stream_url` (`STREAM_PUBLIC_URL`). The link
+   is no secret: the OWUI plugin hands it to the model, which gives it to the
+   user as a Markdown link; the console shows it too. The gateway itself no
+   longer serves a public `/stream/` path.
 
 `test/integration/oidc/desktop.sh` verifies the sign-in against a real
-Keycloak with the overlay's exact flags: no request reaches the stream without
+Keycloak with the overlay's exact flags: no request reaches a desktop without
 the session cookie (neither basic auth nor a bearer token replaces it), the
-rest of the gateway is unreachable, basic auth and Host arrive unchanged, no
-token is forwarded, WebSockets pass only when signed in. The gateway's
-`TestDesktopStreamRealKasmVNC` (opt-in, `TERMIPLUS_KASM_ADDR` /
-`TERMIPLUS_KASM_PASSWORD`) checks the route against a real KasmVNC container:
-401 without and 200 with the password, 101 for a same-origin WebSocket, 403
-for cross-origin or missing `Origin`.
+rest of the gateway is unreachable, the gateway is called as the linked Open
+WebUI user with the control key and without the browser's credentials or any
+token, WebSockets pass only when signed in and from the desktop's origin, and
+an unlinked user is refused. The gateway's `TestDesktopStream` and
+`TestDesktopStreamThroughMCP` check the owner rule and the full chain; the
+opt-in `TestDesktopStreamRealKasmVNC` (`TERMIPLUS_KASM_ADDR` /
+`TERMIPLUS_KASM_PASSWORD`, run by `.github/scripts/desktop-smoke.sh`) checks
+that the gateway's basic auth and the WebSocket upgrade get through to a real
+KasmVNC.
 
-Known limits: authorization to a desktop is knowing its password; the browser
-sign-in only proves a Keycloak user, not that it is the owner (the owner's
-identity is the Open WebUI user id). The desktop image is built and smoke-tested in CI (runc only; gVisor and Sysbox were checked by hand).
+The desktop image is built and smoke-tested in CI (runc only; gVisor and
+Sysbox were checked by hand).
 
 ### Port forwarding
 

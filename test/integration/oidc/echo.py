@@ -1,4 +1,4 @@
-"""Stand-in for the gateway's /stream/ path in desktop.sh: answers every
+"""Stand-in for the gateway's control stream path in desktop.sh: answers every
 request with what reached it (path and headers) and accepts WebSocket
 upgrades. Standard library only."""
 

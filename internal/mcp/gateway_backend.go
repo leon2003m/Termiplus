@@ -76,7 +76,6 @@ type gwSession struct {
 	TerminalPath    string `json:"terminal_path"`
 	TerminalSession string `json:"terminal_session"`
 	StreamPath      string `json:"stream_path"`
-	StreamPassword  string `json:"stream_password"`
 }
 
 func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Workspace, error) {
@@ -180,7 +179,6 @@ func (b *GatewayBackend) session(s gwSession, userID string) Session {
 	}
 	if s.StreamPath != "" {
 		out.StreamURL = b.streamBase + s.StreamPath
-		out.StreamPassword = s.StreamPassword
 	}
 	return out
 }

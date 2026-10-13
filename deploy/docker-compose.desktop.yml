@@ -6,16 +6,18 @@
 #     -f docker-compose.desktop.yml up -d
 #
 # Browsers sign in through oauth2-proxy (desk-auth, OIDC authorization code
-# flow with a session cookie) before they reach the gateway's /stream/ path or
-# the management UI (${DESKTOP_PUBLIC_URL}/ui/, served by the MCP server on its
-# own listener); nothing else of the gateway or the MCP server is exposed here.
+# flow with a session cookie) before they reach the desktops
+# (${DESKTOP_PUBLIC_URL}/stream/) or the management UI (/ui/), both served by
+# the MCP server on its own listener; nothing else of the gateway or the MCP
+# server is exposed here.
 # The UI maps the signed-in subject to the Open WebUI user the plugin reported
 # for it, so a user has to use the Open WebUI tool once before the UI shows
 # their sessions.
 #
-# For a desktop, KasmVNC in the container then asks for the per-container
-# password, which the MCP server hands only to the session's owner (the Open WebUI plugin shows it to the user, not the model).
-# The gateway refuses cross-origin WebSockets to the stream.
+# The sign-in is the only login: the MCP server lets a browser into a desktop
+# only if it belongs to the Open WebUI user linked to the signed-in subject,
+# and the gateway fills in KasmVNC's per-container password itself. The MCP
+# server refuses cross-origin WebSockets to the stream.
 #
 # Prerequisites (in addition to the MCP overlay's):
 #   - TERMINAL_IMAGE set to the desktop image (image/desktop), and a policy
@@ -70,11 +72,10 @@ services:
       # Behind the TLS reverse proxy; trust its X-Forwarded-* headers.
       - --reverse-proxy=true
       - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
-      # Only the stream path and the UI; nothing else is reachable.
-      - --upstream=http://gateway:8080/stream/
+      # Only the desktops and the UI; nothing else is reachable.
+      - --upstream=http://mcp:8091/stream/
       - --upstream=http://mcp:8091/ui/
-      # The browser's KasmVNC basic auth must reach the container unchanged,
-      # and no token or identity of ours is handed to it.
+      # No token or credential of ours is handed on.
       - --pass-basic-auth=false
       - --pass-access-token=false
       - --pass-authorization-header=false
@@ -84,7 +85,7 @@ services:
     secrets: [desk_oidc_client_secret, desk_oidc_cookie_secret]
     ports:
       - "127.0.0.1:${DESKTOP_PORT:-4181}:4180"
-    networks: [ot-desk, ot-mcp-ui, owui]
+    networks: [ot-mcp-ui, owui]
     mem_limit: 128m
     cpus: 0.5
     pids_limit: 64
@@ -138,23 +139,18 @@ services:
       FORWARD_PUBLIC_URL: ${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL}
       # Port forwards; trusts fwd-auth's identity headers like the UI does.
       FWD_LISTEN_ADDR: ":8092"
-      # Trusts desk-auth's identity headers. Besides desk-auth (ot-mcp-ui)
-      # only mcp-auth and the gateway share a network with the MCP server,
-      # and neither forwards browser requests to this port.
+      # Console and desktops; trusts desk-auth's identity headers. Besides
+      # desk-auth (ot-mcp-ui) only mcp-auth and the gateway share a network
+      # with the MCP server, and neither forwards browser requests to this
+      # port.
       UI_LISTEN_ADDR: ":8091"
     networks:
       ot-mcp-ui: {}
       ot-mcp-fwd: {}
 
-  gateway:
-    networks:
-      ot-desk: {}
-
 networks:
-  # desk-auth <-> gateway only. desk-auth also joins owui to reach the issuer.
-  ot-desk:
-    internal: true
-  # desk-auth <-> mcp management UI only.
+  # desk-auth <-> mcp console and desktops only. desk-auth also joins owui to
+  # reach the issuer.
   ot-mcp-ui:
     internal: true
   # fwd-auth <-> mcp port forwarder only.

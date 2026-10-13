@@ -215,11 +215,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if g.serveControl(w, r) {
 		return
 	}
-	// The desktop stream is reached by browsers, not Open WebUI: no bearer key,
-	// KasmVNC authenticates (see stream.go).
-	if g.serveStream(w, r) {
-		return
-	}
 
 	policyName, rest, ok := splitPolicy(r.URL.Path)
 	if !ok {

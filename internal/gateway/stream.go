@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/base64"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -10,58 +11,54 @@ import (
 	"termiplus/internal/naming"
 )
 
-// The desktop stream of a container whose policy has "desktop": true is
-// reachable under /stream/<container>/. The gateway only routes: KasmVNC in
-// the container checks its own basic auth against the per-container password
-// (desktopPassword), which only the control API hands out, to the session's
-// owner. In the deployment the browser additionally signs in through
-// oauth2-proxy before it reaches this path (deploy/docker-compose.desktop.yml).
-// The gateway never starts a container for a stream request and never adds
-// credentials of its own.
+// The desktop of a container whose policy has "desktop": true is reachable
+// only through the control API: /control/v1/stream/<container>/<path> with the
+// control key and the X-User-Id of the container's owner. The MCP server calls
+// it after the browser signed in (desk-auth, oauth2-proxy) and was mapped to
+// its Open WebUI user, and checks the Origin of WebSockets. KasmVNC's basic
+// auth is filled in here with the per-container password (desktopPassword), so
+// it never reaches a browser and the user signs in only once. The gateway
+// never starts a container for a stream request.
 
-const streamPrefix = "/stream/"
+const streamPrefix = "stream/"
 
 // desktopPort is where KasmVNC listens inside a desktop container.
 const desktopPort = 6901
 
-// serveStream handles /stream/*. It returns true if it handled the request.
-func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.HasPrefix(r.URL.Path, streamPrefix) {
-		return false
-	}
-	name, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, streamPrefix), "/")
-	inst := g.mgr.streamTarget(name)
+// desktopUser is KasmVNC's only user (image/desktop/start-desktop.sh).
+const desktopUser = "user"
+
+// serveStream handles control-API paths below stream/. rest is
+// "<container>/<path>".
+func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, rest string) {
+	name, path, _ := strings.Cut(rest, "/")
+	inst := g.mgr.streamTarget(name, userID)
 	if inst == nil {
-		// Unknown, stopped, not a desktop or not managed: all look the same.
-		httpError(w, http.StatusNotFound, "not found")
-		return true
-	}
-	if rest == "" && !strings.HasSuffix(r.URL.Path, "/") {
-		// KasmVNC's client uses relative URLs, so it needs the trailing slash.
-		http.Redirect(w, r, streamPrefix+name+"/", http.StatusMovedPermanently)
-		return true
-	}
-	// KasmVNC does not check the Origin of a WebSocket, and browsers send
-	// cached basic-auth credentials with cross-site WebSocket handshakes, so a
-	// foreign page could otherwise drive the desktop (cross-site WebSocket
-	// hijacking). Only same-origin upgrades pass.
-	if isWebSocket(r) && !sameOrigin(r) {
-		httpError(w, http.StatusForbidden, "cross-origin WebSocket refused")
-		return true
+		// Unknown, stopped, not a desktop or another user's: all look the same.
+		httpError(w, http.StatusNotFound, "no such desktop")
+		return
 	}
 	addr := g.mgr.addrFor(name, desktopPort)
 	target := &url.URL{Scheme: "http", Host: addr}
+	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(desktopUser+":"+g.mgr.desktopPassword(name)))
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
-			pr.Out.URL.Path = "/" + rest
+			pr.Out.URL.Path = "/" + path
 			pr.Out.URL.RawPath = ""
+			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			pr.Out.Host = addr
-			// The browser's basic auth for KasmVNC passes through; cookies
-			// (the sign-in proxy's session) and gateway headers do not.
-			pr.Out.Header.Del("Cookie")
-			pr.Out.Header.Del("X-Proxy-Token")
-			pr.Out.Header.Del("X-User-Id")
+			for _, h := range []string{controlKeyHeader, "X-User-Id", "X-Proxy-Token", "Cookie",
+				"X-Forwarded-User", "X-Forwarded-Groups", "X-Forwarded-Email",
+				"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", forwardPrefixHeader} {
+				pr.Out.Header.Del(h)
+			}
+			pr.Out.Header.Set("Authorization", auth)
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			// A rejected password must not make the browser ask the user.
+			resp.Header.Del("Www-Authenticate")
+			return nil
 		},
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -74,32 +71,18 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request) bool {
 	g.mgr.touch(inst, 1)
 	defer g.mgr.touch(inst, -1)
 	rp.ServeHTTP(w, r)
-	return true
 }
 
-// sameOrigin reports whether the request has exactly one Origin header whose
-// host matches the Host the browser addressed.
-func sameOrigin(r *http.Request) bool {
-	origins := r.Header.Values("Origin")
-	if len(origins) != 1 {
-		return false
-	}
-	u, err := url.Parse(origins[0])
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return false
-	}
-	return strings.EqualFold(u.Host, r.Host)
-}
-
-// streamTarget returns the running desktop instance called name, or nil.
-func (m *manager) streamTarget(name string) *instance {
-	if !naming.IsManagedContainer(name) {
+// streamTarget returns the running desktop instance called name if it belongs
+// to userID, or nil.
+func (m *manager) streamTarget(name, userID string) *instance {
+	if !naming.IsManagedContainer(name) || userID == "" {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inst := m.instances[name]
-	if inst == nil || !inst.desktop {
+	if inst == nil || !inst.desktop || inst.userID != userID {
 		return nil
 	}
 	return inst
