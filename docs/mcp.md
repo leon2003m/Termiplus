@@ -247,7 +247,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
-| OWUI link/embed for the management UI | todo |
+| OWUI plugin `open_console` tool (link to the management UI, `ui_url` valve) | **done** |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
 | Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
 

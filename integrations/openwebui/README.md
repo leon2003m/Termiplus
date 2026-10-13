@@ -34,7 +34,9 @@ Requirements: Open WebUI **>= 0.8.6** signed in through OIDC (Keycloak), with
 2. In the tool's **Valves**, set `plugin_key` to the content of
    `deploy/secrets/mcp_owui_plugin_key` (sessions then belong to the Open WebUI
    user and share homes with their Open WebUI terminals), and `mcp_url` if it
-   differs from the default `http://mcp-auth:4180/`.
+   differs from the default `http://mcp-auth:4180/`. Optionally set `ui_url`
+   to the management console (`${DESKTOP_PUBLIC_URL}/ui/`) so the assistant
+   can show the user a link to it.
 3. Enable the tool for the models that should manage workspaces.
 
 ## Tests

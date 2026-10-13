@@ -305,6 +305,21 @@ class StreamPasswordStaysWithTheUser(unittest.TestCase):
         self.assertNotIn(PW, embed.body.decode() + context)
 
 
+class Console(unittest.TestCase):
+    def test_not_configured(self):
+        self.assertIn("not configured", asyncio.run(plugin.Tools().open_console()))
+
+    def test_link_is_escaped_and_http_only(self):
+        t = plugin.Tools()
+        t.valves.ui_url = "https://desk.example/ui/?a='><script>"
+        embed, context = asyncio.run(t.open_console())
+        self.assertNotIn("<script>", embed.body.decode())
+        self.assertIn("https://desk.example/ui/", embed.body.decode())
+        self.assertNotIn("http", context)
+        t.valves.ui_url = "javascript:alert(1)"
+        self.assertIn("not configured", asyncio.run(t.open_console()))
+
+
 class StreamPasswordThroughRun(OpenWebUIUserHeaders):
     def test_run_returns_embed(self):
         HeaderRecorder.reply = json.dumps([DESK])

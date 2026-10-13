@@ -53,6 +53,10 @@ class Tools:
             default="",
             description="The deployment's mcp_owui_plugin_key secret. Set it so sessions belong to the Open WebUI user.",
         )
+        ui_url: str = Field(
+            default="",
+            description="Browser URL of the termiplus management UI, e.g. https://desk.example.com/ui/ (optional).",
+        )
         timeout_seconds: int = Field(
             default=150, description="Request timeout; creating a session can take a while."
         )
@@ -107,6 +111,23 @@ class Tools:
         """
         return await self._run(
             "destroy_session", {"session_id": session_id}, __oauth_token__, __event_call__, __event_emitter__, __user__
+        )
+
+    async def open_console(self) -> Any:
+        """
+        Show the user a link to the termiplus management console, where they can see and manage their workspaces and sessions (and admins the entitlements and network policy).
+        """
+        url = self.valves.ui_url.strip()
+        if not url.startswith(("https://", "http://")):
+            return "termiplus: the management console is not configured (ui_url valve)."
+        u = html.escape(url, quote=True)
+        page = (
+            "<!doctype html><meta charset='utf-8'><style>body{font:14px sans-serif;margin:8px}</style>"
+            f"<a href='{u}' target='_blank' rel='noopener noreferrer'>Open the termiplus console</a> <code>{u}</code>"
+        )
+        return (
+            HTMLResponse(content=page, headers={"Content-Disposition": "inline"}),
+            "A link to the termiplus management console is shown to the user.",
         )
 
     # --- helpers (underscore: not exposed to the model) ---
