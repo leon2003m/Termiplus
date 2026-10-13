@@ -164,14 +164,15 @@ ensure_gateway_antispoof() {
 }
 ensure_gateway_antispoof
 
-# The forwarder's upstream must be a plain IPv4 address outside the never-
-# allowed ranges; anything else gets no rule (DNS then fails closed).
+# Each forwarder upstream (DNS_UPSTREAM, comma-separated) must be a plain IPv4
+# address outside the never-allowed ranges; anything else gets no rule.
 upstream_ok() {
-  echo "$DNS_UPSTREAM" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
-  case "$DNS_UPSTREAM" in
+  echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
+  case "$1" in
     127.* | 169.254.* | 172.30.0.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*) return 1 ;;
   esac
 }
+upstreams() { echo "$DNS_UPSTREAM" | tr -s ', ' '\n' | grep -v '^$' || true; }
 
 # Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
 iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
@@ -187,13 +188,15 @@ if [ -n "${forwarder_mac:-}" ]; then
   for p in udp tcp; do
     iptables -A TERMIPLUS -s "$SANDBOX" -d "$FORWARDER" -p "$p" --dport 53 -j ACCEPT
   done
-  if upstream_ok; then
-    for p in udp tcp; do
-      iptables -A TERMIPLUS -s "$FORWARDER" -d "$DNS_UPSTREAM" -p "$p" --dport 53 -j RETURN
-    done
-  else
-    echo "firewall: DNS_UPSTREAM '$DNS_UPSTREAM' unusable - the forwarder gets no upstream rule" >&2
-  fi
+  for up in $(upstreams); do
+    if upstream_ok "$up"; then
+      for p in udp tcp; do
+        iptables -A TERMIPLUS -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
+      done
+    else
+      echo "firewall: DNS upstream '$up' unusable - the forwarder gets no rule for it" >&2
+    fi
+  done
 fi
 # terminal <-> terminal: dropped here (belt) and again by Docker's icc:false drop.
 iptables -A TERMIPLUS -s "$SANDBOX" -d "$SANDBOX" -j DROP
@@ -217,9 +220,13 @@ iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || iptables -I DOCKER-USER 1 -j
 iptables -N TERMIPLUS-IN 2>/dev/null || iptables -F TERMIPLUS-IN
 iptables -A TERMIPLUS-IN -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 # An upstream resolver on this host itself: only the forwarder may ask it.
-if [ -n "${forwarder_mac:-}" ] && upstream_ok && ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$DNS_UPSTREAM"; then
-  for p in udp tcp; do
-    iptables -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -d "$DNS_UPSTREAM" -p "$p" --dport 53 -j RETURN
+if [ -n "${forwarder_mac:-}" ]; then
+  for up in $(upstreams); do
+    if upstream_ok "$up" && ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$up"; then
+      for p in udp tcp; do
+        iptables -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
+      done
+    fi
   done
 fi
 iptables -A TERMIPLUS-IN -i "$BRIDGE" -j DROP
