@@ -228,8 +228,9 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
   validation that a human runs for the core (`test/integration/VALIDATION.md`).
 - Streaming/embedding runs in a sandboxed iframe — validate media/WebSocket
   behavior on target desktop browsers.
-- The MCP↔gateway link must stay on a private network with the API key; the MCP
-  server's JWT validation is the trust anchor for all identity.
+- The MCP↔gateway link must stay on a private network with the control key;
+  oauth2-proxy's token validation (and, for sessions, the Open WebUI plugin key)
+  is the trust anchor for all identity. termiplus verifies no tokens itself.
 
 ## 12. Implementation status
 
@@ -241,7 +242,8 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OIDC authentication via oauth2-proxy v7.15.5 (Keycloak first, any OIDC IdP) + `MCP_AUTH=proxy` | **done** — verified against a real Keycloak by `test/integration/oidc/run.sh` |
 | Sessions keyed by the Open WebUI user id (`MCP_OWUI_PLUGIN_KEY`, plugin `plugin_key` valve) | **done** — same homes as Open WebUI terminals; covered by the same test |
 | Native OWUI plugin: confirmation dialog, `__oauth_token__` forwarding (`integrations/openwebui/`) | **done** — tested against the real `mcp` binary in CI |
-| OWUI plugin: DE previews and management-UI link | todo (needs streaming / management UI) |
+| OWUI plugin: desktop and console links (open in a new tab) | **done** |
+| OWUI plugin: inline desktop preview (iframe in the chat) | **not planned for now** — the browser sign-in cookie is SameSite=Lax, so it is not sent inside a cross-site iframe; allowing that (SameSite=None + `frame-ancestors` for Open WebUI) would weaken the CSRF protection of the console |
 | Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0, runs Open Terminal too) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
 | Desktop streams: policy `"desktop": true`, gateway `/stream/<container>/`, per-container password, `stream_url` handle, browser sign-in (`deploy/docker-compose.desktop.yml`) | **done (experimental)** — gateway tests incl. a real KasmVNC; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
@@ -249,7 +251,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
 | OWUI plugin `open_console` tool (link to the management UI, `ui_url` valve) | **done** |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
-| Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
+| Workspace entitlements per group (`MCP_ENTITLEMENTS_FILE`, editable by admins) | **done** |
 
 ### Gateway control API
 
