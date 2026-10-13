@@ -6,7 +6,10 @@ server's real RBAC and confirmation gate are exercised.
 """
 
 import asyncio
+import http.server
+import json
 import os
+import threading
 import socket
 import subprocess
 import sys
@@ -181,6 +184,68 @@ class PluginAgainstServer(unittest.TestCase):
         )
         self.assertIn("not allowed", out)
         self.assertEqual(rec.calls, [])
+
+
+class HeaderRecorder(http.server.BaseHTTPRequestHandler):
+    seen: list = []
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        HeaderRecorder.seen.append(dict(self.headers))
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "[]"}]}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_):
+        pass
+
+
+class OpenWebUIUserHeaders(unittest.TestCase):
+    """The plugin names the Open WebUI user only when the plugin key is set."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.srv = http.server.HTTPServer(("127.0.0.1", 0), HeaderRecorder)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.url = f"http://127.0.0.1:{cls.srv.server_address[1]}/"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+
+    def setUp(self):
+        HeaderRecorder.seen = []
+
+    def tools(self, key):
+        t = plugin.Tools()
+        t.valves.mcp_url = self.url
+        t.valves.plugin_key = key
+        t.valves.timeout_seconds = 5
+        return t
+
+    def test_without_key_no_user_headers(self):
+        asyncio.run(self.tools("").list_sessions(__oauth_token__=TOKEN, __user__={"id": "u-1"}))
+        h = HeaderRecorder.seen[0]
+        self.assertEqual(h["Authorization"], f"Bearer {DEV_TOKEN}")
+        self.assertNotIn("X-Termiplus-Owui-Key", h)
+        self.assertNotIn("X-Termiplus-Owui-User", h)
+
+    def test_with_key_sends_user_id(self):
+        asyncio.run(self.tools("k" * 64).list_sessions(__oauth_token__=TOKEN, __user__={"id": "u-1", "name": "x"}))
+        h = HeaderRecorder.seen[0]
+        self.assertEqual(h["X-Termiplus-Owui-Key"], "k" * 64)
+        self.assertEqual(h["X-Termiplus-Owui-User"], "u-1")
+
+    def test_with_key_but_no_user_nothing_is_sent(self):
+        for user in (None, {}, {"id": ""}, {"id": 5}):
+            with self.subTest(user=user):
+                out = asyncio.run(self.tools("k" * 64).list_sessions(__oauth_token__=TOKEN, __user__=user))
+                self.assertIn("did not provide the user id", out)
+        self.assertEqual(HeaderRecorder.seen, [])
 
 
 if __name__ == "__main__":

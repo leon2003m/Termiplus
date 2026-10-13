@@ -25,6 +25,10 @@
 #   - deploy/secrets/mcp_oidc_client_secret: that client's secret (no newline).
 #   - deploy/secrets/mcp_oidc_cookie_secret: openssl rand -hex 16 (unused for
 #     bearer calls, but oauth2-proxy requires it).
+#   - deploy/secrets/mcp_owui_plugin_key: openssl rand -hex 32 (no newline),
+#     also entered as the Open WebUI plugin's "plugin_key" valve. Sessions then
+#     belong to the Open WebUI user id, so they share homes with that user's
+#     Open WebUI terminals; the token still proves the sign-in and the groups.
 #   - deploy/entitlements.json: which groups may see and launch which workspace
 #     (docs/mcp.md, "Workspace entitlements"). The shipped file opens every
 #     workspace to every signed-in user.
@@ -86,7 +90,8 @@ services:
       GATEWAY_PUBLIC_URL: ${MCP_GATEWAY_PUBLIC_URL:-http://gateway:8080}
       CONTROL_API_KEY_FILE: /run/secrets/control_api_key
       MCP_ENTITLEMENTS_FILE: /etc/termiplus/entitlements.json
-    secrets: [control_api_key]
+      MCP_OWUI_PLUGIN_KEY_FILE: /run/secrets/mcp_owui_plugin_key
+    secrets: [control_api_key, mcp_owui_plugin_key]
     configs:
       - { source: mcp_entitlements, target: /etc/termiplus/entitlements.json }
     networks: [ot-mcp, ot-mcp-auth]
@@ -114,3 +119,4 @@ secrets:
   control_api_key: { file: ./secrets/control_api_key }
   mcp_oidc_client_secret: { file: ./secrets/mcp_oidc_client_secret }
   mcp_oidc_cookie_secret: { file: ./secrets/mcp_oidc_cookie_secret }
+  mcp_owui_plugin_key: { file: ./secrets/mcp_owui_plugin_key }

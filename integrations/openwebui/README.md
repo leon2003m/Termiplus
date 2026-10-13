@@ -14,6 +14,9 @@ through the MCP control plane (`docs/mcp.md`).
   required" (persistent sessions, removing a session), the plugin shows an Open
   WebUI dialog and repeats the call only after an explicit **yes**. Any other
   answer, or no dialog at all, cancels.
+- With `plugin_key` set it also sends the Open WebUI user id, so sessions use
+  the same homes as that user's Open WebUI terminals. Without a user id it
+  sends nothing.
 - RBAC stays on the server: without the `termiplus-persist` group a persistent
   session is refused even if the user confirms.
 
@@ -24,8 +27,10 @@ Requirements: Open WebUI **>= 0.8.6** signed in through OIDC (Keycloak), with
 (`deploy/docker-compose.mcp.yml`) running on the Open WebUI network.
 
 1. Admin Panel → Workspace → Tools → **+**, paste `termiplus_workspaces.py`, save.
-2. In the tool's **Valves**, set `mcp_url` if it differs from the default
-   `http://mcp-auth:4180/`.
+2. In the tool's **Valves**, set `plugin_key` to the content of
+   `deploy/secrets/mcp_owui_plugin_key` (sessions then belong to the Open WebUI
+   user and share homes with their Open WebUI terminals), and `mcp_url` if it
+   differs from the default `http://mcp-auth:4180/`.
 3. Enable the tool for the models that should manage workspaces.
 
 ## Tests

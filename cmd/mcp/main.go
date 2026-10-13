@@ -47,7 +47,16 @@ func main() {
 		if config.Secret("MCP_DEV_TOKEN", false) != "" {
 			log.Fatal("MCP_DEV_TOKEN must not be set with MCP_AUTH=proxy")
 		}
-		auth, authDesc = mcp.ProxyHeaderAuthenticator{}, "identity from the OIDC proxy"
+		// With MCP_OWUI_PLUGIN_KEY, sessions belong to the Open WebUI user the
+		// plugin names (same homes as that user's Open WebUI terminals).
+		owuiKey := config.Secret("MCP_OWUI_PLUGIN_KEY", false)
+		if owuiKey != "" && len(owuiKey) < 32 {
+			log.Fatal("MCP_OWUI_PLUGIN_KEY must be at least 32 characters")
+		}
+		auth, authDesc = mcp.ProxyHeaderAuthenticator{OWUIKey: owuiKey}, "identity from the OIDC proxy, sessions keyed by the OIDC subject"
+		if owuiKey != "" {
+			authDesc = "identity from the OIDC proxy, sessions keyed by the Open WebUI user id"
+		}
 	case "dev":
 		tok := config.Secret("MCP_DEV_TOKEN", true)
 		log.Print("WARNING: MCP_AUTH=dev - every caller with MCP_DEV_TOKEN acts as MCP_DEV_USER; never use this in production")

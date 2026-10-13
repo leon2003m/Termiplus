@@ -32,12 +32,13 @@ Design principles:
   Open WebUI ── native "termiplus" Tool plugin
        │            │  - raises __event_call__ confirmation modals
        │            │  - forwards user's __oauth_token__ (Bearer)
+       │            │  - names the Open WebUI user (plugin key)
        │            │  - renders DE preview embeds + management-UI link
        ▼            ▼
   oauth2-proxy  ── validates the JWT (JWKS, iss, aud, exp); forwards sub + groups
        │  (internal network ot-mcp-auth: the only way to reach the MCP server)
        ▼
-  termiplus MCP server  ── reads the proxy's identity headers -> (user_id, roles)
+  termiplus MCP server  ── proxy headers -> roles; Open WebUI user id -> user_id
        │  (sole setter of the gateway X-User-Id, over the API-key link)
        ▼
   gateway ── sockproxy ── Docker ── session containers (runsc / sysbox)
@@ -69,7 +70,17 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      delegated to that established, independently maintained proxy, and the MCP
      server only reads its headers. It is reachable solely through the proxy
      (internal network `ot-mcp-auth`).
-  4. The MCP server is the **only** component that sets the gateway's
+  4. **Sessions belong to the Open WebUI user**, so they share homes with that
+     user's Open WebUI terminals. With `MCP_OWUI_PLUGIN_KEY` set (the overlay
+     does), the plugin also sends `X-Termiplus-Owui-Key` (a shared secret, the
+     plugin's `plugin_key` valve) and `X-Termiplus-Owui-User` (`__user__["id"]`).
+     The MCP server then uses that id as `user_id` and still takes the roles
+     from the verified token; without both a verified token and the key the call
+     is unauthenticated. Open WebUI fetched the token for that same user, and
+     the trust is the same as towards the gateway, where Open WebUI names the
+     user in `X-User-Id` with its API key. Keycloak stays the login and the
+     source of the groups.
+  5. The MCP server is the **only** component that sets the gateway's
      `X-User-Id`, over the existing API-key-authenticated, private MCP↔gateway
      link. The gateway therefore receives a trustworthy identity.
 - **Persistent homes** are templated per `user_id` (Kasm-style), never shared by
@@ -206,6 +217,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Gateway control API (`/control/v1`, `X-Control-Key`) + `GatewayBackend` | **done** |
 | Opt-in deployment (`deploy/docker-compose.mcp.yml`, `mcp` image target) | **done** |
 | OIDC authentication via oauth2-proxy v7.15.5 (Keycloak first, any OIDC IdP) + `MCP_AUTH=proxy` | **done** — verified against a real Keycloak by `test/integration/oidc/run.sh` |
+| Sessions keyed by the Open WebUI user id (`MCP_OWUI_PLUGIN_KEY`, plugin `plugin_key` valve) | **done** — same homes as Open WebUI terminals; covered by the same test |
 | Native OWUI plugin: confirmation dialog, `__oauth_token__` forwarding (`integrations/openwebui/`) | **done** — tested against the real `mcp` binary in CI |
 | OWUI plugin: DE previews and management-UI link | todo (needs streaming / management UI) |
 | Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
@@ -304,9 +316,10 @@ server sits only on the internal auth network.
 Known limits: the `terminal_session` handle of an ephemeral session created via
 the control API is kept in gateway memory only (lost on a gateway restart, which
 is acceptable for throwaway sandboxes). Open WebUI chat ids are never returned.
-The MCP user id is the OIDC `sub`, while Open WebUI's own terminal connection
-keys homes by Open WebUI's user id, so a persistent home created through MCP is
-not yet the same volume as the user's Open WebUI terminal home (open decision).
+Whoever holds the plugin key can name any Open WebUI user (with any valid
+token), exactly like the holder of the gateway API key; keep it in Open WebUI's
+valve and the Docker secret only. A caller outside Open WebUI (another MCP
+client with a Keycloak token) cannot use the MCP server while the key is set.
 
 Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
 isolated throwaway stack: ephemeral and persistent creation, the mismatch and

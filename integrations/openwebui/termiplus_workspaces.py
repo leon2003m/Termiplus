@@ -12,6 +12,9 @@ license: see the termiplus repository
 # - Forwards the signed-in user's OIDC access token (__oauth_token__) unchanged
 #   to the MCP endpoint, where oauth2-proxy verifies it. This plugin does no
 #   authentication of its own.
+# - With the plugin_key valve set, it also names the Open WebUI user
+#   (__user__["id"]), so sessions share homes with that user's Open WebUI
+#   terminals. Open WebUI fetched the token for that same user.
 # - The model only sees the fixed functions below. It can never set the
 #   confirmation flag: when the server answers "human confirmation required",
 #   the plugin asks the user in an Open WebUI dialog and only repeats the call
@@ -41,6 +44,10 @@ class Tools:
             default="http://mcp-auth:4180/",
             description="termiplus MCP endpoint behind oauth2-proxy (the mcp-auth service).",
         )
+        plugin_key: str = Field(
+            default="",
+            description="The deployment's mcp_owui_plugin_key secret. Set it so sessions belong to the Open WebUI user.",
+        )
         timeout_seconds: int = Field(
             default=150, description="Request timeout; creating a session can take a while."
         )
@@ -48,17 +55,17 @@ class Tools:
     def __init__(self):
         self.valves = self.Valves()
 
-    async def list_workspaces(self, __oauth_token__: Optional[dict] = None) -> str:
+    async def list_workspaces(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> str:
         """
         List the termiplus workspaces (sandbox profiles) the user can launch, and whether each one keeps a persistent home.
         """
-        return await self._run("list_workspaces", {}, __oauth_token__, None, None)
+        return await self._run("list_workspaces", {}, __oauth_token__, None, None, __user__)
 
-    async def list_sessions(self, __oauth_token__: Optional[dict] = None) -> str:
+    async def list_sessions(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> str:
         """
         List the user's termiplus sessions (running or stopped).
         """
-        return await self._run("list_sessions", {}, __oauth_token__, None, None)
+        return await self._run("list_sessions", {}, __oauth_token__, None, None, __user__)
 
     async def request_session(
         self,
@@ -68,6 +75,7 @@ class Tools:
         __oauth_token__: Optional[dict] = None,
         __event_call__: EventCall = None,
         __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
     ) -> str:
         """
         Start (or attach to) a termiplus sandbox session. Persistent sessions need the user's permission and an explicit confirmation from the user.
@@ -78,7 +86,7 @@ class Tools:
         args: dict = {"workspace": workspace, "persistent": bool(persistent)}
         if label:
             args["label"] = label
-        return await self._run("request_session", args, __oauth_token__, __event_call__, __event_emitter__)
+        return await self._run("request_session", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
 
     async def destroy_session(
         self,
@@ -86,34 +94,48 @@ class Tools:
         __oauth_token__: Optional[dict] = None,
         __event_call__: EventCall = None,
         __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
     ) -> str:
         """
         Remove one of the user's termiplus sessions. A persistent home volume is kept. Always asks the user for confirmation.
         :param session_id: The session_id from list_sessions.
         """
         return await self._run(
-            "destroy_session", {"session_id": session_id}, __oauth_token__, __event_call__, __event_emitter__
+            "destroy_session", {"session_id": session_id}, __oauth_token__, __event_call__, __event_emitter__, __user__
         )
 
     # --- helpers (underscore: not exposed to the model) ---
 
     async def _run(
-        self, tool: str, args: dict, oauth_token: Optional[dict], event_call: EventCall, emitter: EventEmitter
+        self,
+        tool: str,
+        args: dict,
+        oauth_token: Optional[dict],
+        event_call: EventCall,
+        emitter: EventEmitter,
+        user: Optional[dict] = None,
     ) -> str:
         token = (oauth_token or {}).get("access_token")
         if not token:
             return "termiplus: no OIDC sign-in token available. Sign in to Open WebUI with SSO and try again."
+        headers = {"Authorization": f"Bearer {token}"}
+        if self.valves.plugin_key:
+            user_id = (user or {}).get("id")
+            if not isinstance(user_id, str) or not user_id:
+                return "termiplus: Open WebUI did not provide the user id; nothing was sent."
+            headers["X-Termiplus-Owui-Key"] = self.valves.plugin_key
+            headers["X-Termiplus-Owui-User"] = user_id
         # Never forward a caller-supplied confirmation flag.
         args = {k: v for k, v in args.items() if not k.startswith("_")}
 
         await _emit(emitter, {"type": "status", "data": {"description": f"termiplus: {tool}", "done": False}})
         try:
-            resp = await self._call(tool, args, token)
+            resp = await self._call(tool, args, headers)
             err = resp.get("error")
             if err and err.get("code") == CODE_CONFIRM_REQUIRED:
                 if not await self._confirm(event_call, tool, args):
                     return f"termiplus: {tool} was cancelled by the user."
-                resp = await self._call(tool, {**args, "_confirmed": True}, token)
+                resp = await self._call(tool, {**args, "_confirmed": True}, headers)
                 err = resp.get("error")
             if err:
                 return _describe_error(tool, err)
@@ -143,7 +165,7 @@ class Tools:
         # Fail closed: only an explicit True counts as approval.
         return answer is True
 
-    async def _call(self, tool: str, args: dict, token: str) -> dict:
+    async def _call(self, tool: str, args: dict, auth_headers: dict) -> dict:
         body = json.dumps(
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}
         ).encode()
@@ -151,7 +173,7 @@ class Tools:
             self.valves.mcp_url,
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            headers={"Content-Type": "application/json", **auth_headers},
         )
 
         def do() -> dict:

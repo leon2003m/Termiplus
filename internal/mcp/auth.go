@@ -15,19 +15,47 @@ const (
 	proxyGroupsHeader = "X-Forwarded-Groups"
 )
 
+// Headers set by the Open WebUI plugin (integrations/openwebui) when homes are
+// keyed by the Open WebUI user id. oauth2-proxy passes them through unchanged,
+// so they are only trusted together with the plugin key.
+const (
+	owuiKeyHeader  = "X-Termiplus-Owui-Key"
+	owuiUserHeader = "X-Termiplus-Owui-User"
+)
+
 // ProxyHeaderAuthenticator trusts the identity an OIDC proxy forwards. termiplus
 // deliberately contains no token verification of its own: oauth2-proxy
 // validates the bearer JWT (signature via the issuer's JWKS, iss, aud, exp) and
 // forwards the subject and groups. This is only safe when the MCP server is
 // reachable exclusively through that proxy (deploy/docker-compose.mcp.yml puts
 // it on an internal network shared only with the proxy and the gateway).
-type ProxyHeaderAuthenticator struct{}
+//
+// With OWUIKey set, sessions belong to the Open WebUI user instead of the OIDC
+// subject, so they share homes with that user's Open WebUI terminals. The
+// caller must then also present the plugin key and the Open WebUI user id; the
+// token (still verified by the proxy) proves a signed-in user and carries the
+// groups. Trust is the same as the gateway's: whoever holds the Open WebUI
+// side's key may name the user, exactly as Open WebUI does towards the gateway
+// with X-User-Id.
+type ProxyHeaderAuthenticator struct {
+	OWUIKey string
+}
 
 // Authenticate implements Authenticator.
-func (ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, error) {
+func (a ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, error) {
 	users := r.Header.Values(proxyUserHeader)
 	if len(users) != 1 || !naming.UserID.MatchString(users[0]) {
 		return Principal{}, ErrUnauthenticated
+	}
+	userID := users[0]
+	if a.OWUIKey != "" {
+		keys := r.Header.Values(owuiKeyHeader)
+		owui := r.Header.Values(owuiUserHeader)
+		if len(keys) != 1 || subtle.ConstantTimeCompare([]byte(keys[0]), []byte(a.OWUIKey)) != 1 ||
+			len(owui) != 1 || !naming.UserID.MatchString(owui[0]) {
+			return Principal{}, ErrUnauthenticated
+		}
+		userID = owui[0]
 	}
 	var roles []string
 	seen := map[string]bool{}
@@ -39,7 +67,7 @@ func (ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, error)
 			}
 		}
 	}
-	return Principal{UserID: users[0], Roles: roles}, nil
+	return Principal{UserID: userID, Roles: roles}, nil
 }
 
 // StaticAuthenticator maps fixed bearer tokens to principals. It exists for

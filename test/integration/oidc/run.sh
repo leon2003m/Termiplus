@@ -8,7 +8,8 @@
 # deploy/docker-compose.mcp.yml configures it (image and flags are read from
 # the overlay, so they cannot drift) and the real mcp image (stub backend),
 # then checks that only valid tokens get through and that forged identity
-# headers are never trusted. Everything it creates is named tp-oidc-it-* and
+# headers are never trusted. The mcp server runs with the Open WebUI plugin key,
+# as the overlay deploys it, so sessions are keyed by the Open WebUI user id. Everything it creates is named tp-oidc-it-* and
 # removed on exit; it needs no gateway and touches no other containers.
 set -euo pipefail
 
@@ -43,7 +44,9 @@ mapfile -t PROXY_ARGS < <(python3 -c 'import json,sys; print("\n".join(json.load
 
 printf 'mcp-secret-it' >"$WORK/client_secret"
 openssl rand -hex 16 | tr -d '\n' >"$WORK/cookie_secret"
-chmod 644 "$WORK/client_secret" "$WORK/cookie_secret"
+OWUI_KEY="$(openssl rand -hex 32)"
+printf '%s' "$OWUI_KEY" >"$WORK/owui_key"
+chmod 644 "$WORK/client_secret" "$WORK/cookie_secret" "$WORK/owui_key"
 
 # $P-net reaches Keycloak; $P-auth is internal and shared only by proxy and
 # mcp, as ot-mcp-auth is in the overlay.
@@ -59,6 +62,8 @@ KC="http://$(docker port "$P-kc" 8080/tcp | head -1)"
 
 docker run -d --name "$P-mcp" --network "$P-auth" --network-alias mcp \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  -v "$WORK/owui_key:/run/secrets/mcp_owui_plugin_key:ro" \
+  -e MCP_OWUI_PLUGIN_KEY_FILE=/run/secrets/mcp_owui_plugin_key \
   -e MCP_AUTH=proxy -e MCP_STUB_BACKEND=1 "$MCP_IMAGE" >/dev/null
 
 for _ in $(seq 1 90); do
@@ -86,12 +91,16 @@ token() { # client secret user password
 }
 
 # rpc TOKEN TOOL ARGS_JSON [extra curl args...] -> "<http status> <rpc error code or ok> <result text>"
+# Sends the plugin key and AS (the Open WebUI user id) like the plugin does,
+# unless AS is empty.
+AS=""
 rpc() {
   local tok="$1" tool="$2" args="$3"
   shift 3
-  local auth=()
+  local auth=() owui=()
   [ -n "$tok" ] && auth=(-H "Authorization: Bearer $tok")
-  curl -s -o "$WORK/body" -w '%{http_code}' "${auth[@]}" "$@" -H 'Content-Type: application/json' \
+  [ -n "$AS" ] && owui=(-H "X-Termiplus-Owui-Key: $OWUI_KEY" -H "X-Termiplus-Owui-User: $AS")
+  curl -s -o "$WORK/body" -w '%{http_code}' "${auth[@]}" "${owui[@]}" "$@" -H 'Content-Type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}" \
     "$PROXY/" >"$WORK/code"
   python3 - "$(cat "$WORK/code")" "$WORK/body" <<'EOF'
@@ -119,6 +128,7 @@ B="$(token owui owui-secret-it bob bob-pw)"       # no groups
 O="$(token other other-secret-it alice alice-pw)" # no aud=termiplus-mcp
 SUB_A="$(cut -d. -f2 <<<"$A" | python3 -c 'import base64,json,sys; s=sys.stdin.read().strip(); print(json.loads(base64.urlsafe_b64decode(s+"="*(-len(s)%4)))["sub"])')"
 
+AS="owui-alice"
 expect "no token is rejected by the proxy" "401" "$(rpc "" list_sessions '{}')"
 expect "forged identity without a token is rejected" "401" \
   "$(rpc "" list_sessions '{}' -H "X-Forwarded-User: $SUB_A" -H 'X-Forwarded-Groups: termiplus-admin')"
@@ -135,14 +145,27 @@ expect "user without the group is forbidden" "200 -32003" \
 expect "forged X-Forwarded-Groups does not grant the role" "200 -32003" \
   "$(rpc "$B" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}' -H 'X-Forwarded-Groups: termiplus-persist')"
 expect "alice sees her session" "200 ok [{" "$(rpc "$A" list_sessions '{}')"
+AS="owui-bob"
 expect "forged X-Forwarded-User does not impersonate" "200 ok []" \
   "$(rpc "$B" list_sessions '{}' -H "X-Forwarded-User: $SUB_A")"
+
+# Open WebUI user keying: the plugin key and user id pass through oauth2-proxy.
+AS=""
+expect "valid token without the plugin key is unauthenticated" "200 -32001" "$(rpc "$A" list_sessions '{}')"
+expect "wrong plugin key is unauthenticated" "200 -32001" \
+  "$(rpc "$A" list_sessions '{}' -H 'X-Termiplus-Owui-Key: wrong' -H 'X-Termiplus-Owui-User: owui-alice')"
+expect "plugin key without a token is rejected by the proxy" "401" \
+  "$(rpc "" list_sessions '{}' -H "X-Termiplus-Owui-Key: $OWUI_KEY" -H 'X-Termiplus-Owui-User: owui-alice')"
+AS="owui-alice-2"
+expect "sessions are keyed by the Open WebUI user, not the token subject" "200 ok []" "$(rpc "$A" list_sessions '{}')"
+AS="owui-alice"
 
 # Expiry: shorten the realm's token lifespan, then outwait a fresh token.
 kc() { docker exec "$P-kc" /opt/keycloak/bin/kcadm.sh "$@"; }
 kc config credentials --server http://localhost:8080 --realm master --user admin --password admin-it >/dev/null 2>&1
 kc update realms/termiplus -s accessTokenLifespan=5
 SHORT="$(token owui owui-secret-it alice alice-pw)"
+AS="owui-alice"
 expect "short-lived token works while valid" "200 ok" "$(rpc "$SHORT" list_workspaces '{}')"
 sleep 8
 expect "expired token is rejected" "401" "$(rpc "$SHORT" list_workspaces '{}')"
