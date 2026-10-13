@@ -117,10 +117,52 @@ async function loadSessions() {
   $("sessions-section").hidden = false;
 }
 
+async function loadAdmin() {
+  const ent = await api("admin/entitlements");
+  $("entitlements").value = JSON.stringify(ent.entitlements, null, 2);
+  $("entitlements").readOnly = !ent.editable;
+  $("save-entitlements").disabled = !ent.editable;
+  try {
+    $("netpolicy").value = JSON.stringify(await api("admin/netpolicy"), null, 2);
+  } catch (e) {
+    $("netpolicy").value = "";
+    $("netpolicy").placeholder = e.message;
+    $("netpolicy").readOnly = true;
+    $("save-netpolicy").disabled = true;
+  }
+  $("admin-section").hidden = false;
+}
+
+function saver(button, field, path, what) {
+  $(button).addEventListener("click", async () => {
+    let body;
+    try {
+      body = JSON.parse($(field).value);
+    } catch (e) {
+      status(what + ": not valid JSON (" + e.message + ")", true);
+      return;
+    }
+    if (!window.confirm("Replace the " + what + " for everyone?")) return;
+    $(button).disabled = true;
+    try {
+      await api(path, { method: "PUT", body: JSON.stringify(body) });
+      status("Saved the " + what + ".");
+      await Promise.all([loadAdmin(), loadWorkspaces().catch(() => {})]);
+    } catch (e) {
+      status(what + ": " + e.message, true);
+    } finally {
+      $(button).disabled = false;
+    }
+  });
+}
+
 async function main() {
+  saver("save-entitlements", "entitlements", "admin/entitlements", "workspace entitlements");
+  saver("save-netpolicy", "netpolicy", "admin/netpolicy", "network policy");
   try {
     const me = await api("me");
     $("roles").textContent = me.roles.length ? "groups: " + me.roles.join(", ") : "";
+    if (me.roles.includes("termiplus-admin")) await loadAdmin().catch((e) => status(e.message, true));
     if (!me.linked) {
       status("Your sign-in is not linked to an Open WebUI user yet. Use the termiplus tool in Open WebUI once, then reload.", true);
       return;

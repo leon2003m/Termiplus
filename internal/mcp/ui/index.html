@@ -19,6 +19,17 @@
     <h2>Your sessions</h2>
     <ul id="sessions"></ul>
   </section>
+  <section id="admin-section" hidden>
+    <h2>Administration</h2>
+    <h3>Workspace entitlements</h3>
+    <p class="hint">Which groups may see and start which workspace. A listed workspace needs one of its groups; unlisted ones follow <code>default</code> (<code>allow</code> or <code>deny</code>).</p>
+    <textarea id="entitlements" spellcheck="false" rows="10" aria-label="Workspace entitlements (JSON)"></textarea>
+    <button id="save-entitlements" class="primary" type="button">Save entitlements</button>
+    <h3>Network policy</h3>
+    <p class="hint">Custom DNS entries and internal egress allowances for all terminals.</p>
+    <textarea id="netpolicy" spellcheck="false" rows="10" aria-label="Network policy (JSON)"></textarea>
+    <button id="save-netpolicy" class="primary" type="button">Save network policy</button>
+  </section>
 </main>
 </body>
 </html>

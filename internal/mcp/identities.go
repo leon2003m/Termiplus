@@ -88,18 +88,24 @@ func (s *IdentityStore) Record(sub, owui string) error {
 	return nil
 }
 
-// save writes the file atomically (temp file + rename). Caller holds mu.
+// save writes the file atomically. Caller holds mu.
 func (s *IdentityStore) save() error {
 	data, err := json.MarshalIndent(identityFile{Subjects: s.subjects}, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".identities-*")
+	return writeFileAtomic(s.path, append(data, '\n'))
+}
+
+// writeFileAtomic replaces path with data (mode 0600) via a temp file and
+// rename, so readers never see a partial file.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -110,5 +116,5 @@ func (s *IdentityStore) save() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.path)
+	return os.Rename(tmp.Name(), path)
 }

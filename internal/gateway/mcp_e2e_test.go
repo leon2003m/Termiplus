@@ -169,3 +169,20 @@ func TestMCPNetworkPolicyNotConfigured(t *testing.T) {
 		t.Fatalf("want forbidden, got %+v", out)
 	}
 }
+
+// Admin tools through the real gateway admin API: set, then read back.
+func TestMCPNetworkPolicyThroughGateway(t *testing.T) {
+	opt, _ := withAdmin(t)
+	h := newHarness(t, opt)
+	auth := mcp.NewStaticAuthenticator(map[string]mcp.Principal{"root-tok": {UserID: "root", Roles: []string{mcp.RoleAdmin}}})
+	c := &mcpChain{h: h, srv: mcp.NewServer(auth, mcp.NewGatewayBackend(h.gw.URL, "", "", testAdminKey), "test")}
+
+	pol := map[string]any{"dns_entries": []any{map[string]any{"name": "db.internal", "ip": "10.0.0.5"}}, "egress_allow": []any{}}
+	if out := c.call(t, "root-tok", "set_network_policy", map[string]any{"policy": pol, "_confirmed": true}); out.Error != nil || out.Result.IsError {
+		t.Fatalf("set: %+v", out)
+	}
+	out := c.call(t, "root-tok", "get_network_policy", nil)
+	if out.Error != nil || out.Result.IsError || !strings.Contains(out.Result.Content[0].Text, "db.internal") {
+		t.Fatalf("get: %+v", out)
+	}
+}

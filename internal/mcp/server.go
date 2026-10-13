@@ -3,11 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+	"sync/atomic"
 )
 
 // protocolVersion is the MCP protocol revision this server speaks.
@@ -19,7 +23,8 @@ type Server struct {
 	backend Backend
 	version string
 	tools   []tool
-	ent     *Entitlements
+	ent     atomic.Pointer[Entitlements]
+	entPath string // where set_entitlements persists; "" makes them read-only
 	ids     *IdentityStore
 }
 
@@ -33,8 +38,48 @@ func NewServer(auth Authenticator, backend Backend, version string) *Server {
 // WithEntitlements restricts which workspaces callers may see and launch.
 // Without it every workspace is open to every authenticated caller.
 func (s *Server) WithEntitlements(e *Entitlements) *Server {
-	s.ent = e
+	s.ent.Store(e)
 	return s
+}
+
+// WithEntitlementsFile loads the entitlements from path and lets admins change
+// them with set_entitlements, which rewrites the file. A missing file means
+// every workspace is open until an admin sets entitlements.
+func (s *Server) WithEntitlementsFile(path string) (*Server, error) {
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		s.ent.Store(nil)
+	case err != nil:
+		return nil, err
+	default:
+		e, err := ParseEntitlements(data)
+		if err != nil {
+			return nil, err
+		}
+		s.ent.Store(e)
+	}
+	s.entPath = path
+	return s, nil
+}
+
+func (s *Server) entitlements() *Entitlements { return s.ent.Load() }
+
+// setEntitlements validates raw like the file, persists it atomically and
+// only then applies it.
+func (s *Server) setEntitlements(raw []byte) (*Entitlements, error) {
+	if s.entPath == "" {
+		return nil, errors.New("entitlements are not editable on this server (no MCP_ENTITLEMENTS_FILE)")
+	}
+	e, err := ParseEntitlements(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeFileAtomic(s.entPath, append(e.marshal(), '\n')); err != nil {
+		return nil, fmt.Errorf("save entitlements: %w", err)
+	}
+	s.ent.Store(e)
+	return e, nil
 }
 
 // WithIdentities makes the server remember which Open WebUI user each OIDC
@@ -298,7 +343,7 @@ func (s *Server) buildTools() []tool {
 				if err != nil {
 					return nil, err
 				}
-				return s.ent.filter(p, all), nil
+				return s.entitlements().filter(p, all), nil
 			},
 		},
 		{
@@ -306,7 +351,7 @@ func (s *Server) buildTools() []tool {
 			description: "Provision (or attach to) a sandbox session and return its access handle. A persistent session requires the termiplus-persist role and explicit human confirmation.",
 			inputSchema: `{"type":"object","properties":{"workspace":{"type":"string"},"persistent":{"type":"boolean","default":false},"label":{"type":"string"}},"required":["workspace"],"additionalProperties":true}`,
 			gate: func(p Principal, args map[string]any) (bool, error) {
-				if ws := argString(args, "workspace"); !s.ent.Allowed(p, ws) {
+				if ws := argString(args, "workspace"); !s.entitlements().Allowed(p, ws) {
 					return false, fmt.Errorf("you are not entitled to the workspace %q", ws)
 				}
 				if argBool(args, "persistent") {
@@ -353,16 +398,50 @@ func (s *Server) buildTools() []tool {
 			},
 		},
 		{
+			name:        "get_network_policy",
+			description: "Show the custom DNS entries and internal egress whitelist (admin).",
+			inputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+			readOnly:    true,
+			gate:        adminOnly("network policy", false),
+			handle: func(ctx context.Context, p Principal, _ map[string]any) (any, error) {
+				return s.backend.GetNetworkPolicy(ctx, p)
+			},
+		},
+		{
+			name:        "get_entitlements",
+			description: "Show which groups may use which workspace (admin).",
+			inputSchema: `{"type":"object","properties":{},"additionalProperties":false}`,
+			readOnly:    true,
+			gate:        adminOnly("entitlements", false),
+			handle: func(context.Context, Principal, map[string]any) (any, error) {
+				e := s.entitlements()
+				return map[string]any{"entitlements": json.RawMessage(e.marshal()), "editable": s.entPath != ""}, nil
+			},
+		},
+		{
+			name:        "set_entitlements",
+			description: "Replace which groups may use which workspace (admin). Security-sensitive: requires the termiplus-admin role and explicit human confirmation.",
+			inputSchema: `{"type":"object","properties":{"entitlements":{"type":"object"}},"required":["entitlements"],"additionalProperties":true}`,
+			destructive: true,
+			gate:        adminOnly("entitlements", true),
+			handle: func(_ context.Context, _ Principal, args map[string]any) (any, error) {
+				raw, err := json.Marshal(args["entitlements"])
+				if err != nil {
+					return nil, err
+				}
+				e, err := s.setEntitlements(raw)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"entitlements": json.RawMessage(e.marshal())}, nil
+			},
+		},
+		{
 			name:        "set_network_policy",
 			description: "Set custom DNS entries and internal egress whitelist (admin). Security-sensitive: requires the termiplus-admin role and explicit human confirmation.",
 			inputSchema: `{"type":"object","properties":{"policy":{"type":"object"}},"required":["policy"],"additionalProperties":true}`,
 			destructive: true,
-			gate: func(p Principal, _ map[string]any) (bool, error) {
-				if !p.HasRole(RoleAdmin) {
-					return false, fmt.Errorf("network policy requires the %s role", RoleAdmin)
-				}
-				return true, nil
-			},
+			gate:        adminOnly("network policy", true),
 			handle: func(ctx context.Context, p Principal, args map[string]any) (any, error) {
 				pol, err := json.Marshal(args["policy"])
 				if err != nil {
@@ -374,5 +453,16 @@ func (s *Server) buildTools() []tool {
 				return map[string]any{"applied": true}, nil
 			},
 		},
+	}
+}
+
+// adminOnly gates a tool on the admin role; confirm marks it as needing an
+// explicit human confirmation.
+func adminOnly(what string, confirm bool) func(Principal, map[string]any) (bool, error) {
+	return func(p Principal, _ map[string]any) (bool, error) {
+		if !p.HasRole(RoleAdmin) {
+			return false, fmt.Errorf("%s requires the %s role", what, RoleAdmin)
+		}
+		return confirm, nil
 	}
 }

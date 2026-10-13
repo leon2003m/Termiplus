@@ -7,10 +7,8 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -70,18 +68,12 @@ func main() {
 	}
 
 	srv := mcp.NewServer(auth, backend, version)
-	entDesc := "all workspaces open to every signed-in user"
+	entDesc := "all workspaces open to every signed-in user (no MCP_ENTITLEMENTS_FILE)"
 	if f := config.Get("MCP_ENTITLEMENTS_FILE", ""); f != "" {
-		data, err := os.ReadFile(f)
-		if err != nil {
+		if _, err := srv.WithEntitlementsFile(f); err != nil {
 			log.Fatalf("MCP_ENTITLEMENTS_FILE: %v", err)
 		}
-		ent, err := mcp.ParseEntitlements(data)
-		if err != nil {
-			log.Fatal(err)
-		}
-		srv.WithEntitlements(ent)
-		entDesc = fmt.Sprintf("entitlements from %s (%d workspaces, default %s)", f, len(ent.Workspaces), ent.Default)
+		entDesc = "entitlements from " + f + " (admins can change them)"
 	}
 
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin

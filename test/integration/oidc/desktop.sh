@@ -193,6 +193,8 @@ out="$(ORIGIN=https://evil.example write "$JAR" POST api/sessions '{"workspace":
 check "UI: a cross-site write is refused" "$(endswith "$out" 403)" "$out"
 sessions="$(ui "$JAR" GET api/sessions)"
 check "UI: alice lists her two sessions" "$([ "$(grep -o session_id <<<"$sessions" | wc -l)" = 2 ] && echo 0 || echo 1)" "$sessions"
+out="$(ui "$JAR" GET api/admin/entitlements)"
+check "UI: admin pages need the admin group" "$(endswith "$out" 403)" "$out"
 out="$(browser -w ' %{http_code}' "$PUBLIC/ui/api/sessions")"
 check "UI: not signed in, the API is not reachable" "$(endswith "$out" 302)" "$out"
 

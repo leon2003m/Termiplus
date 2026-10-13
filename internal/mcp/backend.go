@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -18,6 +19,7 @@ type StubBackend struct {
 
 	mu       sync.Mutex
 	sessions map[string]Session // by id
+	netpol   []byte
 }
 
 // NewStubBackend returns a stub with a fixed set of workspaces. gatewayBase is
@@ -97,9 +99,20 @@ func (b *StubBackend) DestroySession(_ context.Context, p Principal, id string) 
 	return nil
 }
 
-func (b *StubBackend) SetNetworkPolicy(_ context.Context, _ Principal, _ []byte) error {
-	// Wired to the gateway admin API in a later spike.
+func (b *StubBackend) SetNetworkPolicy(_ context.Context, _ Principal, policy []byte) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.netpol = append([]byte(nil), policy...)
 	return nil
+}
+
+func (b *StubBackend) GetNetworkPolicy(_ context.Context, _ Principal) (json.RawMessage, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.netpol == nil {
+		return json.RawMessage(`{"dns_entries":[],"egress_allow":[]}`), nil
+	}
+	return append(json.RawMessage(nil), b.netpol...), nil
 }
 
 func randomID() (string, error) {

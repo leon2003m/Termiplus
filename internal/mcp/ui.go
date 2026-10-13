@@ -80,6 +80,12 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		uiJSON(w, http.StatusOK, map[string]any{"linked": known, "roles": nonNil(p.Roles)})
 		return
 	}
+	// Admin pages manage the deployment, not the admin's own sessions, so they
+	// need the role but no Open WebUI link.
+	if what, ok := strings.CutPrefix(rest, "admin/"); ok {
+		u.admin(w, r, p, what)
+		return
+	}
 	if !known {
 		uiError(w, http.StatusConflict, "your sign-in is not linked to an Open WebUI user yet: use the termiplus tool in Open WebUI once")
 		return
@@ -112,6 +118,32 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		})
 	default:
 		uiError(w, http.StatusNotFound, "not found")
+	}
+}
+
+// admin serves admin/netpolicy and admin/entitlements (GET shows, PUT
+// replaces). The tools check the admin role.
+func (u *UI) admin(w http.ResponseWriter, r *http.Request, p Principal, what string) {
+	tools := map[string][3]string{ // get tool, set tool, set argument
+		"netpolicy":    {"get_network_policy", "set_network_policy", "policy"},
+		"entitlements": {"get_entitlements", "set_entitlements", "entitlements"},
+	}
+	t, ok := tools[what]
+	switch {
+	case !ok:
+		uiError(w, http.StatusNotFound, "not found")
+	case r.Method == http.MethodGet:
+		u.run(w, r, p, t[0], nil)
+	case r.Method == http.MethodPut:
+		var body map[string]any
+		dec := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+		if err := dec.Decode(&body); err != nil || body == nil {
+			uiError(w, http.StatusBadRequest, "a JSON object is required")
+			return
+		}
+		u.run(w, r, p, t[1], map[string]any{t[2]: body, "_confirmed": true})
+	default:
+		uiError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 

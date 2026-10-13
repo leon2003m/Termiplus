@@ -32,9 +32,12 @@
 #   - deploy/mcp-data writable by uid 65534 (the MCP server remembers which
 #     Open WebUI user each Keycloak subject belongs to, for the management UI):
 #       mkdir -p deploy/mcp-data && sudo chown 65534:65534 deploy/mcp-data
-#   - deploy/entitlements.json: which groups may see and launch which workspace
-#     (docs/mcp.md, "Workspace entitlements"). The shipped file opens every
-#     workspace to every signed-in user.
+#   - Workspace entitlements (which groups may see and launch which workspace,
+#     docs/mcp.md) live in deploy/mcp-data/entitlements.json and are edited by
+#     admins in the management UI or with set_entitlements. Without the file
+#     every workspace is open to every signed-in user; to start from a file:
+#       sudo install -o 65534 -g 65534 -m 600 deploy/entitlements.example.json \
+#         deploy/mcp-data/entitlements.json
 name: termiplus
 
 services:
@@ -92,14 +95,12 @@ services:
       GATEWAY_URL: http://gateway:8080
       GATEWAY_PUBLIC_URL: ${MCP_GATEWAY_PUBLIC_URL:-http://gateway:8080}
       CONTROL_API_KEY_FILE: /run/secrets/control_api_key
-      MCP_ENTITLEMENTS_FILE: /etc/termiplus/entitlements.json
+      MCP_ENTITLEMENTS_FILE: /data/entitlements.json
       MCP_OWUI_PLUGIN_KEY_FILE: /run/secrets/mcp_owui_plugin_key
       MCP_IDENTITY_FILE: /data/identities.json
     volumes:
       - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]
-    configs:
-      - { source: mcp_entitlements, target: /etc/termiplus/entitlements.json }
     networks: [ot-mcp, ot-mcp-auth]
     mem_limit: 128m
     cpus: 0.5
@@ -117,9 +118,6 @@ networks:
     internal: true
   ot-mcp-auth:
     internal: true
-
-configs:
-  mcp_entitlements: { file: ./entitlements.json }
 
 secrets:
   control_api_key: { file: ./secrets/control_api_key }

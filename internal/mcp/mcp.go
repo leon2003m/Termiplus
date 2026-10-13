@@ -12,6 +12,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 )
@@ -94,6 +95,7 @@ type Backend interface {
 	ListSessions(ctx context.Context, p Principal) ([]Session, error)
 	DestroySession(ctx context.Context, p Principal, id string) error
 	SetNetworkPolicy(ctx context.Context, p Principal, policy []byte) error
+	GetNetworkPolicy(ctx context.Context, p Principal) (json.RawMessage, error)
 }
 
 // Role names used for RBAC entitlement (claims from the OIDC token).

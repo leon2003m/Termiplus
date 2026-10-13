@@ -141,6 +141,22 @@ func (b *GatewayBackend) SetNetworkPolicy(ctx context.Context, _ Principal, poli
 	return b.send(req, nil)
 }
 
+func (b *GatewayBackend) GetNetworkPolicy(ctx context.Context, _ Principal) (json.RawMessage, error) {
+	if b.adminKey == "" {
+		return nil, errors.New("network policy administration is not configured on this server")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.base+"/admin/netpolicy", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Admin-Key", b.adminKey)
+	var out json.RawMessage
+	if err := b.send(req, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (b *GatewayBackend) session(s gwSession, userID string) Session {
 	out := Session{
 		ID:              s.ID,

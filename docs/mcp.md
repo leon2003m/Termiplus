@@ -246,7 +246,8 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Desktop streams: policy `"desktop": true`, gateway `/stream/<container>/`, per-container password, `stream_url` handle, browser sign-in (`deploy/docker-compose.desktop.yml`) | **done (experimental)** — gateway tests incl. a real KasmVNC; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
-| Management UI, admin part (entitlements, network policy) and OWUI link/embed | todo |
+| Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
+| OWUI link/embed for the management UI | todo |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
 | Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
 
@@ -339,7 +340,11 @@ identity is the Open WebUI user id). The desktop image is built and smoke-tested
 
 Which group may see and launch which workspace is configured in the MCP server,
 not in the gateway (the gateway trusts the MCP server's checks).
-`deploy/entitlements.json` is mounted as `MCP_ENTITLEMENTS_FILE`:
+They live in `MCP_ENTITLEMENTS_FILE` (`deploy/mcp-data/entitlements.json` in
+the overlay) and admins edit them in the management UI or with the
+`set_entitlements` tool (admin role + confirmation), which validates, writes
+the file atomically and applies it at once. Example
+(`deploy/entitlements.example.json`):
 
 ```json
 {
@@ -356,10 +361,9 @@ claim, like the roles). An unlisted one follows `default` (`allow` or `deny`).
 `termiplus-admin` is not an implicit entitlement. `list_workspaces` only shows
 permitted workspaces and `request_session` refuses others before any
 confirmation is asked for. The file is parsed strictly: an unknown field, a
-missing `default` or an empty group list stops the server instead of opening a
-workspace by accident. The shipped file is `{"default": "allow"}`; without
-`MCP_ENTITLEMENTS_FILE` every workspace is open to every signed-in user. Changes
-take effect on restart.
+missing `default` or an empty group list stops the server (or is refused by
+`set_entitlements`) instead of opening a workspace by accident. While the file
+does not exist, every workspace is open to every signed-in user.
 
 ### Authentication (oauth2-proxy)
 

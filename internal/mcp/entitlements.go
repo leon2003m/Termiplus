@@ -79,3 +79,16 @@ func (e *Entitlements) filter(p Principal, all []Workspace) []Workspace {
 	}
 	return out
 }
+
+// marshal renders e as the file format; nil renders the allow-all default.
+func (e *Entitlements) marshal() []byte {
+	out := Entitlements{Default: "allow", Workspaces: map[string][]string{}}
+	if e != nil {
+		out.Default = e.Default
+		for ws, g := range e.Workspaces {
+			out.Workspaces[ws] = g
+		}
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return b
+}

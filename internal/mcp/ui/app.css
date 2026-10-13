@@ -20,3 +20,6 @@ button:disabled { opacity: .5; cursor: default; }
 input.secret { font: 12px ui-monospace, monospace; width: 100%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--fg); }
 #status { min-height: 1.4em; color: var(--muted); }
 #status.error { color: var(--danger); }
+h3 { font-size: 14px; margin: 16px 0 4px; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+textarea { display: block; width: 100%; font: 12px/1.4 ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); margin-bottom: 8px; }
