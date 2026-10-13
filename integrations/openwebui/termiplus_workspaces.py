@@ -79,7 +79,7 @@ class Tools:
     async def request_session(
         self,
         workspace: str,
-        persistent: bool = False,
+        persistent: Optional[bool] = None,
         label: str = "",
         __oauth_token__: Optional[dict] = None,
         __event_call__: EventCall = None,
@@ -89,10 +89,12 @@ class Tools:
         """
         Start (or attach to) a termiplus sandbox session. Persistent sessions need the user's permission and an explicit confirmation from the user.
         :param workspace: Name of the workspace from list_workspaces.
-        :param persistent: True only for a workspace that keeps a persistent home.
+        :param persistent: Leave out to use the workspace's own setting.
         :param label: Optional short label for the session.
         """
-        args: dict = {"workspace": workspace, "persistent": bool(persistent)}
+        args: dict = {"workspace": workspace}
+        if persistent is not None:
+            args["persistent"] = bool(persistent)
         if label:
             args["label"] = label
         return await self._run("request_session", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
@@ -195,11 +197,20 @@ class Tools:
 
         await _emit(emitter, {"type": "status", "data": {"description": f"termiplus: {tool}", "done": False}})
         try:
+            if tool == "request_session" and "persistent" not in args:
+                # Models rarely know a workspace's persistence; take it from the
+                # workspace so the server still applies its role check and the
+                # confirmation for persistent sessions.
+                args = {**args, "persistent": await self._workspace_persistent(args.get("workspace"), headers)}
             resp = await self._call(tool, args, headers)
             err = resp.get("error")
             if err and err.get("code") == CODE_CONFIRM_REQUIRED:
                 if not await self._confirm(event_call, tool, args):
-                    return f"termiplus: {tool} was cancelled by the user."
+                    # Without this, models retry the call in a loop.
+                    return (
+                        f"termiplus: {tool} was cancelled by the user. Do not call it again; "
+                        "tell the user it was cancelled and wait for them to ask again."
+                    )
                 resp = await self._call(tool, {**args, "_confirmed": True}, headers)
                 err = resp.get("error")
             if err:
@@ -229,6 +240,20 @@ class Tools:
         )
         # Fail closed: only an explicit True counts as approval.
         return answer is True
+
+    async def _workspace_persistent(self, workspace: Any, headers: dict) -> bool:
+        """The persistent flag of workspace, False when it is not listed (the server then rejects or allows it)."""
+        resp = await self._call("list_workspaces", {}, headers)
+        result = resp.get("result") or {}
+        text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+        try:
+            listed = json.loads(text) if text else []
+        except ValueError:
+            return False
+        for ws in listed if isinstance(listed, list) else []:
+            if isinstance(ws, dict) and ws.get("name") == workspace:
+                return ws.get("persistent") is True
+        return False
 
     async def _call(self, tool: str, args: dict, auth_headers: dict) -> dict:
         body = json.dumps(

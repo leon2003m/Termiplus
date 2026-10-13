@@ -152,6 +152,23 @@ class PluginAgainstServer(unittest.TestCase):
         self.assertEqual(rec.calls[0]["type"], "confirmation")
         self.assertIn('"persistent":true', out)
 
+    def test_persistence_comes_from_the_workspace(self):
+        # Models leave out "persistent": a persistent workspace still asks first.
+        rec = Recorder(True)
+        out = self.run_async(
+            self.tools().request_session("desk", label="implicit", __oauth_token__=TOKEN, __event_call__=rec)
+        )
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn('"persistent":true', out)
+        rec = Recorder(False)
+        out = self.run_async(self.tools().request_session("desk", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn("Do not call it again", out)
+        rec = Recorder(False)
+        out = self.run_async(self.tools().request_session("default", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertIn('"session_id"', out)
+        self.assertEqual(rec.calls, [])
+
     def test_declined_or_unclear_answers_cancel(self):
         for answer in (False, None, "yes", {"confirmed": True}, 1):
             with self.subTest(answer=answer):
