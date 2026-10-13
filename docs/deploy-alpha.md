@@ -54,6 +54,13 @@ docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
 sudo deploy/firewall.sh   # as for the base stack
 ```
 
+If `mcp-auth` or `desk-auth` start before Keycloak has finished its first boot,
+their OIDC discovery fails ("Bootstrap in progress") and they restart until it
+answers; `docker restart` them to skip the back-off. Both run with
+`--reverse-proxy`, so they trust `X-Forwarded-*` from any client that can reach
+them: keep them reachable only from your TLS proxy (they listen on 127.0.0.1
+and the Open WebUI network).
+
 ## 5. Open WebUI
 
 Set the environment printed by `setup-alpha.sh` (OIDC client `owui`,
