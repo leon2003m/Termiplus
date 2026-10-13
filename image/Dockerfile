@@ -55,8 +55,15 @@ RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/st
 
 USER 1000:1000
 WORKDIR /home/user
+# USER names the account in the tool description Open Terminal gives the
+# model. Commands wait up to 60 s so their output comes back with run_command:
+# without it every call returns "running" and models have to poll, which small
+# ones do badly.
 ENV HOME=/home/user \
-    SHELL=/usr/local/libexec/termiplus/bash
+    USER=user \
+    SHELL=/usr/local/libexec/termiplus/bash \
+    OPEN_TERMINAL_EXECUTE_TIMEOUT=60 \
+    OPEN_TERMINAL_EXECUTE_DESCRIPTION="Debian container of your own; nothing here affects the host. sudo works without a password (e.g. sudo apt-get install -y PACKAGE). Waits up to 60 s and returns the output; if status is still running, use get_process_status."
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

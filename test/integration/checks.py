@@ -125,6 +125,15 @@ def main_checks():
     out = run(BOB, f"curl -s -m 5 -o /dev/null -w '%{{http_code}}' http://{alice_host}:8000/health || echo blocked")
     check("bob cannot reach alice's container", "200" not in out, out)
 
+    print("-- what the model sees")
+    status, body = call("POST", "/execute", ALICE, None, {"command": "echo inline-42"})
+    data = json.loads(body) if status == 200 else {}
+    out = "".join(o.get("data", "") for o in data.get("output", []))
+    check("run_command returns output without polling", data.get("status") == "done" and "inline-42" in out, body[:200])
+    status, body = call("GET", "/openapi.json", ALICE)
+    desc = json.loads(body)["paths"]["/execute"]["post"]["description"] if status == 200 else ""
+    check("tool description names the user and sudo", "as user 'user'" in desc and "sudo works" in desc, desc[:300])
+
     print("-- egress")
     out = run(ALICE, "curl -s -m 5 -o /dev/null -w '%{http_code}' http://10.0.0.1 || echo blocked")
     check("private range 10.0.0.0/8 blocked", "blocked" in out or out.startswith("000"), out)
