@@ -58,6 +58,16 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, streamPathPrefix+session+"/", http.StatusFound)
 		return
 	}
+	if page := strings.TrimPrefix(r.URL.Path, streamPathPrefix+session+"/"); r.Method == http.MethodGet &&
+		(page == "" || page == "index.html" || page == "vnc.html") && !r.URL.Query().Has("path") {
+		// KasmVNC's client opens its WebSocket at /<path> of the host, default
+		// /websockify, which is outside this session; its "path" URL parameter
+		// moves it here.
+		q := r.URL.Query()
+		q.Set("path", strings.TrimPrefix(streamPathPrefix, "/")+session+"/websockify")
+		http.Redirect(w, r, r.URL.Path+"?"+q.Encode(), http.StatusFound)
+		return
+	}
 	if isUpgrade(r) && !sameOrigin(r) {
 		forwardError(w, http.StatusForbidden, "Cross-origin WebSocket refused.")
 		return

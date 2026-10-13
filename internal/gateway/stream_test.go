@@ -249,16 +249,21 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 		return resp.StatusCode, resp.Header
 	}
 	path := "/stream/" + s.ID + "/"
-	if code, hdr := get("kc-alice", path, map[string]string{"X-User-Id": "bob"}); code != http.StatusOK || hdr.Get("Www-Authenticate") != "" {
+	// The page gets KasmVNC's WebSocket path, which defaults to /websockify.
+	wantLoc := path + "?path=stream%2F" + s.ID + "%2Fwebsockify"
+	if code, hdr := get("kc-alice", path, nil); code != http.StatusFound || hdr.Get("Location") != wantLoc {
+		t.Fatalf("desktop page without path: %d %q, want %q", code, hdr.Get("Location"), wantLoc)
+	}
+	if code, hdr := get("kc-alice", wantLoc, map[string]string{"X-User-Id": "bob"}); code != http.StatusOK || hdr.Get("Www-Authenticate") != "" {
 		t.Fatalf("alice's desktop: %d %v", code, hdr)
 	}
-	if code, _ := get("kc-alice", "/stream/"+bob.ID+"/", nil); code != http.StatusNotFound {
+	if code, _ := get("kc-alice", "/stream/"+bob.ID+"/app.js", nil); code != http.StatusNotFound {
 		t.Fatalf("bob's desktop for alice: %d", code)
 	}
-	if code, _ := get("kc-carol", path, nil); code != http.StatusForbidden {
+	if code, _ := get("kc-carol", wantLoc, nil); code != http.StatusForbidden {
 		t.Fatalf("unlinked user: %d", code)
 	}
-	if code, _ := get("", path, nil); code != http.StatusUnauthorized {
+	if code, _ := get("", wantLoc, nil); code != http.StatusUnauthorized {
 		t.Fatalf("not signed in: %d", code)
 	}
 	if code, hdr := get("kc-alice", strings.TrimSuffix(path, "/"), nil); code != http.StatusFound || hdr.Get("Location") != path {
