@@ -20,6 +20,7 @@ import (
 type GatewayBackend struct {
 	base       string // internal gateway URL, e.g. http://gateway:8080
 	publicBase string // externally reachable gateway URL for access handles
+	streamBase string // browser-facing URL of the desktop stream (sign-in proxy)
 	controlKey string
 	adminKey   string // optional; empty disables set_network_policy
 	client     *http.Client
@@ -34,6 +35,7 @@ func NewGatewayBackend(base, publicBase, controlKey, adminKey string) *GatewayBa
 	return &GatewayBackend{
 		base:       strings.TrimSuffix(base, "/"),
 		publicBase: strings.TrimSuffix(publicBase, "/"),
+		streamBase: strings.TrimSuffix(publicBase, "/"),
 		controlKey: controlKey,
 		adminKey:   adminKey,
 		// Creating a session waits for the terminal to become ready.
@@ -41,11 +43,21 @@ func NewGatewayBackend(base, publicBase, controlKey, adminKey string) *GatewayBa
 	}
 }
 
+// WithStreamBase sets the browser-facing base URL for desktop stream handles
+// (the desktop sign-in proxy). Defaults to the public gateway URL.
+func (b *GatewayBackend) WithStreamBase(u string) *GatewayBackend {
+	if u != "" {
+		b.streamBase = strings.TrimSuffix(u, "/")
+	}
+	return b
+}
+
 // gwWorkspace / gwSession mirror the gateway control API's JSON.
 type gwWorkspace struct {
 	Name       string `json:"name"`
 	Runtime    string `json:"runtime"`
 	Persistent bool   `json:"persistent"`
+	Desktop    bool   `json:"desktop"`
 }
 
 type gwSession struct {
@@ -55,6 +67,8 @@ type gwSession struct {
 	Running         bool   `json:"running"`
 	TerminalPath    string `json:"terminal_path"`
 	TerminalSession string `json:"terminal_session"`
+	StreamPath      string `json:"stream_path"`
+	StreamPassword  string `json:"stream_password"`
 }
 
 func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Workspace, error) {
@@ -64,7 +78,7 @@ func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Wor
 	}
 	out := make([]Workspace, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, Workspace{Name: w.Name, Description: "runtime " + w.Runtime, Persistent: w.Persistent})
+		out = append(out, Workspace{Name: w.Name, Description: "runtime " + w.Runtime, Persistent: w.Persistent, Desktop: w.Desktop})
 	}
 	return out, nil
 }
@@ -128,7 +142,7 @@ func (b *GatewayBackend) SetNetworkPolicy(ctx context.Context, _ Principal, poli
 }
 
 func (b *GatewayBackend) session(s gwSession, userID string) Session {
-	return Session{
+	out := Session{
 		ID:              s.ID,
 		Workspace:       s.Workspace,
 		UserID:          userID,
@@ -137,6 +151,11 @@ func (b *GatewayBackend) session(s gwSession, userID string) Session {
 		TerminalURL:     b.publicBase + s.TerminalPath,
 		TerminalSession: s.TerminalSession,
 	}
+	if s.StreamPath != "" {
+		out.StreamURL = b.streamBase + s.StreamPath
+		out.StreamPassword = s.StreamPassword
+	}
+	return out
 }
 
 // do calls /control/v1/<path> as userID (empty for user-less endpoints).

@@ -1,0 +1,91 @@
+# Opt-in overlay: browser access to desktop workspaces (EXPERIMENTAL, alpha).
+# Use together with the MCP overlay:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
+#     -f docker-compose.desktop.yml up -d
+#
+# Browsers sign in through oauth2-proxy (desk-auth, OIDC authorization code
+# flow with a session cookie) before they reach the gateway's /stream/ path;
+# nothing else of the gateway is exposed here. KasmVNC in the container then
+# asks for the per-container password, which the MCP server hands only to the
+# session's owner (the Open WebUI plugin shows it to the user, not the model).
+# The gateway refuses cross-origin WebSockets to the stream.
+#
+# Prerequisites (in addition to the MCP overlay's):
+#   - TERMINAL_IMAGE set to the desktop image (image/desktop), and a policy
+#     with "desktop": true in deploy/policies.json, e.g.
+#       "desk": { "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 2,
+#                 "pids": 1024, "home": "default", "desktop": true }
+#   - DESKTOP_PUBLIC_URL: the HTTPS URL browsers use, e.g.
+#     https://desk.example.com, terminated by your TLS reverse proxy in front
+#     of desk-auth (127.0.0.1:${DESKTOP_PORT:-4181}). Also set it as
+#     STREAM_PUBLIC_URL for the MCP server (below).
+#   - An OIDC client (default id "termiplus-desktop", standard flow on,
+#     redirect URI ${DESKTOP_PUBLIC_URL}/oauth2/callback).
+#   - deploy/secrets/desk_oidc_client_secret: that client's secret (no newline).
+#   - deploy/secrets/desk_oidc_cookie_secret: openssl rand -hex 16 (no newline).
+name: termiplus
+
+services:
+  desk-auth:
+    # oauth2-proxy v7.15.5 (same image as mcp-auth)
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on:
+      gateway: { condition: service_healthy }
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${DESKTOP_OIDC_CLIENT_ID:-termiplus-desktop}
+      - --client-secret-file=/run/secrets/desk_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/desk_oidc_cookie_secret
+      - --redirect-url=${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL}/oauth2/callback
+      - --code-challenge-method=S256
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-name=_termiplus_desk
+      - --email-domain=*
+      - --skip-provider-button=true
+      # Behind the TLS reverse proxy; trust its X-Forwarded-* headers.
+      - --reverse-proxy=true
+      # Only the stream path; the rest of the gateway stays unreachable.
+      - --upstream=http://gateway:8080/stream/
+      # The browser's KasmVNC basic auth must reach the container unchanged,
+      # and no token or identity of ours is handed to it.
+      - --pass-basic-auth=false
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --set-xauthrequest=false
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [desk_oidc_client_secret, desk_oidc_cookie_secret]
+    ports:
+      - "127.0.0.1:${DESKTOP_PORT:-4181}:4180"
+    networks: [ot-desk, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  mcp:
+    environment:
+      STREAM_PUBLIC_URL: ${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL}
+
+  gateway:
+    networks:
+      ot-desk: {}
+
+networks:
+  # desk-auth <-> gateway only. desk-auth also joins owui to reach the issuer.
+  ot-desk:
+    internal: true
+
+secrets:
+  desk_oidc_client_secret: { file: ./secrets/desk_oidc_client_secret }
+  desk_oidc_cookie_secret: { file: ./secrets/desk_oidc_cookie_secret }

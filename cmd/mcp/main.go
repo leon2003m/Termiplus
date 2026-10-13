@@ -32,7 +32,8 @@ func main() {
 	var backend mcp.Backend
 	switch controlKey := config.Secret("CONTROL_API_KEY", false); {
 	case controlKey != "":
-		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false))
+		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false)).
+			WithStreamBase(config.Get("STREAM_PUBLIC_URL", ""))
 	case config.Get("MCP_STUB_BACKEND", "") == "1":
 		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
 		backend = mcp.NewStubBackend(publicURL)

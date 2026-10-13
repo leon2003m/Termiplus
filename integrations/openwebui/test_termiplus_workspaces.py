@@ -34,6 +34,24 @@ if "pydantic" not in sys.modules:
         stub.Field = lambda default=None, **_: default
         sys.modules["pydantic"] = stub
 
+if "fastapi" not in sys.modules:
+    try:
+        import fastapi.responses  # noqa: F401  (Open WebUI ships it)
+    except ImportError:  # minimal stand-in with the attributes Open WebUI reads
+        fastapi = types.ModuleType("fastapi")
+        responses = types.ModuleType("fastapi.responses")
+
+        class HTMLResponse:
+            def __init__(self, content="", status_code=200, headers=None):
+                self.body = content.encode()
+                self.status_code = status_code
+                self.headers = dict(headers or {})
+
+        responses.HTMLResponse = HTMLResponse
+        fastapi.responses = responses
+        sys.modules["fastapi"] = fastapi
+        sys.modules["fastapi.responses"] = responses
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import termiplus_workspaces as plugin  # noqa: E402
 
@@ -188,11 +206,14 @@ class PluginAgainstServer(unittest.TestCase):
 
 class HeaderRecorder(http.server.BaseHTTPRequestHandler):
     seen: list = []
+    reply = "[]"
 
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", 0)))
         HeaderRecorder.seen.append(dict(self.headers))
-        body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "[]"}]}}).encode()
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": HeaderRecorder.reply}]}}
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -219,6 +240,7 @@ class OpenWebUIUserHeaders(unittest.TestCase):
 
     def setUp(self):
         HeaderRecorder.seen = []
+        HeaderRecorder.reply = "[]"
 
     def tools(self, key):
         t = plugin.Tools()
@@ -246,6 +268,50 @@ class OpenWebUIUserHeaders(unittest.TestCase):
                 out = asyncio.run(self.tools("k" * 64).list_sessions(__oauth_token__=TOKEN, __user__=user))
                 self.assertIn("did not provide the user id", out)
         self.assertEqual(HeaderRecorder.seen, [])
+
+
+PW = "f" * 64
+DESK = {"session_id": "ot-u-1-desk", "workspace": "desk", "stream_url": "https://desk.example/stream/ot-u-1-desk/",
+        "stream_password": PW}
+
+
+class StreamPasswordStaysWithTheUser(unittest.TestCase):
+    def test_password_only_in_embed(self):
+        for reply in (DESK, [DESK, {"session_id": "t", "workspace": "default"}]):
+            with self.subTest(reply=reply):
+                out = plugin._hide_stream_passwords(json.dumps(reply))
+                self.assertIsInstance(out, tuple)
+                embed, context = out
+                self.assertNotIn(PW, context)
+                self.assertIn("ot-u-1-desk", context)
+                self.assertIn(PW, embed.body.decode())
+                self.assertIn("https://desk.example/stream/ot-u-1-desk/", embed.body.decode())
+                self.assertIn("inline", embed.headers["Content-Disposition"])
+
+    def test_without_password_text_is_unchanged(self):
+        for text in ("[]", '{"session_id":"t"}', "not json", '"x"'):
+            self.assertEqual(plugin._hide_stream_passwords(text), text)
+
+    def test_values_are_escaped(self):
+        evil = dict(DESK, session_id="<script>x</script>", stream_password="'><img src=x>")
+        embed, _ = plugin._hide_stream_passwords(json.dumps(evil))
+        page = embed.body.decode()
+        self.assertNotIn("<script>x", page)
+        self.assertNotIn("'><img", page)
+
+    def test_non_http_link_is_not_rendered(self):
+        embed, context = plugin._hide_stream_passwords(json.dumps(dict(DESK, stream_url="javascript:alert(1)")))
+        self.assertNotIn("javascript:", embed.body.decode())
+        self.assertNotIn(PW, embed.body.decode() + context)
+
+
+class StreamPasswordThroughRun(OpenWebUIUserHeaders):
+    def test_run_returns_embed(self):
+        HeaderRecorder.reply = json.dumps([DESK])
+        out = asyncio.run(self.tools("").list_sessions(__oauth_token__=TOKEN))
+        embed, context = out
+        self.assertNotIn(PW, context)
+        self.assertIn(PW, embed.body.decode())
 
 
 if __name__ == "__main__":

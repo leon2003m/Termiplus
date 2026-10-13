@@ -17,6 +17,10 @@ through the MCP control plane (`docs/mcp.md`).
 - With `plugin_key` set it also sends the Open WebUI user id, so sessions use
   the same homes as that user's Open WebUI terminals. Without a user id it
   sends nothing.
+- **Desktop passwords stay with the user.** For a desktop workspace the plugin
+  removes the stream password from the tool result and shows the link and
+  password in an inline embed, which Open WebUI renders for the user but does
+  not send to the model.
 - RBAC stays on the server: without the `termiplus-persist` group a persistent
   session is refused even if the user confirms.
 

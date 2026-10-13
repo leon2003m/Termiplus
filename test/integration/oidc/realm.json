@@ -13,7 +13,10 @@
     {"clientId": "termiplus-mcp", "enabled": true, "publicClient": false, "secret": "mcp-secret-it",
      "directAccessGrantsEnabled": false, "standardFlowEnabled": false},
     {"clientId": "other", "enabled": true, "publicClient": false, "secret": "other-secret-it",
-     "directAccessGrantsEnabled": true, "standardFlowEnabled": false}
+     "directAccessGrantsEnabled": true, "standardFlowEnabled": false},
+    {"clientId": "termiplus-desktop", "enabled": true, "publicClient": false, "secret": "desk-secret-it",
+     "directAccessGrantsEnabled": true, "standardFlowEnabled": true, "redirectUris": ["http://127.0.0.1:*"],
+     "attributes": {"pkce.code.challenge.method": "S256"}}
   ],
   "users": [
     {"username": "alice", "enabled": true, "email": "alice@example.test", "emailVerified": true, "firstName": "Alice", "lastName": "Test",

@@ -53,6 +53,8 @@ type Workspace struct {
 	// Persistent reports whether this workspace can be launched with a
 	// persistent home (still subject to the caller's entitlement).
 	Persistent bool `json:"persistent"`
+	// Desktop reports a graphical desktop workspace (stream_url in its handle).
+	Desktop bool `json:"desktop,omitempty"`
 }
 
 // Session is a provisioned sandbox and the handle used to reach it.
@@ -67,7 +69,11 @@ type Session struct {
 	// TerminalSession must be sent as X-Session-Id to reach an ephemeral
 	// session through TerminalURL; empty for persistent sessions.
 	TerminalSession string `json:"terminal_session,omitempty"`
-	StreamURL       string `json:"stream_url,omitempty"`
+	// StreamURL and StreamPassword open a desktop workspace in the browser
+	// (KasmVNC basic auth, user "user"). The password is for the user only:
+	// the Open WebUI plugin shows it to them and keeps it out of the model.
+	StreamURL      string `json:"stream_url,omitempty"`
+	StreamPassword string `json:"stream_password,omitempty"`
 }
 
 // ErrPersistenceMismatch is returned when a request's persistent flag does not

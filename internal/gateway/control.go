@@ -39,6 +39,7 @@ type workspaceInfo struct {
 	Name       string `json:"name"`
 	Runtime    string `json:"runtime"`
 	Persistent bool   `json:"persistent"`
+	Desktop    bool   `json:"desktop,omitempty"`
 }
 
 type sessionInfo struct {
@@ -50,6 +51,19 @@ type sessionInfo struct {
 	// ephemeral session TerminalSession must be sent as X-Session-Id.
 	TerminalPath    string `json:"terminal_path,omitempty"`
 	TerminalSession string `json:"terminal_session,omitempty"`
+	// StreamPath and StreamPassword reach the desktop of a "desktop" policy
+	// (KasmVNC basic auth, user "user"). Only the session's owner gets them.
+	StreamPath     string `json:"stream_path,omitempty"`
+	StreamPassword string `json:"stream_password,omitempty"`
+}
+
+// withStream fills the desktop stream handle for desktop policies.
+func (m *manager) withStream(s sessionInfo, pol Policy) sessionInfo {
+	if pol.Desktop {
+		s.StreamPath = streamPrefix + s.ID + "/"
+		s.StreamPassword = m.desktopPassword(s.ID)
+	}
+	return s
 }
 
 var (
@@ -120,7 +134,7 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 func (g *Gateway) workspaces() []workspaceInfo {
 	out := make([]workspaceInfo, 0, len(g.cfg.Policies))
 	for name, p := range g.cfg.Policies {
-		out = append(out, workspaceInfo{Name: name, Runtime: p.Runtime, Persistent: !p.ephemeral()})
+		out = append(out, workspaceInfo{Name: name, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -162,14 +176,14 @@ func (g *Gateway) createSession(w http.ResponseWriter, r *http.Request, userID s
 		g.ensureError(w, userID, req.Workspace, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, sessionInfo{
+	writeJSON(w, http.StatusCreated, g.mgr.withStream(sessionInfo{
 		ID:              inst.name,
 		Workspace:       req.Workspace,
 		Persistent:      !pol.ephemeral(),
 		Running:         true,
 		TerminalPath:    "/p/" + req.Workspace + "/",
 		TerminalSession: sessionID,
-	})
+	}, pol))
 }
 
 // listUser returns the user's terminal containers, running or stopped.
@@ -196,14 +210,14 @@ func (m *manager) listUser(ctx context.Context, userID string) ([]sessionInfo, e
 			continue
 		}
 		policy := c.Labels[naming.LabelPolicy]
-		out = append(out, sessionInfo{
+		out = append(out, m.withStream(sessionInfo{
 			ID:              name,
 			Workspace:       policy,
 			Persistent:      c.Labels[naming.LabelStorage] != storageEphemeral,
 			Running:         c.State == "running",
 			TerminalPath:    "/p/" + policy + "/",
 			TerminalSession: known[name],
-		})
+		}, m.policies[policy]))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil

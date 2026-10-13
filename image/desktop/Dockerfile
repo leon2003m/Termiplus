@@ -1,7 +1,8 @@
-# EXPERIMENTAL desktop workspace (alpha, docs/mcp.md §9): the terminal image
-# plus an XFCE desktop streamed by KasmVNC on port 6901. Not wired into the
-# gateway yet - routing and authenticating the stream is an open decision.
-# Verified to render and stream under both gVisor and Sysbox.
+# EXPERIMENTAL desktop workspace (alpha, docs/mcp.md): the terminal image plus
+# an XFCE desktop streamed by KasmVNC on port 6901. Use it as TERMINAL_IMAGE:
+# every container runs Open Terminal as before, and policies with
+# "desktop": true also start the desktop (start-desktop.sh). The gateway
+# routes /stream/<container>/ to it. Runs under gVisor and Sysbox.
 ARG BASE=ghcr.io/leon2003m/termiplus-terminal:latest
 FROM ${BASE}
 
@@ -28,5 +29,7 @@ COPY start-desktop.sh /usr/local/bin/start-desktop
 RUN chmod 755 /usr/local/bin/start-desktop
 
 USER 1000:1000
-EXPOSE 6901
+# The terminal image's HEALTHCHECK (Open Terminal on 8000) still applies.
+EXPOSE 8000 6901
 ENTRYPOINT ["/usr/local/bin/start-desktop"]
+CMD []

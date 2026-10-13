@@ -19,15 +19,20 @@ license: see the termiplus repository
 #   confirmation flag: when the server answers "human confirmation required",
 #   the plugin asks the user in an Open WebUI dialog and only repeats the call
 #   with "_confirmed": true after an explicit yes.
-# - Needs nothing beyond the standard library and pydantic (which Open WebUI
-#   ships), so it installs without extra packages.
+# - A desktop session's stream password is for the user, never the model: the
+#   plugin removes it from the tool result and shows it in an inline embed,
+#   which Open WebUI renders for the user but does not send to the model.
+# - Needs nothing beyond the standard library, pydantic and fastapi (which Open
+#   WebUI ships), so it installs without extra packages.
 
 import asyncio
+import html
 import json
 import urllib.error
 import urllib.request
 from typing import Any, Awaitable, Callable, Optional
 
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 CODE_UNAUTHENTICATED = -32001
@@ -55,13 +60,13 @@ class Tools:
     def __init__(self):
         self.valves = self.Valves()
 
-    async def list_workspaces(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> str:
+    async def list_workspaces(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> Any:
         """
         List the termiplus workspaces (sandbox profiles) the user can launch, and whether each one keeps a persistent home.
         """
         return await self._run("list_workspaces", {}, __oauth_token__, None, None, __user__)
 
-    async def list_sessions(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> str:
+    async def list_sessions(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> Any:
         """
         List the user's termiplus sessions (running or stopped).
         """
@@ -76,7 +81,7 @@ class Tools:
         __event_call__: EventCall = None,
         __event_emitter__: EventEmitter = None,
         __user__: Optional[dict] = None,
-    ) -> str:
+    ) -> Any:
         """
         Start (or attach to) a termiplus sandbox session. Persistent sessions need the user's permission and an explicit confirmation from the user.
         :param workspace: Name of the workspace from list_workspaces.
@@ -95,7 +100,7 @@ class Tools:
         __event_call__: EventCall = None,
         __event_emitter__: EventEmitter = None,
         __user__: Optional[dict] = None,
-    ) -> str:
+    ) -> Any:
         """
         Remove one of the user's termiplus sessions. A persistent home volume is kept. Always asks the user for confirmation.
         :param session_id: The session_id from list_sessions.
@@ -114,7 +119,7 @@ class Tools:
         event_call: EventCall,
         emitter: EventEmitter,
         user: Optional[dict] = None,
-    ) -> str:
+    ) -> Any:
         token = (oauth_token or {}).get("access_token")
         if not token:
             return "termiplus: no OIDC sign-in token available. Sign in to Open WebUI with SSO and try again."
@@ -143,7 +148,7 @@ class Tools:
             text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
             if result.get("isError"):
                 return f"termiplus: {tool} failed: {text}"
-            return text
+            return _hide_stream_passwords(text)
         except Exception as e:  # network, HTTP or decoding problems
             return f"termiplus: {tool} failed: {e}"
         finally:
@@ -197,6 +202,41 @@ def _describe_error(tool: str, err: dict) -> str:
     if code == CODE_CONFIRM_REQUIRED:
         return f"termiplus: {tool} still requires confirmation and was not run."
     return f"termiplus: {tool} failed: {msg}"
+
+
+def _hide_stream_passwords(text: str) -> Any:
+    """Moves desktop stream passwords out of the model-visible result into an
+    inline embed for the user. Returns text unchanged when there are none."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    sessions = data if isinstance(data, list) else [data]
+    desktops = []
+    for s in sessions:
+        if isinstance(s, dict) and s.get("stream_password"):
+            desktops.append((str(s.get("session_id", "")), str(s.get("stream_url", "")), str(s.pop("stream_password"))))
+            s["stream_password"] = "(shown to the user, not to you)"
+    if not desktops:
+        return text
+    rows = "".join(
+        "<div class='d'><b>{sid}</b><br>"
+        "<a href='{url}' target='_blank' rel='noopener noreferrer'>Open desktop</a> <code>{url}</code><br>"
+        "User <code>user</code>, password "
+        "<input readonly value='{pw}' size='70' onclick='this.select()'></div>".format(
+            sid=html.escape(sid), url=html.escape(url, quote=True), pw=html.escape(pw, quote=True)
+        )
+        for sid, url, pw in desktops
+        if url.startswith(("https://", "http://"))
+    )
+    page = (
+        "<!doctype html><meta charset='utf-8'><style>body{font:14px sans-serif;margin:8px}"
+        ".d{margin:6px 0;padding:8px;border:1px solid #8884;border-radius:6px}code{font-size:12px}</style>"
+        + rows
+    )
+    context = json.dumps(data if isinstance(data, list) else sessions[0], separators=(",", ":"))
+    context += "\nThe desktop link and password are shown to the user in the chat; never ask for or repeat the password."
+    return HTMLResponse(content=page, headers={"Content-Disposition": "inline"}), context
 
 
 async def _emit(emitter: EventEmitter, event: dict) -> None:

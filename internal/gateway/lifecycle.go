@@ -38,6 +38,11 @@ type Policy struct {
 	// MaxPerUser caps concurrent ephemeral sandboxes per user (default 3).
 	// When reached, the user's least recently used idle sandbox is deleted.
 	MaxPerUser int `json:"max_per_user,omitempty"`
+	// Desktop starts the image's XFCE desktop (KasmVNC on desktopPort) next to
+	// Open Terminal, protected by a per-container password derived from
+	// KEY_SECRET, and makes it reachable under /stream/<container>/. Needs
+	// TERMINAL_IMAGE to be the desktop image (image/desktop). Experimental.
+	Desktop bool `json:"desktop,omitempty"`
 
 	idle time.Duration
 }
@@ -58,7 +63,8 @@ type instance struct {
 	key       string // per-container Open Terminal API key
 	ready     bool
 	lastUsed  time.Time
-	conns     int // open WebSocket sessions
+	conns     int // open WebSocket sessions (terminal and desktop stream)
+	desktop   bool
 	// controlSession is the session id of an ephemeral sandbox created through
 	// the control API, so it can be listed with a usable handle. In memory only
 	// (ephemerals are throwaway); never set for Open WebUI chat sandboxes.
@@ -92,6 +98,14 @@ func (m *manager) lockFor(name string) *sync.Mutex {
 		m.locks[name] = l
 	}
 	return l
+}
+
+// desktopPassword derives the per-container KasmVNC password the same way, in
+// a separate domain (container names never contain a NUL byte).
+func (m *manager) desktopPassword(name string) string {
+	mac := hmac.New(sha256.New, m.keySecret)
+	mac.Write([]byte("desktop\x00" + name))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // containerKey derives the per-container API key. Nothing to store, and
@@ -190,6 +204,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 		idle:      m.idleFor(pol),
 		addr:      m.addrFor(name, m.port),
 		key:       m.containerKey(name),
+		desktop:   pol.Desktop,
 	}
 	if pol.ephemeral() && strings.HasPrefix(sessionID, controlSessionPrefix) {
 		inst.controlSession = sessionID
@@ -344,11 +359,13 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	if m.forwarderDNS != "" {
 		hostConfig["Dns"] = []string{m.forwarderDNS}
 	}
+	env := []string{"OPEN_TERMINAL_API_KEY=" + m.containerKey(name)}
+	if pol.Desktop {
+		env = append(env, "OPEN_TERMINAL_DESKTOP_PASSWORD="+m.desktopPassword(name))
+	}
 	spec := map[string]any{
-		"Image": m.image,
-		"Env": []string{
-			"OPEN_TERMINAL_API_KEY=" + m.containerKey(name),
-		},
+		"Image":      m.image,
+		"Env":        env,
 		"Labels":     labels,
 		"HostConfig": hostConfig,
 	}
@@ -437,6 +454,7 @@ func (m *manager) adopt(ctx context.Context) {
 				ephemeral: naming.EphemeralName.MatchString(name),
 				idle:      m.idleFor(pol),
 				lastUsed:  time.Now(),
+				desktop:   pol.Desktop,
 			}
 		}
 	}

@@ -220,9 +220,10 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Sessions keyed by the Open WebUI user id (`MCP_OWUI_PLUGIN_KEY`, plugin `plugin_key` valve) | **done** — same homes as Open WebUI terminals; covered by the same test |
 | Native OWUI plugin: confirmation dialog, `__oauth_token__` forwarding (`integrations/openwebui/`) | **done** — tested against the real `mcp` binary in CI |
 | OWUI plugin: DE previews and management-UI link | todo (needs streaming / management UI) |
-| Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
-| Stream routing through the gateway + `stream_url` | todo — **open decision**: how the gateway authenticates and forwards the stream |
-| Management UI | todo |
+| Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0, runs Open Terminal too) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
+| Desktop streams: policy `"desktop": true`, gateway `/stream/<container>/`, per-container password, `stream_url` handle, browser sign-in (`deploy/docker-compose.desktop.yml`) | **done (experimental)** — gateway tests incl. a real KasmVNC; `test/integration/oidc/desktop.sh` against a real Keycloak |
+| OWUI plugin shows the desktop link and password to the user (inline embed), never to the model | **done** |
+| Management UI | todo — sign-in will reuse the desk-auth oauth2-proxy (browser cookie flow) |
 | Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
 
 ### Gateway control API
@@ -260,12 +261,55 @@ this host (2026-10-12):
 | Idle memory | ~190 MiB | ~90 MiB |
 
 No firewall change is needed (the gateway may already reach any sandbox
-port). Not done yet, and an **open decision** because it is
-authentication-relevant: how the gateway routes `/stream/...` to port 6901 and
-supplies the per-container stream password (for example derived like the
-terminal key from `KEY_SECRET`), and how browser access is authenticated
-(oauth2-proxy cookie flow). `VNC_PW` is visible inside the container to the
-user it protects, so it must be unique per container.
+port).
+
+### Desktop streams
+
+Decided 2026-10-13: per-container password derived like the terminal key,
+browser sign-in through oauth2-proxy. How it fits together:
+
+1. **Image.** The socket proxy allows exactly one image, so the desktop image
+   is used as `TERMINAL_IMAGE` (no socket-proxy change). Every container runs
+   Open Terminal as before; only policies with `"desktop": true` also start
+   XFCE + KasmVNC, because only they get `OPEN_TERMINAL_DESKTOP_PASSWORD`.
+2. **Password.** The gateway derives it as HMAC-SHA256(`KEY_SECRET`,
+   `"desktop\0" + container`), separate from the terminal key; nothing is
+   stored, and rotating `KEY_SECRET` recreates the containers. KasmVNC checks
+   it (basic auth, user `user`, write permission only). The start script hands
+   it only to KasmVNC, not to Open Terminal or the user's shells (it remains
+   visible in PID 1's environment to the user it protects). KasmVNC's per-IP
+   brute-force blacklist is off: every browser comes through the gateway's
+   single IP, so it would let anyone lock the owner out, and the password has
+   256 random bits.
+3. **Routing.** The gateway serves `/stream/<container>/` for running desktop
+   containers only (anything else is 404) and never starts a container for a
+   stream request. It forwards the browser's basic auth, drops cookies and
+   `X-User-Id`, counts open streams so the idle reaper keeps the desktop, and
+   refuses **cross-origin WebSockets** (KasmVNC does not check `Origin`, and
+   browsers send cached basic-auth credentials cross-site).
+4. **Handle.** The control API returns `stream_path` + `stream_password` to the
+   session's owner only; the MCP server turns it into `stream_url`
+   (`STREAM_PUBLIC_URL`). The OWUI plugin removes the password from the tool
+   result and shows link and password to the user in an inline embed, which
+   Open WebUI does not send to the model.
+5. **Browser sign-in.** `deploy/docker-compose.desktop.yml` adds `desk-auth`
+   (oauth2-proxy, authorization code flow with PKCE, HttpOnly SameSite=Lax
+   cookie) whose only upstream is the gateway's `/stream/`. It passes no token
+   of its own and keeps the browser's basic auth and Host.
+
+`test/integration/oidc/desktop.sh` verifies the sign-in against a real
+Keycloak with the overlay's exact flags: no request reaches the stream without
+the session cookie (neither basic auth nor a bearer token replaces it), the
+rest of the gateway is unreachable, basic auth and Host arrive unchanged, no
+token is forwarded, WebSockets pass only when signed in. The gateway's
+`TestDesktopStreamRealKasmVNC` (opt-in, `TERMIPLUS_KASM_ADDR` /
+`TERMIPLUS_KASM_PASSWORD`) checks the route against a real KasmVNC container:
+401 without and 200 with the password, 101 for a same-origin WebSocket, 403
+for cross-origin or missing `Origin`.
+
+Known limits: authorization to a desktop is knowing its password; the browser
+sign-in only proves a Keycloak user, not that it is the owner (the owner's
+identity is the Open WebUI user id). The desktop image is not built in CI.
 
 ### Workspace entitlements
 
