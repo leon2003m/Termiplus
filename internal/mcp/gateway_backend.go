@@ -21,6 +21,7 @@ type GatewayBackend struct {
 	base       string // internal gateway URL, e.g. http://gateway:8080
 	publicBase string // externally reachable gateway URL for access handles
 	streamBase string // browser-facing URL of the desktop stream (sign-in proxy)
+	fwdBase    string // browser-facing URL of the port forwards (fwd-auth), or ""
 	controlKey string
 	adminKey   string // optional; empty disables set_network_policy
 	client     *http.Client
@@ -49,6 +50,13 @@ func (b *GatewayBackend) WithStreamBase(u string) *GatewayBackend {
 	if u != "" {
 		b.streamBase = strings.TrimSuffix(u, "/")
 	}
+	return b
+}
+
+// WithForwardBase sets the browser-facing base URL of the port forwards; each
+// session handle then carries forward_url (append "<port>/").
+func (b *GatewayBackend) WithForwardBase(u string) *GatewayBackend {
+	b.fwdBase = strings.TrimSuffix(u, "/")
 	return b
 }
 
@@ -166,6 +174,9 @@ func (b *GatewayBackend) session(s gwSession, userID string) Session {
 		Running:         s.Running,
 		TerminalURL:     b.publicBase + s.TerminalPath,
 		TerminalSession: s.TerminalSession,
+	}
+	if b.fwdBase != "" {
+		out.ForwardURL = b.fwdBase + "/" + s.ID + "/"
 	}
 	if s.StreamPath != "" {
 		out.StreamURL = b.streamBase + s.StreamPath

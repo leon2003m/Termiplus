@@ -102,6 +102,8 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	switch {
+	case strings.HasPrefix(rest, forwardPrefix):
+		g.serveForward(w, r, userID, strings.TrimPrefix(rest, forwardPrefix))
 	case rest == "sessions" && r.Method == http.MethodGet:
 		list, err := g.mgr.listUser(r.Context(), userID)
 		if err != nil {

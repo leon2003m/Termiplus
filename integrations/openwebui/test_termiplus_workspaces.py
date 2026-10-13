@@ -320,6 +320,28 @@ class Console(unittest.TestCase):
         self.assertIn("not configured", asyncio.run(t.open_console()))
 
 
+class OpenPort(OpenWebUIUserHeaders):
+    def test_link_for_own_session(self):
+        HeaderRecorder.reply = json.dumps([{"session_id": "ot-u-1-default", "forward_url": "https://fwd.example/ot-u-1-default/"}])
+        embed, context = asyncio.run(self.tools("").open_port("ot-u-1-default", 3000, __oauth_token__=TOKEN))
+        self.assertIn("https://fwd.example/ot-u-1-default/3000/", embed.body.decode())
+        self.assertNotIn("https://", context)
+
+    def test_with_desktop_session_in_list(self):
+        HeaderRecorder.reply = json.dumps([dict(DESK, forward_url="https://fwd.example/ot-u-1-desk/")])
+        embed, _ = asyncio.run(self.tools("").open_port("ot-u-1-desk", "5173", __oauth_token__=TOKEN))
+        self.assertIn("https://fwd.example/ot-u-1-desk/5173/", embed.body.decode())
+        self.assertNotIn(PW, embed.body.decode())
+
+    def test_refusals(self):
+        HeaderRecorder.reply = json.dumps([{"session_id": "s1", "forward_url": "javascript:alert(1)//"}])
+        t = self.tools("")
+        self.assertIn("between 1 and 65535", asyncio.run(t.open_port("s1", 0, __oauth_token__=TOKEN)))
+        self.assertIn("must be a number", asyncio.run(t.open_port("s1", "x", __oauth_token__=TOKEN)))
+        self.assertIn("no session", asyncio.run(t.open_port("other", 3000, __oauth_token__=TOKEN)))
+        self.assertIn("not configured", asyncio.run(t.open_port("s1", 3000, __oauth_token__=TOKEN)))
+
+
 class StreamPasswordThroughRun(OpenWebUIUserHeaders):
     def test_run_returns_embed(self):
         HeaderRecorder.reply = json.dumps([DESK])

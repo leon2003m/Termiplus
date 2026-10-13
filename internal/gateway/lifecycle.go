@@ -57,6 +57,7 @@ const (
 type instance struct {
 	name      string
 	userHash  string
+	userID    string // owner, from the request that created it or its label
 	ephemeral bool
 	idle      time.Duration
 	addr      string // host:port reachable from the gateway
@@ -200,6 +201,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	inst = &instance{
 		name:      name,
 		userHash:  naming.UserHash(name),
+		userID:    userID,
 		ephemeral: pol.ephemeral(),
 		idle:      m.idleFor(pol),
 		addr:      m.addrFor(name, m.port),
@@ -454,6 +456,7 @@ func (m *manager) adopt(ctx context.Context) {
 			m.instances[name] = &instance{
 				name:      name,
 				userHash:  naming.UserHash(name),
+				userID:    c.Labels[naming.LabelUser],
 				ephemeral: naming.EphemeralName.MatchString(name),
 				idle:      m.idleFor(pol),
 				lastUsed:  time.Now(),

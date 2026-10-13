@@ -105,6 +105,20 @@ async function loadSessions() {
     if (url) {
       items.splice(1, 0, el("a", { class: "button", href: url, target: "_blank", rel: "noopener noreferrer", text: "Open desktop" }));
     }
+    const fwd = s.forward_url && safeURL(s.forward_url);
+    if (fwd && s.running) {
+      const port = el("input", { class: "port", type: "number", min: "1", max: "65535", placeholder: "port", "aria-label": "Port to open" });
+      const open = el("button", { type: "button", text: "Open port" });
+      open.addEventListener("click", () => {
+        const n = Number(port.value);
+        if (!Number.isInteger(n) || n < 1 || n > 65535) {
+          status("Enter a port between 1 and 65535.", true);
+          return;
+        }
+        window.open(fwd + n + "/", "_blank", "noopener,noreferrer");
+      });
+      items.splice(items.length - 1, 0, port, open);
+    }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
     items.push(el("span", { class: "meta", text: meta }));
     if (url && s.stream_password) {

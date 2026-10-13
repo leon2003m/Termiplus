@@ -31,7 +31,8 @@ func main() {
 	switch controlKey := config.Secret("CONTROL_API_KEY", false); {
 	case controlKey != "":
 		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false)).
-			WithStreamBase(config.Get("STREAM_PUBLIC_URL", ""))
+			WithStreamBase(config.Get("STREAM_PUBLIC_URL", "")).
+			WithForwardBase(config.Get("FORWARD_PUBLIC_URL", ""))
 	case config.Get("MCP_STUB_BACKEND", "") == "1":
 		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
 		backend = mcp.NewStubBackend(publicURL)
@@ -96,6 +97,21 @@ func main() {
 		ui := &http.Server{Addr: uiAddr, Handler: mcp.NewUI(srv, ids), ReadHeaderTimeout: 10 * time.Second}
 		go func() { log.Fatal(ui.ListenAndServe()) }()
 		log.Printf("management UI listening on %s", uiAddr)
+	}
+
+	// Port forwards: own listener behind their own sign-in proxy (fwd-auth).
+	if fwdAddr := config.Get("FWD_LISTEN_ADDR", ""); fwdAddr != "" {
+		controlKey := config.Secret("CONTROL_API_KEY", false)
+		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil || controlKey == "" {
+			log.Fatal("FWD_LISTEN_ADDR needs MCP_AUTH=proxy, MCP_IDENTITY_FILE and CONTROL_API_KEY")
+		}
+		fwd, err := mcp.NewForwarder(ids, gatewayURL, controlKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fs := &http.Server{Addr: fwdAddr, Handler: fwd, ReadHeaderTimeout: 10 * time.Second}
+		go func() { log.Fatal(fs.ListenAndServe()) }()
+		log.Printf("port forwards listening on %s", fwdAddr)
 	}
 
 	log.Printf("termiplus mcp %s listening on %s, gateway %s, auth: %s, %s", version, addr, gatewayURL, authDesc, entDesc)

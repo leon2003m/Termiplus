@@ -77,7 +77,10 @@ type Session struct {
 	// StreamURL and StreamPassword open a desktop workspace in the browser
 	// (KasmVNC basic auth, user "user"). The password is for the user only:
 	// the Open WebUI plugin shows it to them and keeps it out of the model.
-	StreamURL      string `json:"stream_url,omitempty"`
+	StreamURL string `json:"stream_url,omitempty"`
+	// ForwardURL + "<port>/" opens a port of this session in the browser
+	// (owner only, behind its own sign-in).
+	ForwardURL     string `json:"forward_url,omitempty"`
 	StreamPassword string `json:"stream_password,omitempty"`
 }
 

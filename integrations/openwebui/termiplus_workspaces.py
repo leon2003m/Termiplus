@@ -113,6 +113,45 @@ class Tools:
             "destroy_session", {"session_id": session_id}, __oauth_token__, __event_call__, __event_emitter__, __user__
         )
 
+    async def open_port(
+        self,
+        session_id: str,
+        port: int,
+        __oauth_token__: Optional[dict] = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Show the user a browser link to a port inside one of their sessions (e.g. a dev server the assistant started on port 3000). Only the session's owner can open it.
+        :param session_id: The session_id from list_sessions.
+        :param port: The TCP port the app listens on inside the session.
+        """
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            return "termiplus: port must be a number."
+        if not 1 <= port <= 65535:
+            return "termiplus: port must be between 1 and 65535."
+        result = await self._run("list_sessions", {}, __oauth_token__, None, None, __user__)
+        try:
+            sessions = json.loads(result) if isinstance(result, str) else json.loads(result[1].split("\n")[0])
+        except (ValueError, IndexError, TypeError):
+            return result if isinstance(result, str) else "termiplus: could not list your sessions."
+        match = [s for s in sessions if isinstance(s, dict) and s.get("session_id") == session_id]
+        if not match:
+            return f"termiplus: no session {session_id!r} of yours."
+        base = str(match[0].get("forward_url") or "")
+        if not base.startswith(("https://", "http://")):
+            return "termiplus: port forwarding is not configured on this server."
+        u = html.escape(f"{base}{port}/", quote=True)
+        page = (
+            "<!doctype html><meta charset='utf-8'><style>body{font:14px sans-serif;margin:8px}</style>"
+            f"<a href='{u}' target='_blank' rel='noopener noreferrer'>Open port {port}</a> <code>{u}</code>"
+        )
+        return (
+            HTMLResponse(content=page, headers={"Content-Disposition": "inline"}),
+            f"A link to port {port} of session {session_id} is shown to the user.",
+        )
+
     async def open_console(self) -> Any:
         """
         Show the user a link to the termiplus management console, where they can see and manage their workspaces and sessions (and admins the entitlements and network policy).

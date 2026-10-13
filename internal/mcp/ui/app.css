@@ -23,3 +23,4 @@ input.secret { font: 12px ui-monospace, monospace; width: 100%; padding: 4px 6px
 h3 { font-size: 14px; margin: 16px 0 4px; }
 .hint { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
 textarea { display: block; width: 100%; font: 12px/1.4 ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); margin-bottom: 8px; }
+input.port { width: 6.5em; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); }
