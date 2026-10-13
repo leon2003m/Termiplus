@@ -1,0 +1,19 @@
+#!/bin/sh
+# Entrypoint of the terminal image. Docker writes its embedded resolver
+# (127.0.0.11) into /etc/resolv.conf even when the gateway pins a terminal to
+# the internal DNS forwarder, and gVisor cannot reach that resolver
+# (google/gvisor#7469). When the gateway passes the forwarder in
+# OPEN_TERMINAL_RESOLVER, point resolv.conf straight at it. This is a
+# convenience, not a boundary: the firewall decides where DNS may go.
+set -eu
+resolver="${OPEN_TERMINAL_RESOLVER:-}"
+unset OPEN_TERMINAL_RESOLVER
+if [ -n "$resolver" ]; then
+  if echo "$resolver" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    printf 'nameserver %s\noptions ndots:0\n' "$resolver" | sudo -n tee /etc/resolv.conf >/dev/null ||
+      echo "start: could not point /etc/resolv.conf at $resolver" >&2
+  else
+    echo "start: ignoring malformed OPEN_TERMINAL_RESOLVER" >&2
+  fi
+fi
+exec "$@"

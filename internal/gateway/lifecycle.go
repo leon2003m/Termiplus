@@ -100,7 +100,7 @@ func (m *manager) containerKey(name string) string {
 
 func (m *manager) configHash(pol Policy, policyName string) string {
 	secretFP := sha256.Sum256(m.keySecret)
-	b, _ := json.Marshal([]any{m.image, m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4])})
+	b, _ := json.Marshal([]any{m.image, m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }
@@ -334,14 +334,16 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	// Pin the terminal to the internal forwarder when one is configured. The
 	// socket proxy independently accepts only this one address, so a tampered
 	// gateway cannot point a terminal at any other resolver.
+	env := []string{"OPEN_TERMINAL_API_KEY=" + m.containerKey(name)}
 	if m.forwarderDNS != "" {
 		hostConfig["Dns"] = []string{m.forwarderDNS}
+		// Docker still writes its embedded resolver into resolv.conf, which
+		// gVisor cannot reach (#3); the image's start script uses this instead.
+		env = append(env, "OPEN_TERMINAL_RESOLVER="+m.forwarderDNS)
 	}
 	spec := map[string]any{
-		"Image": m.image,
-		"Env": []string{
-			"OPEN_TERMINAL_API_KEY=" + m.containerKey(name),
-		},
+		"Image":      m.image,
+		"Env":        env,
 		"Labels":     labels,
 		"HostConfig": hostConfig,
 	}

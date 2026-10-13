@@ -50,7 +50,8 @@ RUN useradd -m -u 1000 -s /bin/bash user \
 # /bin/sh. bash-ctty starts bash with the PTY as controlling terminal, so job
 # control works. Commands run by the model use /bin/sh -c and are unaffected.
 COPY bash-ctty /usr/local/libexec/termiplus/bash
-RUN chmod 0755 /usr/local/libexec/termiplus/bash
+COPY start /usr/local/libexec/termiplus/start
+RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/start
 
 USER 1000:1000
 WORKDIR /home/user
@@ -62,4 +63,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/health"]
 
 # The API key comes from OPEN_TERMINAL_API_KEY, set per container by the gateway.
+# start points resolv.conf at the DNS forwarder when the gateway passes one.
+ENTRYPOINT ["/usr/local/libexec/termiplus/start"]
 CMD ["/opt/open-terminal/bin/open-terminal", "run", "--host", "0.0.0.0", "--port", "8000", "--cwd", "/home/user"]

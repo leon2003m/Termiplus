@@ -156,5 +156,24 @@ func TestForwarderPinsTerminalDNS(t *testing.T) {
 		if !strings.Contains(body, `"Dns":["172.30.0.3"]`) {
 			t.Fatalf("create body not pinned to the forwarder: %s", body)
 		}
+		// gVisor cannot use the resolver Docker writes into resolv.conf (#3),
+		// so the image's start script is told the forwarder as well.
+		if !strings.Contains(body, `"OPEN_TERMINAL_RESOLVER=172.30.0.3"`) {
+			t.Fatalf("create body does not pass the forwarder to the image: %s", body)
+		}
+	}
+}
+
+func TestNoResolverWithoutForwarder(t *testing.T) {
+	h := newHarness(t)
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatalf("request failed: %d", code)
+	}
+	h.docker.mu.Lock()
+	defer h.docker.mu.Unlock()
+	for _, body := range h.docker.seen {
+		if strings.Contains(body, "OPEN_TERMINAL_RESOLVER") || strings.Contains(body, `"Dns":[`) {
+			t.Fatalf("resolver set without a forwarder: %s", body)
+		}
 	}
 }
