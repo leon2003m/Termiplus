@@ -92,7 +92,7 @@ for s in proxy_token gateway_api_key key_secret; do
 done
 chmod 0644 "$WORK"/deploy/secrets/*
 WEBUI_URL=https://chat.test KEYCLOAK_PUBLIC_URL=https://sso.test DESKTOP_PUBLIC_URL=https://desk.test \
-  "$WORK/deploy/setup-alpha.sh" >/dev/null
+  FORWARD_PUBLIC_URL=https://fwd.test "$WORK/deploy/setup-alpha.sh" >/dev/null
 chown 65534:65534 "$WORK/deploy/mcp-data"
 cat >"$WORK/deploy/policies.json" <<JSON
 {
@@ -119,6 +119,9 @@ services:
   desk-auth:
     environment: { SSL_CERT_FILE: /etc/a2e/root.crt }
     volumes: ["$WORK/edge-root.crt:/etc/a2e/root.crt:ro"]
+  fwd-auth:
+    environment: { SSL_CERT_FILE: /etc/a2e/root.crt }
+    volumes: ["$WORK/edge-root.crt:/etc/a2e/root.crt:ro"]
 YAML
 
 if ! docker network inspect owui >/dev/null 2>&1; then
@@ -137,8 +140,12 @@ desk.test {
   tls internal
   reverse_proxy desk-auth:4180
 }
+fwd.test {
+  tls internal
+  reverse_proxy fwd-auth:4180
+}
 CADDY
-docker run -d --name tp-a2e-edge --network owui --network-alias sso.test --network-alias desk.test \
+docker run -d --name tp-a2e-edge --network owui --network-alias sso.test --network-alias desk.test --network-alias fwd.test \
   -p "127.0.0.1:$EDGE_PORT:443" -v "$WORK/Caddyfile:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" >/dev/null
 for _ in $(seq 1 30); do
   docker cp tp-a2e-edge:/data/caddy/pki/authorities/local/root.crt "$WORK/edge-root.crt" 2>/dev/null && break
@@ -149,7 +156,8 @@ chmod 0644 "$WORK/edge-root.crt"
 # The "browser": both names resolve to the published edge, Caddy's CA is trusted.
 browser() {
   curl -s -m 20 --cacert "$WORK/edge-root.crt" \
-    --connect-to "sso.test:443:127.0.0.1:$EDGE_PORT" --connect-to "desk.test:443:127.0.0.1:$EDGE_PORT" "$@"
+    --connect-to "sso.test:443:127.0.0.1:$EDGE_PORT" --connect-to "desk.test:443:127.0.0.1:$EDGE_PORT" \
+    --connect-to "fwd.test:443:127.0.0.1:$EDGE_PORT" "$@"
 }
 for _ in $(seq 1 60); do
   browser -f https://sso.test/realms/termiplus/.well-known/openid-configuration >/dev/null && break
@@ -226,16 +234,16 @@ out="$(docker exec tp-a2e-client curl -s -m 10 -H "Authorization: Bearer $TA" -H
 check "without the plugin key the call is unauthenticated" "$(has "$out" '-32001')" "$out"
 
 log "browser path (desk-auth sign-in, console, desktop stream)"
-login() { # jar user
+login() { # jar user [start-url]
   local form action
-  form="$(browser -L -c "$1" -b "$1" https://desk.test/ui/)"
+  form="$(browser -L -c "$1" -b "$1" "${3:-https://desk.test/ui/}")"
   action="$(python3 -c '
 import html, re, sys
 m = re.search(r"<form[^>]*id=\"kc-form-login\"[^>]*action=\"([^\"]+)\"", sys.stdin.read())
 print(html.unescape(m.group(1)) if m else "")' <<<"$form")"
   [ -n "$action" ] || return 1
   browser -L -c "$1" -b "$1" -o /dev/null --data-urlencode "username=$2" --data-urlencode "password=$2-pw-a2e" "$action"
-  grep -q _termiplus_desk "$1"
+  grep -qE '_termiplus_(desk|fwd)' "$1"
 }
 JA="$WORK/jar-alice"
 if login "$JA" alice; then pass "alice signs in through Keycloak (TLS, PKCE)"; else fail "alice browser sign-in"; fi
@@ -266,6 +274,31 @@ JB="$WORK/jar-bob"
 login "$JB" bob || fail "bob browser sign-in"
 code="$(browser -b "$JB" -o /dev/null -w '%{http_code}' -u "user:wrong" "$STREAM_URL")"
 check "bob without alice's password cannot open her desktop" "$(is "$code" 401)" "$code"
+
+log "port forwarding (own origin, owner only)"
+docker exec -u 1000 -d "$SID" sh -c 'mkdir -p /tmp/app && cd /tmp/app && echo hi-from-app > index.html && exec python3 -m http.server 3000'
+FWD_URL="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("forward_url",""))' "$(mcp "$TA" owui-alice list_sessions '{}' | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)[0]))')")"
+check "the session handle carries forward_url" "$(is "$FWD_URL" "https://fwd.test/$SID/")" "$FWD_URL"
+JAF="$WORK/jar-alice-fwd"
+if login "$JAF" alice "${FWD_URL}3000/"; then pass "alice signs in on the forward origin"; else fail "alice forward sign-in"; fi
+out=""
+for _ in $(seq 1 20); do
+  out="$(browser -b "$JAF" "${FWD_URL}3000/index.html")"
+  [ "$out" = hi-from-app ] && break
+  sleep 1
+done
+check "alice opens her dev server on port 3000" "$(is "$out" hi-from-app)" "$out"
+code="$(browser -b "$JAF" -o /dev/null -w '%{http_code}' "${FWD_URL}8000/")"
+check "Open Terminal's API port is not forwarded" "$(is "$code" 403)" "$code"
+code="$(browser -b "$JAF" -o /dev/null -w '%{http_code}' "${FWD_URL}6901/")"
+check "the desktop port is not forwarded" "$(is "$code" 403)" "$code"
+code="$(browser -b "$JA" -o /dev/null -w '%{http_code}' "${FWD_URL}3000/")"
+check "the console cookie does not open forwards (other origin)" "$(is "$code" 302)" "$code"
+JBF="$WORK/jar-bob-fwd"
+mcp "$TB" owui-bob list_sessions '{}' >/dev/null
+login "$JBF" bob "${FWD_URL}3000/" || fail "bob forward sign-in"
+code="$(browser -b "$JBF" -o /dev/null -w '%{http_code}' "${FWD_URL}3000/")"
+check "bob cannot open alice's port" "$(is "$code" 404)" "$code"
 
 log "admin console"
 mcp "$(token root)" owui-root list_sessions '{}' >/dev/null

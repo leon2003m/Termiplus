@@ -250,6 +250,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
 | OWUI plugin `open_console` tool (link to the management UI, `ui_url` valve) | **done** |
+| Port forwarding (`/<session>/<port>/` on its own origin behind `fwd-auth`, owner only; console "Open port", plugin `open_port`) | **done (experimental)** |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
 | Workspace entitlements per group (`MCP_ENTITLEMENTS_FILE`, editable by admins) | **done** |
 
@@ -337,6 +338,33 @@ for cross-origin or missing `Origin`.
 Known limits: authorization to a desktop is knowing its password; the browser
 sign-in only proves a Keycloak user, not that it is the owner (the owner's
 identity is the Open WebUI user id). The desktop image is built and smoke-tested in CI (runc only; gVisor and Sysbox were checked by hand).
+
+### Port forwarding
+
+Like code-server's `/proxy/<port>/`: `FORWARD_PUBLIC_URL/<session>/<port>/<path>`
+reaches `localhost:<port>` inside one of the signed-in user's sessions (a dev
+server, a notebook, a preview). Decided 2026-10-13: own origin, owner only.
+
+Browser -> `fwd-auth` (oauth2-proxy, own cookie `_termiplus_fwd`) -> MCP
+forwarder (`FWD_LISTEN_ADDR`; maps the OIDC subject to the Open WebUI user via
+the identity store) -> gateway `/control/v1/forward/<container>/<port>/`
+(control key + `X-User-Id`) -> the container.
+
+- The gateway forwards only to a **running** container whose recorded owner is
+  **exactly** that user (another user's or an unknown session is 404), never to
+  Open Terminal's API port (8000) or the desktop port (6901), and never starts
+  a container. It counts the connection for the idle reaper.
+- It strips the control key, `X-User-Id`, the proxies' identity headers and
+  termiplus' own sign-in cookies; the app's own cookies pass. The app is asked
+  for `localhost:<port>` (dev servers refuse unknown hosts), and redirects to
+  itself or to host-relative paths are kept under `/<session>/<port>/`.
+  WebSockets pass (hot reload).
+- Forwards live on their own origin, so a forwarded app can never use the
+  console's or the desktops' cookies or pages. The user's forwarded apps share
+  that origin with each other; another user's forward is never served to them.
+- The base needs its trailing slash; apps with absolute asset paths (`/assets/…`)
+  need a base-path setting (Vite `base`, webpack `publicPath`), as with
+  code-server's path proxy.
 
 ### Workspace entitlements
 

@@ -1,5 +1,5 @@
-# Opt-in overlay: browser access - desktop workspaces and the management UI
-# (EXPERIMENTAL, alpha).
+# Opt-in overlay: browser access - desktop workspaces, the management UI and
+# port forwarding (EXPERIMENTAL, alpha).
 # Use together with the MCP overlay:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
@@ -31,6 +31,13 @@
 #     Membership mapper as the MCP client (claim "groups", full path off).
 #   - deploy/secrets/desk_oidc_client_secret: that client's secret (no newline).
 #   - deploy/secrets/desk_oidc_cookie_secret: openssl rand -hex 16 (no newline).
+#   - Port forwards: FORWARD_PUBLIC_URL (another HTTPS origin, e.g.
+#     https://fwd.example.com, in front of fwd-auth at
+#     127.0.0.1:${FORWARD_PORT:-4182}), an OIDC client "termiplus-forward"
+#     (redirect URI ${FORWARD_PUBLIC_URL}/oauth2/callback, groups mapper) and
+#     deploy/secrets/fwd_oidc_client_secret + fwd_oidc_cookie_secret.
+#     Forwarded apps get their own origin so they can never act on the console
+#     or the desktops; only a session's owner can open its ports.
 name: termiplus
 
 services:
@@ -82,15 +89,62 @@ services:
     cpus: 0.5
     pids_limit: 64
 
+  fwd-auth:
+    # oauth2-proxy v7.15.5, as desk-auth but for port forwards on their own
+    # origin with their own cookie; the only upstream is the MCP forwarder.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on: [mcp]
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${FORWARD_OIDC_CLIENT_ID:-termiplus-forward}
+      - --client-secret-file=/run/secrets/fwd_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/fwd_oidc_cookie_secret
+      - --redirect-url=${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL}/oauth2/callback
+      - --code-challenge-method=S256
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-name=_termiplus_fwd
+      - --email-domain=*
+      - --skip-provider-button=true
+      - --reverse-proxy=true
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      - --upstream=http://mcp:8092/
+      - --pass-basic-auth=false
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --set-xauthrequest=false
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [fwd_oidc_client_secret, fwd_oidc_cookie_secret]
+    ports:
+      - "127.0.0.1:${FORWARD_PORT:-4182}:4180"
+    networks: [ot-mcp-fwd, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
   mcp:
     environment:
       STREAM_PUBLIC_URL: ${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL}
+      FORWARD_PUBLIC_URL: ${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL}
+      # Port forwards; trusts fwd-auth's identity headers like the UI does.
+      FWD_LISTEN_ADDR: ":8092"
       # Trusts desk-auth's identity headers. Besides desk-auth (ot-mcp-ui)
       # only mcp-auth and the gateway share a network with the MCP server,
       # and neither forwards browser requests to this port.
       UI_LISTEN_ADDR: ":8091"
     networks:
       ot-mcp-ui: {}
+      ot-mcp-fwd: {}
 
   gateway:
     networks:
@@ -103,7 +157,12 @@ networks:
   # desk-auth <-> mcp management UI only.
   ot-mcp-ui:
     internal: true
+  # fwd-auth <-> mcp port forwarder only.
+  ot-mcp-fwd:
+    internal: true
 
 secrets:
   desk_oidc_client_secret: { file: ./secrets/desk_oidc_client_secret }
   desk_oidc_cookie_secret: { file: ./secrets/desk_oidc_cookie_secret }
+  fwd_oidc_client_secret: { file: ./secrets/fwd_oidc_client_secret }
+  fwd_oidc_cookie_secret: { file: ./secrets/fwd_oidc_cookie_secret }

@@ -8,7 +8,7 @@ is unchanged.
 | Overlay | Adds |
 |---|---|
 | `docker-compose.mcp.yml` | MCP server + `mcp-auth` (oauth2-proxy, bearer tokens from Open WebUI) |
-| `docker-compose.desktop.yml` | `desk-auth` (oauth2-proxy, browser sign-in) for `/stream/` (desktops) and `/ui/` (console) |
+| `docker-compose.desktop.yml` | `desk-auth` (oauth2-proxy, browser sign-in) for `/stream/` (desktops) and `/ui/` (console); `fwd-auth` for port forwards on their own origin |
 | `docker-compose.keycloak.yml` | Keycloak + Postgres, if you do not already run an OIDC provider |
 
 ## 1. Prepare (once)
@@ -17,6 +17,7 @@ is unchanged.
 WEBUI_URL=https://chat.example.com \
 KEYCLOAK_PUBLIC_URL=https://sso.example.com \
 DESKTOP_PUBLIC_URL=https://desk.example.com \
+FORWARD_PUBLIC_URL=https://fwd.example.com \
 deploy/setup-alpha.sh
 sudo chown 65534:65534 deploy/mcp-data
 ```
@@ -33,6 +34,8 @@ Put your TLS reverse proxy in front of:
 
 - `KEYCLOAK_PUBLIC_URL` → `127.0.0.1:8180`
 - `DESKTOP_PUBLIC_URL` → `127.0.0.1:4181`
+- `FORWARD_PUBLIC_URL` → `127.0.0.1:4182` (must be a different origin from the
+  console: another host name or port)
 
 Open WebUI and both oauth2-proxies must reach the issuer
 (`KEYCLOAK_PUBLIC_URL/realms/termiplus`) under that same URL, because token

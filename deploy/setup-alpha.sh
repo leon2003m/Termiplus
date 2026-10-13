@@ -5,6 +5,7 @@
 #   WEBUI_URL=https://chat.example.com \
 #   KEYCLOAK_PUBLIC_URL=https://sso.example.com \
 #   DESKTOP_PUBLIC_URL=https://desk.example.com \
+#   FORWARD_PUBLIC_URL=https://fwd.example.com \
 #   deploy/setup-alpha.sh
 #
 # Creates every missing secret in deploy/secrets/ (existing files are never
@@ -19,7 +20,8 @@ SECRETS="$DEPLOY/secrets"
 : "${WEBUI_URL:?set WEBUI_URL (how browsers reach Open WebUI, https://...)}"
 : "${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL (https://... in front of Keycloak)}"
 : "${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL (https://... in front of desk-auth)}"
-for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL"; do
+: "${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL (https://... in front of fwd-auth, its own origin)}"
+for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL" "$FORWARD_PUBLIC_URL"; do
   case "$u" in
     https://*) ;;
     *) echo "setup-alpha: $u must be an https:// URL (cookies are Secure)" >&2; exit 1 ;;
@@ -46,13 +48,15 @@ secret mcp_oidc_client_secret 32
 secret mcp_oidc_cookie_secret 16
 secret desk_oidc_client_secret 32
 secret desk_oidc_cookie_secret 16
+secret fwd_oidc_client_secret 32
+secret fwd_oidc_cookie_secret 16
 secret owui_oidc_client_secret 32
 secret owui_oauth_session_key 32
 secret keycloak_db_password 32
 secret keycloak_admin_password 24
 
 # The services read these as non-root users.
-chmod 0644 "$SECRETS"/control_api_key "$SECRETS"/mcp_* "$SECRETS"/desk_* "$SECRETS"/keycloak_db_password
+chmod 0644 "$SECRETS"/control_api_key "$SECRETS"/mcp_* "$SECRETS"/desk_* "$SECRETS"/fwd_* "$SECRETS"/keycloak_db_password
 
 if [ -s "$SECRETS/keycloak.env" ]; then
   echo "keep     secrets/keycloak.env"
@@ -73,6 +77,8 @@ src, dst = sys.argv[1], sys.argv[2]
 values = {
     "__WEBUI_URL__": "$WEBUI_URL",
     "__DESKTOP_PUBLIC_URL__": "$DESKTOP_PUBLIC_URL",
+    "__FORWARD_PUBLIC_URL__": "$FORWARD_PUBLIC_URL",
+    "__FWD_CLIENT_SECRET__": open("$SECRETS/fwd_oidc_client_secret").read(),
     "__OWUI_CLIENT_SECRET__": open("$SECRETS/owui_oidc_client_secret").read(),
     "__MCP_CLIENT_SECRET__": open("$SECRETS/mcp_oidc_client_secret").read(),
     "__DESK_CLIENT_SECRET__": open("$SECRETS/desk_oidc_client_secret").read(),
@@ -103,6 +109,7 @@ fi
   echo "MCP_OIDC_ISSUER_URL=$ISSUER"
   echo "KEYCLOAK_PUBLIC_URL=$KEYCLOAK_PUBLIC_URL"
   echo "DESKTOP_PUBLIC_URL=$DESKTOP_PUBLIC_URL"
+  echo "FORWARD_PUBLIC_URL=$FORWARD_PUBLIC_URL"
 } >"$ENVFILE"
 [ "$ENVFILE" = /dev/stdout ] || echo "wrote    deploy/.env"
 
@@ -111,7 +118,8 @@ cat <<EOF
 Next steps
 ==========
 1. TLS reverse proxy: $KEYCLOAK_PUBLIC_URL -> 127.0.0.1:8180 (Keycloak),
-   $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth). Open WebUI and both
+   $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth),
+   $FORWARD_PUBLIC_URL -> 127.0.0.1:4182 (fwd-auth). Open WebUI and the
    oauth2-proxies must reach $ISSUER under that same URL.
 2. Start (TERMINAL_IMAGE = the desktop image if you want desktops):
      docker compose -f docker-compose.yml -f docker-compose.mcp.yml \\
