@@ -18,12 +18,20 @@ type Server struct {
 	backend Backend
 	version string
 	tools   []tool
+	ent     *Entitlements
 }
 
 // NewServer builds the server with its fixed tool surface.
 func NewServer(auth Authenticator, backend Backend, version string) *Server {
 	s := &Server{auth: auth, backend: backend, version: version}
 	s.tools = s.buildTools()
+	return s
+}
+
+// WithEntitlements restricts which workspaces callers may see and launch.
+// Without it every workspace is open to every authenticated caller.
+func (s *Server) WithEntitlements(e *Entitlements) *Server {
+	s.ent = e
 	return s
 }
 
@@ -266,7 +274,11 @@ func (s *Server) buildTools() []tool {
 			readOnly:    true,
 			gate:        func(Principal, map[string]any) (bool, error) { return false, nil },
 			handle: func(ctx context.Context, p Principal, _ map[string]any) (any, error) {
-				return s.backend.ListWorkspaces(ctx, p)
+				all, err := s.backend.ListWorkspaces(ctx, p)
+				if err != nil {
+					return nil, err
+				}
+				return s.ent.filter(p, all), nil
 			},
 		},
 		{
@@ -274,6 +286,9 @@ func (s *Server) buildTools() []tool {
 			description: "Provision (or attach to) a sandbox session and return its access handle. A persistent session requires the termiplus-persist role and explicit human confirmation.",
 			inputSchema: `{"type":"object","properties":{"workspace":{"type":"string"},"persistent":{"type":"boolean","default":false},"label":{"type":"string"}},"required":["workspace"],"additionalProperties":true}`,
 			gate: func(p Principal, args map[string]any) (bool, error) {
+				if ws := argString(args, "workspace"); !s.ent.Allowed(p, ws) {
+					return false, fmt.Errorf("you are not entitled to the workspace %q", ws)
+				}
 				if argBool(args, "persistent") {
 					if !p.HasRole(RolePersist) {
 						return false, fmt.Errorf("persistent sessions require the %s role", RolePersist)

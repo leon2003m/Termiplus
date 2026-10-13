@@ -7,8 +7,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -58,7 +60,20 @@ func main() {
 	}
 
 	srv := mcp.NewServer(auth, backend, version)
-	log.Printf("termiplus mcp %s listening on %s, gateway %s, auth: %s", version, addr, gatewayURL, authDesc)
+	entDesc := "all workspaces open to every signed-in user"
+	if f := config.Get("MCP_ENTITLEMENTS_FILE", ""); f != "" {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			log.Fatalf("MCP_ENTITLEMENTS_FILE: %v", err)
+		}
+		ent, err := mcp.ParseEntitlements(data)
+		if err != nil {
+			log.Fatal(err)
+		}
+		srv.WithEntitlements(ent)
+		entDesc = fmt.Sprintf("entitlements from %s (%d workspaces, default %s)", f, len(ent.Workspaces), ent.Default)
+	}
+	log.Printf("termiplus mcp %s listening on %s, gateway %s, auth: %s, %s", version, addr, gatewayURL, authDesc, entDesc)
 	s := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(s.ListenAndServe())
 }

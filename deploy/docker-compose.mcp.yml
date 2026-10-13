@@ -25,6 +25,9 @@
 #   - deploy/secrets/mcp_oidc_client_secret: that client's secret (no newline).
 #   - deploy/secrets/mcp_oidc_cookie_secret: openssl rand -hex 16 (unused for
 #     bearer calls, but oauth2-proxy requires it).
+#   - deploy/entitlements.json: which groups may see and launch which workspace
+#     (docs/mcp.md, "Workspace entitlements"). The shipped file opens every
+#     workspace to every signed-in user.
 name: termiplus
 
 services:
@@ -82,7 +85,10 @@ services:
       GATEWAY_URL: http://gateway:8080
       GATEWAY_PUBLIC_URL: ${MCP_GATEWAY_PUBLIC_URL:-http://gateway:8080}
       CONTROL_API_KEY_FILE: /run/secrets/control_api_key
+      MCP_ENTITLEMENTS_FILE: /etc/termiplus/entitlements.json
     secrets: [control_api_key]
+    configs:
+      - { source: mcp_entitlements, target: /etc/termiplus/entitlements.json }
     networks: [ot-mcp, ot-mcp-auth]
     mem_limit: 128m
     cpus: 0.5
@@ -100,6 +106,9 @@ networks:
     internal: true
   ot-mcp-auth:
     internal: true
+
+configs:
+  mcp_entitlements: { file: ./entitlements.json }
 
 secrets:
   control_api_key: { file: ./secrets/control_api_key }

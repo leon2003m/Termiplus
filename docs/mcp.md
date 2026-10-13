@@ -211,7 +211,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Desktop workspace image (`image/desktop/`, XFCE + KasmVNC 1.5.0) | **experimental** — renders and streams under gVisor and Sysbox (see below) |
 | Stream routing through the gateway + `stream_url` | todo — **open decision**: how the gateway authenticates and forwards the stream |
 | Management UI | todo |
-| Workspace entitlements per role/group (which workspaces a user may launch) | todo |
+| Workspace entitlements per group (`deploy/entitlements.json`, `MCP_ENTITLEMENTS_FILE`) | **done** |
 
 ### Gateway control API
 
@@ -254,6 +254,32 @@ supplies the per-container stream password (for example derived like the
 terminal key from `KEY_SECRET`), and how browser access is authenticated
 (oauth2-proxy cookie flow). `VNC_PW` is visible inside the container to the
 user it protects, so it must be unique per container.
+
+### Workspace entitlements
+
+Which group may see and launch which workspace is configured in the MCP server,
+not in the gateway (the gateway trusts the MCP server's checks).
+`deploy/entitlements.json` is mounted as `MCP_ENTITLEMENTS_FILE`:
+
+```json
+{
+  "default": "deny",
+  "workspaces": {
+    "default": ["termiplus-users"],
+    "sysbox":  ["termiplus-dev", "termiplus-admin"]
+  }
+}
+```
+
+A listed workspace needs at least one of its groups (from the token's groups
+claim, like the roles). An unlisted one follows `default` (`allow` or `deny`).
+`termiplus-admin` is not an implicit entitlement. `list_workspaces` only shows
+permitted workspaces and `request_session` refuses others before any
+confirmation is asked for. The file is parsed strictly: an unknown field, a
+missing `default` or an empty group list stops the server instead of opening a
+workspace by accident. The shipped file is `{"default": "allow"}`; without
+`MCP_ENTITLEMENTS_FILE` every workspace is open to every signed-in user. Changes
+take effect on restart.
 
 ### Authentication (oauth2-proxy)
 
