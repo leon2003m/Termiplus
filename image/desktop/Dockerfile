@@ -31,5 +31,6 @@ RUN chmod 755 /usr/local/bin/start-desktop
 USER 1000:1000
 # The terminal image's HEALTHCHECK (Open Terminal on 8000) still applies.
 EXPOSE 8000 6901
-ENTRYPOINT ["/usr/local/bin/start-desktop"]
+# The terminal image's start (DNS forwarder in resolv.conf) runs first.
+ENTRYPOINT ["/usr/local/libexec/termiplus/start", "/usr/local/bin/start-desktop"]
 CMD []
