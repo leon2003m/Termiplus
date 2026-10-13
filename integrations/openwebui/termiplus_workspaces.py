@@ -123,7 +123,7 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> Any:
         """
-        Show the user a browser link to a port inside one of their sessions (e.g. a dev server the assistant started on port 3000). Only the session's owner can open it.
+        Show the user a browser link to a port inside one of their sessions (e.g. a dev server the assistant started on port 3000). Only the session's owner can open it. Not needed for the desktop: request_session already shows it.
         :param session_id: The session_id from list_sessions.
         :param port: The TCP port the app listens on inside the session.
         """
@@ -320,7 +320,10 @@ def _hide_stream_passwords(text: str) -> Any:
         + rows
     )
     context = json.dumps(data if isinstance(data, list) else sessions[0], separators=(",", ":"))
-    context += "\nThe desktop link and password are shown to the user in the chat; never ask for or repeat the password."
+    context += (
+        "\nThe desktop link and password are shown to the user in the chat; never ask for or repeat the password."
+        " Nothing else is needed to open the desktop."
+    )
     return HTMLResponse(content=page, headers={"Content-Disposition": "inline"}), context
 
 
