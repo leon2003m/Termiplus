@@ -34,6 +34,12 @@ cleanup() {
   if [ "${#ctrs[@]}" -gt 0 ]; then docker rm -f "${ctrs[@]}" >/dev/null 2>&1 || true; fi
   mapfile -t vols < <(docker volume ls -q --filter label=termiplus.managed=true)
   if [ "${#vols[@]}" -gt 0 ]; then docker volume rm "${vols[@]}" >/dev/null 2>&1 || true; fi
+  # Sysbox removes containers slowly, so "compose down" can leave ot-sandbox
+  # behind (it did not exist before this run; see the guard below).
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    docker network inspect ot-sandbox >/dev/null 2>&1 || break
+    docker network rm ot-sandbox >/dev/null 2>&1 || sleep 3
+  done
   if [ "$CREATED_OWUI" = 1 ]; then docker network rm owui >/dev/null 2>&1 || true; fi
   rm -rf "$WORK"
 }
