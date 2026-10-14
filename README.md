@@ -124,7 +124,7 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 |---|---|---|
 | `http://gateway:8080` | `default` | **Persistent** terminal, gVisor |
 | `http://gateway:8080/p/scratch` | `scratch` | **Ephemeral** sandbox per chat, gVisor |
-| `http://gateway:8080/p/sysbox` | `sysbox` | Persistent, Sysbox (systemd or Docker inside possible), same home as `default` |
+| `http://gateway:8080/p/sysbox` | `sysbox` | Persistent, Sysbox (systemd or Docker inside possible: `sudo apt-get update && sudo apt-get install -y docker.io`, then `start-docker`; the daemon restarts with the container and `docker` needs no sudo), same home as `default` |
 
 ```json
 {

@@ -16,4 +16,14 @@ if [ -n "$resolver" ]; then
     echo "start: ignoring malformed OPEN_TERMINAL_RESOLVER" >&2
   fi
 fi
+# Under Sysbox the workspace can run its own Docker daemon once the user has
+# installed it. Start it if present, and tell the model in the tool
+# description.
+if grep -q sysboxfs /proc/self/mountinfo 2>/dev/null; then
+  if command -v dockerd >/dev/null 2>&1; then
+    /usr/local/bin/start-docker >/dev/null || echo "start: could not start dockerd" >&2
+  fi
+  OPEN_TERMINAL_EXECUTE_DESCRIPTION="${OPEN_TERMINAL_EXECUTE_DESCRIPTION:-} Docker works in this container: if it is missing, run sudo apt-get update && sudo apt-get install -y docker.io, then start-docker. Afterwards docker works without sudo and starts by itself after a restart."
+  export OPEN_TERMINAL_EXECUTE_DESCRIPTION
+fi
 exec "$@"

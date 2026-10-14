@@ -2,3 +2,4 @@
 !Dockerfile
 !bash-ctty
 !start
+!start-docker
