@@ -141,7 +141,14 @@ def main_checks():
     check("private range 10.0.0.0/8 blocked", "blocked" in out or out.startswith("000"), out)
     out = run(ALICE, "curl -s -m 5 -o /dev/null -w '%{http_code}' http://172.30.0.1:2375/_ping || echo blocked")
     check("VM itself blocked", "blocked" in out or out.startswith("000"), out)
-    out = run(ALICE, "curl -s -m 10 -o /dev/null -w '%{http_code}' https://github.com || echo blocked")
+    if RUNTIME == "runsc":
+        # The base stack has no DNS forwarder, and gVisor cannot reach Docker's
+        # embedded resolver (#3; validate.sh covers DNS with the forwarder). Test
+        # the egress path itself: the host resolves through its own resolver.
+        ip = socket.gethostbyname("github.com")
+        out = run(ALICE, f"curl -s -m 10 -o /dev/null -w '%{{http_code}}' --resolve github.com:443:{ip} https://github.com || echo blocked")
+    else:
+        out = run(ALICE, "curl -s -m 10 -o /dev/null -w '%{http_code}' https://github.com || echo blocked")
     check("internet reachable", out.startswith(("2", "3")), out)
 
     if RUNTIME == "sysbox-runc":
