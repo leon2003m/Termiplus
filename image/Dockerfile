@@ -52,6 +52,7 @@ RUN useradd -m -u 1000 -s /bin/bash user \
 COPY bash-ctty /usr/local/libexec/termiplus/bash
 COPY start /usr/local/libexec/termiplus/start
 COPY start-docker /usr/local/bin/start-docker
+COPY apt-docker.conf /etc/apt/apt.conf.d/90termiplus-docker
 RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/start /usr/local/bin/start-docker
 
 USER 1000:1000
