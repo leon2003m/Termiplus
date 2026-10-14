@@ -128,12 +128,15 @@ Next steps
    deploy/secrets/keycloak_admin_password): realm "termiplus", create users,
    put them into termiplus-persist / termiplus-admin as needed.
 4. Open WebUI environment (then restart it). Existing local accounts with the
-   same e-mail are merged, so their Open WebUI ids - and terminal homes - stay:
+   same e-mail are merged, so their Open WebUI ids - and terminal homes - stay.
+   offline_access keeps the termiplus tool working while Open WebUI's own
+   login lasts; without it the token Open WebUI forwards ends with Keycloak's
+   browser session (30 min idle) and the tool asks users to sign in again:
      OAUTH_CLIENT_ID=owui
      OAUTH_CLIENT_SECRET=<deploy/secrets/owui_oidc_client_secret>
      OPENID_PROVIDER_URL=$ISSUER/.well-known/openid-configuration
      OAUTH_PROVIDER_NAME=Keycloak
-     OAUTH_SCOPES=openid email profile
+     OAUTH_SCOPES=openid email profile offline_access
      ENABLE_OAUTH_SIGNUP=true
      OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
      OAUTH_SESSION_TOKEN_ENCRYPTION_KEY=<deploy/secrets/owui_oauth_session_key>
