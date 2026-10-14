@@ -146,8 +146,9 @@ def main_checks():
 
     if RUNTIME == "sysbox-runc":
         print("-- Docker inside Sysbox")
-        out = run(ALICE, "(sudo apt-get update -qq && sudo apt-get install -y -qq docker.io) >/tmp/apt.log 2>&1 || tail -5 /tmp/apt.log; start-docker", timeout=600)
-        check("start-docker starts a daemon", "Docker is running" in out, out[-300:])
+        out = run(ALICE, "(sudo apt-get update -qq && sudo apt-get install -y -qq docker.io) >/tmp/apt.log 2>&1 || tail -5 /tmp/apt.log; "
+                  "docker info --format ok-{{.ServerVersion}} 2>&1 | tail -1", timeout=600)
+        check("installing Docker starts the daemon", out.startswith("ok-"), out[-300:])
         # A new command: the daemon outlives the one that started it.
         out = run(ALICE, "docker run --rm busybox echo nested-ok 2>&1 | tail -1", timeout=300)
         check("Docker runs containers inside the workspace", "nested-ok" in out, out[-300:])
