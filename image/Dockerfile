@@ -51,7 +51,8 @@ RUN useradd -m -u 1000 -s /bin/bash user \
 # control works. Commands run by the model use /bin/sh -c and are unaffected.
 COPY bash-ctty /usr/local/libexec/termiplus/bash
 COPY start /usr/local/libexec/termiplus/start
-RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/start
+COPY start-docker /usr/local/bin/start-docker
+RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/start /usr/local/bin/start-docker
 
 USER 1000:1000
 WORKDIR /home/user
@@ -63,7 +64,7 @@ ENV HOME=/home/user \
     USER=user \
     SHELL=/usr/local/libexec/termiplus/bash \
     OPEN_TERMINAL_EXECUTE_TIMEOUT=60 \
-    OPEN_TERMINAL_EXECUTE_DESCRIPTION="Debian container of your own; nothing here affects the host. sudo works without a password (e.g. sudo apt-get install -y PACKAGE). Waits up to 60 s and returns the output; if status is still running, use get_process_status."
+    OPEN_TERMINAL_EXECUTE_DESCRIPTION="Debian container of your own; nothing here affects the host. sudo works without a password (e.g. sudo apt-get update && sudo apt-get install -y PACKAGE). Waits up to 60 s and returns the output; if status is still running, use get_process_status."
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

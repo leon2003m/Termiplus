@@ -52,13 +52,13 @@ def call(method, path, user=None, chat=None, body=None, key=KEY):
         return e.code, e.read().decode()
 
 
-def run(user, cmd, chat=None, prefix=""):
+def run(user, cmd, chat=None, prefix="", timeout=30):
     """Run a shell command in the user's terminal and return its output."""
     status, body = call("POST", prefix + "/execute", user, chat, {"command": cmd})
     if status != 200:
         return f"<execute failed: {status} {body[:200]}>"
     pid = json.loads(body)["id"]
-    for _ in range(100):
+    for _ in range(int(timeout / 0.3)):
         status, body = call("GET", f"{prefix}/execute/{pid}/status", user, chat)
         data = json.loads(body) if status == 200 else {}
         if data.get("status") == "done":
@@ -133,6 +133,8 @@ def main_checks():
     status, body = call("GET", "/openapi.json", ALICE)
     desc = json.loads(body)["paths"]["/execute"]["post"]["description"] if status == 200 else ""
     check("tool description names the user and sudo", "as user 'user'" in desc and "sudo works" in desc, desc[:300])
+    check("tool description mentions Docker only under Sysbox",
+          ("Docker works" in desc) == (RUNTIME == "sysbox-runc"), desc[-200:])
 
     print("-- egress")
     out = run(ALICE, "curl -s -m 5 -o /dev/null -w '%{http_code}' http://10.0.0.1 || echo blocked")
@@ -141,6 +143,14 @@ def main_checks():
     check("VM itself blocked", "blocked" in out or out.startswith("000"), out)
     out = run(ALICE, "curl -s -m 10 -o /dev/null -w '%{http_code}' https://github.com || echo blocked")
     check("internet reachable", out.startswith(("2", "3")), out)
+
+    if RUNTIME == "sysbox-runc":
+        print("-- Docker inside Sysbox")
+        out = run(ALICE, "(sudo apt-get update -qq && sudo apt-get install -y -qq docker.io) >/tmp/apt.log 2>&1 || tail -5 /tmp/apt.log; start-docker", timeout=600)
+        check("start-docker starts a daemon", "Docker is running" in out, out[-300:])
+        # A new command: the daemon outlives the one that started it.
+        out = run(ALICE, "docker run --rm busybox echo nested-ok 2>&1 | tail -1", timeout=300)
+        check("Docker runs containers inside the workspace", "nested-ok" in out, out[-300:])
 
     if RUNTIME == "runsc":
         print("-- gVisor")
