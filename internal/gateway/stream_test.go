@@ -260,6 +260,16 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	if code, _ := get("kc-alice", "/stream/"+bob.ID+"/app.js", nil); code != http.StatusNotFound {
 		t.Fatalf("bob's desktop for alice: %d", code)
 	}
+	// A desktop that does not answer (here: someone else's, which looks the
+	// same as a stopped one) gets the start page; assets keep the error.
+	bobPage := "/stream/" + bob.ID + "/?path=x"
+	if code, hdr := get("kc-alice", bobPage, nil); code != http.StatusNotFound ||
+		!strings.HasPrefix(hdr.Get("Content-Type"), "text/html") || !strings.Contains(hdr.Get("Content-Security-Policy"), "default-src 'self'") {
+		t.Fatalf("start page: %d %v", code, hdr)
+	}
+	if _, hdr := get("kc-alice", "/stream/"+bob.ID+"/app.js", nil); strings.HasPrefix(hdr.Get("Content-Type"), "text/html") {
+		t.Fatalf("asset got the start page: %v", hdr)
+	}
 	if code, _ := get("kc-carol", wantLoc, nil); code != http.StatusForbidden {
 		t.Fatalf("unlinked user: %d", code)
 	}
@@ -268,6 +278,25 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	}
 	if code, hdr := get("kc-alice", strings.TrimSuffix(path, "/"), nil); code != http.StatusFound || hdr.Get("Location") != path {
 		t.Fatalf("missing slash: %d %q", code, hdr.Get("Location"))
+	}
+	// The start page looks the desktop up: running, gone but restartable
+	// (persistent), or someone else's (unknown).
+	desk := func(id string) (int, string) {
+		req, _ := http.NewRequest(http.MethodGet, front.URL+"/ui/api/desktops/"+id, nil)
+		req.Header.Set("X-Forwarded-User", "kc-alice")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, b := desk(s.ID); code != http.StatusOK || !strings.Contains(b, `"running":true`) {
+		t.Fatalf("own running desktop: %d %s", code, b)
+	}
+	if code, b := desk(bob.ID); code != http.StatusNotFound {
+		t.Fatalf("bob's desktop for alice: %d %s", code, b)
 	}
 	// WebSockets only from the desktop's own origin.
 	ws := map[string]string{"Connection": "Upgrade", "Upgrade": "websocket"}
@@ -279,6 +308,12 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 		if code, _ := get("kc-alice", path+"websockify", hdr); code != http.StatusForbidden {
 			t.Errorf("WebSocket from Origin %q: want 403, got %d", origin, code)
 		}
+	}
+	if code, _ := h.control(t, http.MethodDelete, "sessions/"+s.ID, testControlKey, "alice", ""); code != http.StatusOK && code != http.StatusNoContent {
+		t.Fatalf("remove alice's desktop: %d", code)
+	}
+	if code, b := desk(s.ID); code != http.StatusOK || !strings.Contains(b, `"running":false`) || !strings.Contains(b, `"workspace":"desk"`) {
+		t.Fatalf("removed persistent desktop: %d %s", code, b)
 	}
 }
 

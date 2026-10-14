@@ -40,6 +40,9 @@ YAML
   # Write permission only (no "owner"): the stream user cannot use the admin API.
   printf '%s\n%s\n' "$pw" "$pw" | kasmvncpasswd -u user -w -r >/dev/null
   unset pw
+  # A stopped and restarted container keeps /tmp, and the home volume keeps
+  # ~/.vnc: stale lock and pid files of display :1 would stop KasmVNC.
+  rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 "$HOME"/.vnc/*:1.pid
   vncserver :1 -fg -geometry 1280x800 -depth 24 &
 fi
 unset pw

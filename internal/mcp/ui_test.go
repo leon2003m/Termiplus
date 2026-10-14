@@ -84,6 +84,11 @@ func TestUIStaticAndHeaders(t *testing.T) {
 	if csp := h.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Fatalf("CSP: %q", csp)
 	}
+	for _, f2 := range []string{"/ui/app.js", "/ui/desktop.js"} {
+		if code, _, _ := f.do(t, http.MethodGet, f2, "", "", "", nil); code != http.StatusOK {
+			t.Fatalf("%s: %d", f2, code)
+		}
+	}
 	if code, _, _ := f.do(t, http.MethodGet, "/ui/app.js", "", "", "", nil); code != http.StatusOK {
 		t.Fatalf("app.js: %d", code)
 	}

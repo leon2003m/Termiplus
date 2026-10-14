@@ -331,6 +331,15 @@ unusable. How it fits together:
    is no secret: the OWUI plugin hands it to the model, which gives it to the
    user as a Markdown link; the console shows it too. The gateway itself no
    longer serves a public `/stream/` path.
+6. **Page path and stopped desktops.** KasmVNC's client opens its WebSocket
+   at `/<path>` of the host (default `/websockify`), so the MCP server
+   redirects the desktop page to `?path=stream/<container>/websockify`. When
+   the desktop does not answer (idle-stopped, removed or still starting), the
+   page is replaced by a small one (`ui/desktop.js`) that looks the desktop up
+   (`/ui/api/desktops/<container>`: the user's session, or a persistent
+   desktop workspace of theirs whose container is gone) and offers to start
+   it through the console API, then reloads once it answers. Other users'
+   desktops look like unknown ones.
 
 `test/integration/oidc/desktop.sh` verifies the sign-in against a real
 Keycloak with the overlay's exact flags: no request reaches a desktop without

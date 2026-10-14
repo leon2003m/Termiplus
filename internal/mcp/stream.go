@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -58,8 +59,9 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, streamPathPrefix+session+"/", http.StatusFound)
 		return
 	}
-	if page := strings.TrimPrefix(r.URL.Path, streamPathPrefix+session+"/"); r.Method == http.MethodGet &&
-		(page == "" || page == "index.html" || page == "vnc.html") && !r.URL.Query().Has("path") {
+	page := strings.TrimPrefix(r.URL.Path, streamPathPrefix+session+"/")
+	isPage := r.Method == http.MethodGet && (page == "" || page == "index.html" || page == "vnc.html")
+	if isPage && !r.URL.Query().Has("path") {
 		// KasmVNC's client opens its WebSocket at /<path> of the host, default
 		// /websockify, which is outside this session; its "path" URL parameter
 		// moves it here.
@@ -89,6 +91,15 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			resp.Header.Del("Www-Authenticate")
+			if isPage && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadGateway) {
+				// Stopped, gone or still starting: a page that says so and
+				// can start it, instead of the gateway's JSON.
+				resp.Body.Close()
+				resp.Header = http.Header{}
+				setStoppedPage(resp.Header)
+				resp.Body = io.NopCloser(strings.NewReader(stoppedPage))
+				resp.ContentLength = int64(len(stoppedPage))
+			}
 			return nil
 		},
 		FlushInterval: -1,
@@ -109,4 +120,32 @@ func isUpgrade(r *http.Request) bool {
 		}
 	}
 	return r.Header.Get("Upgrade") != ""
+}
+
+// stoppedPage replaces a desktop that does not answer; ui/desktop.js says
+// why and offers to start it.
+const stoppedPage = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>termiplus desktop</title>
+<link rel="stylesheet" href="/ui/app.css">
+<script src="/ui/desktop.js" defer></script>
+</head>
+<body>
+<header><h1>termiplus</h1></header>
+<main>
+  <p id="status" role="status">Loading …</p>
+  <p><button id="start" class="primary" type="button" hidden>Start desktop</button> <a class="button" href="/ui/">Console</a></p>
+</main>
+</body>
+</html>
+`
+
+func setStoppedPage(h http.Header) {
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "no-store")
 }
