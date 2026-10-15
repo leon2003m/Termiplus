@@ -242,7 +242,11 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 	}
 	if s.ids != nil && p.Subject != "" {
 		if err := s.ids.Record(p.Subject, p.UserID); err != nil {
-			log.Printf("identity: record %s: %v", p.Subject, err)
+			// Do not continue with the caller-supplied Open WebUI id when it
+			// conflicts with an established mapping. In particular, never let
+			// a valid OIDC token plus a replayed plugin key transfer a home.
+			log.Printf("identity binding rejected for subject %s: %v", p.Subject, err)
+			return nil, &rpcError{Code: codeForbidden, Message: "identity is already linked to a different Open WebUI user; contact an administrator"}
 		}
 	}
 	var params struct {
