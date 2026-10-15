@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,17 +12,22 @@ import (
 	"termiplus/internal/naming"
 )
 
-// IdentityStore remembers which Open WebUI user an OIDC subject belongs to.
-// The MCP server learns the pair from Open WebUI plugin calls (verified token
-// plus plugin key, see ProxyHeaderAuthenticator) and the management UI, where
-// the browser sign-in only yields the subject, uses it to find the user's
-// sessions. A subject that never came through the plugin is unknown. The file
-// holds no secrets, only ids.
+// IdentityStore remembers the stable mapping between an OIDC subject and an
+// Open WebUI user id. The first mapping is learned only from the trusted native
+// Open WebUI plugin (verified OIDC identity plus the deployment's plugin key).
+// Once created, mappings are immutable through this API: changing accounts or
+// reusing one Open WebUI id for a different OIDC subject requires an explicit
+// administrative edit of the store. This prevents a later plugin call from
+// silently moving an existing user's persistent home to another identity.
+//
+// The store is scoped to one configured OIDC issuer. If multiple issuers are
+// ever supported, keys must become issuer+subject before enabling them.
 type IdentityStore struct {
 	path string
 
 	mu       sync.Mutex
 	subjects map[string]string // OIDC subject -> Open WebUI user id
+	owners   map[string]string // Open WebUI user id -> OIDC subject
 }
 
 type identityFile struct {
@@ -32,7 +36,7 @@ type identityFile struct {
 
 // OpenIdentityStore loads path, or starts empty if it does not exist yet.
 func OpenIdentityStore(path string) (*IdentityStore, error) {
-	s := &IdentityStore{path: path, subjects: map[string]string{}}
+	s := &IdentityStore{path: path, subjects: map[string]string{}, owners: map[string]string{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return s, nil
@@ -48,7 +52,11 @@ func OpenIdentityStore(path string) (*IdentityStore, error) {
 		if !naming.UserID.MatchString(sub) || !naming.UserID.MatchString(owui) {
 			return nil, fmt.Errorf("identity store %s: invalid entry %q -> %q", path, sub, owui)
 		}
+		if prior, exists := s.owners[owui]; exists && prior != sub {
+			return nil, fmt.Errorf("identity store %s: Open WebUI id %q is mapped to multiple OIDC subjects", path, owui)
+		}
 		s.subjects[sub] = owui
+		s.owners[owui] = sub
 	}
 	return s, nil
 }
@@ -61,28 +69,32 @@ func (s *IdentityStore) Lookup(sub string) (string, bool) {
 	return owui, ok
 }
 
-// Record stores sub -> owui and persists it when it changed. The newest pair
-// wins: a subject belongs to one Open WebUI user at a time.
+// Record creates a mapping if neither identity is already bound elsewhere.
+// Repeating the same mapping is idempotent. Rebinding requires an explicit
+// administrative edit of the identity file; normal plugin requests cannot
+// transfer ownership of an existing user's home.
 func (s *IdentityStore) Record(sub, owui string) error {
 	if !naming.UserID.MatchString(sub) || !naming.UserID.MatchString(owui) {
 		return fmt.Errorf("invalid identity %q -> %q", sub, owui)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	old, had := s.subjects[sub]
-	if had && old == owui {
-		return nil
-	}
-	if had {
-		log.Printf("identity: subject %s now belongs to Open WebUI user %s (was %s)", sub, owui, old)
-	}
-	s.subjects[sub] = owui
-	if err := s.save(); err != nil {
-		if had {
-			s.subjects[sub] = old
-		} else {
-			delete(s.subjects, sub)
+
+	if old, exists := s.subjects[sub]; exists {
+		if old == owui {
+			return nil
 		}
+		return fmt.Errorf("OIDC subject is already linked to a different Open WebUI user; administrator intervention required")
+	}
+	if oldSub, exists := s.owners[owui]; exists && oldSub != sub {
+		return fmt.Errorf("Open WebUI user is already linked to a different OIDC subject; administrator intervention required")
+	}
+
+	s.subjects[sub] = owui
+	s.owners[owui] = sub
+	if err := s.save(); err != nil {
+		delete(s.subjects, sub)
+		delete(s.owners, owui)
 		return err
 	}
 	return nil
