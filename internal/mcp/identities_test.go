@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestIdentityStorePersists(t *testing.T) {
+func TestIdentityStorePersistsAndIsImmutable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "identities.json")
 	s, err := OpenIdentityStore(path)
 	if err != nil {
@@ -18,10 +18,19 @@ func TestIdentityStorePersists(t *testing.T) {
 	if err := s.Record("sub-1", "owui-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Record("sub-1", "owui-2"); err != nil { // newest pair wins
+	// Repeating the exact same pair is idempotent.
+	if err := s.Record("sub-1", "owui-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Record("bad id", "owui-1"); err == nil {
+	// A subject cannot be silently rebound to another Open WebUI account.
+	if err := s.Record("sub-1", "owui-2"); err == nil {
+		t.Fatal("accepted rebind of an existing OIDC subject")
+	}
+	// Nor can another subject claim the existing Open WebUI account.
+	if err := s.Record("sub-2", "owui-1"); err == nil {
+		t.Fatal("accepted a second OIDC subject for the same Open WebUI user")
+	}
+	if err := s.Record("bad id", "owui-3"); err == nil {
 		t.Fatal("invalid subject accepted")
 	}
 	st, err := os.Stat(path)
@@ -35,17 +44,21 @@ func TestIdentityStorePersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := again.Lookup("sub-1"); !ok || got != "owui-2" {
+	if got, ok := again.Lookup("sub-1"); !ok || got != "owui-1" {
 		t.Fatalf("after reload: %q %v", got, ok)
+	}
+	if _, ok := again.Lookup("sub-2"); ok {
+		t.Fatal("failed rebind unexpectedly persisted")
 	}
 }
 
 func TestIdentityStoreRejectsBadFile(t *testing.T) {
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"not json":   "nope",
-		"bad entry":  `{"subjects":{"a b":"owui"}}`,
-		"bad target": `{"subjects":{"sub":"../x"}}`,
+		"not json":       "nope",
+		"bad entry":      `{"subjects":{"a b":"owui"}}`,
+		"bad target":     `{"subjects":{"sub":"../x"}}`,
+		"duplicate owner": `{"subjects":{"sub-1":"owui-1","sub-2":"owui-1"}}`,
 	} {
 		path := filepath.Join(dir, "f.json")
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -57,7 +70,7 @@ func TestIdentityStoreRejectsBadFile(t *testing.T) {
 	}
 }
 
-// Plugin calls (verified token + plugin key) teach the server the pair.
+// Plugin calls (verified token + plugin key) may establish a mapping once.
 func TestServerRecordsIdentityFromPlugin(t *testing.T) {
 	ids, err := OpenIdentityStore(filepath.Join(t.TempDir(), "ids.json"))
 	if err != nil {
@@ -72,11 +85,23 @@ func TestServerRecordsIdentityFromPlugin(t *testing.T) {
 	if got, ok := ids.Lookup("kc-sub"); !ok || got != "owui-7" {
 		t.Fatalf("not recorded: %q %v", got, ok)
 	}
-	// A rejected call records nothing.
+
+	// A valid token and the shared plugin key are not enough to reassign a
+	// previously bound subject to a different Open WebUI id.
+	req[owuiUserHeader] = "owui-evil"
+	resp := callWithHeaders(t, s, req, "list_sessions")
+	if resp.Error == nil {
+		t.Fatal("rebind attempt should fail closed")
+	}
+	if got, _ := ids.Lookup("kc-sub"); got != "owui-7" {
+		t.Fatalf("rebind attempt changed mapping to %q", got)
+	}
+
+	// A rejected call with an invalid plugin key cannot establish or change it.
 	req[owuiKeyHeader] = "wrong"
 	req[owuiUserHeader] = "owui-evil"
 	_ = callWithHeaders(t, s, req, "list_sessions")
 	if got, _ := ids.Lookup("kc-sub"); got != "owui-7" {
-		t.Fatalf("rejected call changed the mapping to %q", got)
+		t.Fatalf("rejected call changed mapping to %q", got)
 	}
 }
