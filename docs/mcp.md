@@ -76,10 +76,15 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      plugin's `plugin_key` valve) and `X-Termiplus-Owui-User` (`__user__["id"]`).
      The MCP server then uses that id as `user_id` and still takes the roles
      from the verified token; without both a verified token and the key the call
-     is unauthenticated. Open WebUI fetched the token for that same user, and
-     the trust is the same as towards the gateway, where Open WebUI names the
-     user in `X-User-Id` with its API key. Keycloak stays the login and the
-     source of the groups.
+     is unauthenticated. The first valid plugin call creates a persistent
+     subject-to-Open-WebUI-user binding. That binding is one-to-one and
+     immutable through normal requests: a later request trying to rebind either
+     side is rejected before any tool runs. Re-linking requires an explicit
+     administrator edit of `MCP_IDENTITY_FILE`. This prevents a stolen/reused
+     plugin key from silently transferring an already-linked user's home.
+     The plugin key remains a bootstrap trust anchor: keep it only in the
+     Open WebUI admin-controlled valve and Docker secret. Keycloak remains the
+     source of authentication and groups.
   5. The MCP server is the **only** component that sets the gateway's
      `X-User-Id`, over the existing API-key-authenticated, private MCP↔gateway
      link. The gateway therefore receives a trustworthy identity.
@@ -436,10 +441,16 @@ server sits only on the internal auth network.
 Known limits: the `terminal_session` handle of an ephemeral session created via
 the control API is kept in gateway memory only (lost on a gateway restart, which
 is acceptable for throwaway sandboxes). Open WebUI chat ids are never returned.
-Whoever holds the plugin key can name any Open WebUI user (with any valid
-token), exactly like the holder of the gateway API key; keep it in Open WebUI's
-valve and the Docker secret only. A caller outside Open WebUI (another MCP
-client with a Keycloak token) cannot use the MCP server while the key is set.
+The plugin key is a bootstrap trust anchor: whoever holds it and has a valid
+token can attempt to claim an as-yet-unlinked Open WebUI user id on that
+subject's first call. After a mapping exists, the server enforces an immutable
+one-to-one binding and rejects reassignments before running tools. Keep the key
+only in Open WebUI's admin-controlled valve and the Docker secret; do not expose
+it to ordinary users or model-visible tool arguments. A caller outside Open
+WebUI (another MCP client with a Keycloak token) cannot use the MCP server while
+the key is set. If you need stronger first-enrollment assurance than this shared
+bootstrap secret, pre-provision the subject-to-user mapping through a trusted
+admin workflow before enabling user access.
 
 Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
 isolated throwaway stack: ephemeral and persistent creation, the mismatch and
