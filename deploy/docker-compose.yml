@@ -36,6 +36,8 @@ services:
       MAX_MEMORY_MB: "8192"
       MAX_CPUS: "4"
       MAX_PIDS: "2048"
+      # Disk quota per home volume, e.g. 20G (needs XFS project quotas, see README).
+      HOME_VOLUME_SIZE: ${HOME_VOLUME_SIZE:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     secrets: [proxy_token]

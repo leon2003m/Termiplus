@@ -150,6 +150,34 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 
 **Ephemeral.** One container per user, chat and policy (`ot-e-<user>-<chat>-<policy>`), no volume. Files live in the container and disappear with it. Docker deletes it as soon as it stops (`AutoRemove`, forced by the proxy). The same chat keeps its sandbox until it goes idle, then gets a fresh one. At `max_per_user`, the user's least recently used sandbox without an open terminal is deleted; if all are in use, the request gets 429. Requests without a chat id share one `nochat` sandbox per user. Open WebUI's file browser sends the chat id only once the chat is saved (after the first message): in a new chat it shows the `nochat` sandbox, while the model's first tool call already gets the chat's own sandbox.
 
+### Disk quota for home volumes
+
+Set `HOME_VOLUME_SIZE` on the socket proxy (for example `20G`; units `M`, `G`, `T`, at least `64M`) and every **new** home volume gets that hard limit. A full home then fails with "No space left on device" inside the workspace instead of filling the host. Verified under gVisor, Sysbox and runc. The proxy adds the limit itself, so the gateway cannot ask for a different size or other driver options.
+
+Docker enforces it with XFS project quotas, so `/var/lib/docker/volumes` must be on XFS mounted with `prjquota`. Docker checks this when it starts. Without it, Docker refuses to create the volume and the workspace does not start ("quota size requested but no quota support"); the limit is never skipped silently. If the host is not on XFS, a loopback file works on any filesystem (sparse, so it only uses what is written):
+
+```bash
+sudo systemctl stop docker.socket docker
+sudo touch /var/lib/termiplus-volumes.xfs
+sudo chattr +C /var/lib/termiplus-volumes.xfs 2>/dev/null || true   # btrfs: no copy-on-write for the image
+sudo truncate -s 500G /var/lib/termiplus-volumes.xfs                 # upper bound for all volumes together
+sudo mkfs.xfs -q /var/lib/termiplus-volumes.xfs
+sudo mv /var/lib/docker/volumes /var/lib/docker/volumes.old
+sudo mkdir /var/lib/docker/volumes
+echo '/var/lib/termiplus-volumes.xfs /var/lib/docker/volumes xfs loop,prjquota 0 0' | sudo tee -a /etc/fstab
+sudo mount /var/lib/docker/volumes
+sudo cp -a /var/lib/docker/volumes.old/. /var/lib/docker/volumes/
+sudo systemctl start docker
+```
+
+This moves **all** Docker volumes on the host, not only termiplus ones. Remove `volumes.old` once everything works.
+
+Limits:
+
+- Existing volumes keep no limit: Docker sets the quota only when it creates a volume. To limit an existing home, copy its contents into a new volume (remove the workspace container first, then the old volume).
+- Ephemeral sandboxes and the container layer of persistent workspaces (everything outside `/home/user`) are not covered.
+- `df` inside the workspace shows the whole filesystem, not the quota.
+
 ## What the socket proxy allows
 
 Everything not listed is 403.
@@ -159,7 +187,7 @@ Everything not listed is 403.
 | `GET /_ping`, `/version` | none |
 | `GET /containers/json` | label filter forced to termiplus containers |
 | `POST /containers/create` | Name must be `ot-u-...` or `ot-e-...`. Body decoded strictly (unknown fields rejected) and rebuilt from checked values. Only the configured image, a runtime from the allowlist (runc refused), the sandbox network, capped memory/CPU/PIDs. Persistent: exactly one volume at `/home/user` belonging to the same user. Ephemeral: no mounts, `AutoRemove` forced. Env only `OPEN_TERMINAL_*`. `Privileged:false` forced. No ports, binds, capabilities, devices, security options, namespaces |
-| `POST /volumes/create` | Name `ot-home-...`, local driver, no driver options (blocks `o=bind,device=/`) |
+| `POST /volumes/create` | Name `ot-home-...`, local driver, no driver options from the caller (blocks `o=bind,device=/`). With `HOME_VOLUME_SIZE` the proxy adds exactly `size=<that value>` |
 | `GET /volumes/<name>` | termiplus volumes only |
 | `GET /images/<configured image>/json` | exactly the configured terminal image, no query. The proxy answers with the image ID only; labels, environment and history are not passed on |
 | `GET .../json`, `POST .../start`, `POST .../stop`, `DELETE` | Target resolved by the daemon first, must carry the termiplus label and name, then addressed by full ID. `DELETE` without `v` |
@@ -229,6 +257,7 @@ curl -X PUT -H "X-Admin-Key: $ADMIN_API_KEY" http://gateway:8080/admin/netpolicy
 | `PROXY_TOKEN` / `PROXY_TOKEN_FILE` | both | optional, recommended |
 | `ALLOWED_RUNTIMES` | sockproxy | `runsc,sysbox-runc` |
 | `MAX_MEMORY_MB`, `MAX_CPUS`, `MAX_PIDS` | sockproxy | `8192`, `4`, `2048` |
+| `HOME_VOLUME_SIZE` | sockproxy | empty (no limit); quota for new home volumes, e.g. `20G` (needs XFS project quotas, see *Disk quota for home volumes*) |
 | `DOCKER_SOCKET` | sockproxy | `/var/run/docker.sock` |
 | `GATEWAY_API_KEY` / `_FILE` | gateway | required, min. 32 chars |
 | `KEY_SECRET` / `_FILE` | gateway | required, min. 32 chars |
@@ -313,7 +342,7 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 - gVisor policies need the netpolicy overlay for DNS (#3). Without it, terminals under runsc connect by IP only.
 - Instance state lives in gateway memory: run one gateway replica. After a restart it adopts running containers.
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
-- Disk usage is not capped: neither home volumes nor ephemeral container layers. Use a filesystem with project quotas or monitor.
+- Disk usage is capped only for home volumes created with `HOME_VOLUME_SIZE` set. Ephemeral sandboxes and container layers are not capped.
 - No per-user audit log beyond the gateway and proxy logs.
 
 ## Development

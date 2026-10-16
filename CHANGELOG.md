@@ -23,6 +23,7 @@ All notable changes to this project are documented here. The format is based on 
 - `deploy/termiplus-firewall.path`: reapplies the sandbox firewall when the rendered egress rules change.
 - Stopped persistent workspaces are recreated on their next start when the image tag now points to a newer image (home volume kept, running workspaces untouched). The socket proxy allows `GET /images/<configured image>/json` for this and returns only the image ID.
 - Docker inside Sysbox workspaces: installing `docker.io` starts the daemon (apt hook), the entrypoint restarts it with the container, `start-docker` starts it by hand, and the tool description tells the model so under Sysbox only.
+- Disk quota for home volumes: with `HOME_VOLUME_SIZE` (e.g. `20G`) the socket proxy puts that hard limit on every new home volume (Docker's local-driver `size` option, XFS project quotas). The proxy adds the option itself; driver options from the caller stay refused. README explains the host setup, including a loopback XFS file for other filesystems.
 
 ### Changed
 
