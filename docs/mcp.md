@@ -123,7 +123,8 @@ one's entitlement are autonomous.
 | `request_session(workspace, persistent?=false, label?)` | Provision (or attach to) a session; returns an **access handle** | — | **persistent → entitlement + confirm** |
 | `list_sessions()` | The caller's active sessions | readOnly | none |
 | `destroy_session(session_id)` | Tear a session down | destructive | **confirm** |
-| `set_network_policy(custom_dns[], egress[])` *(admin)* | Custom DNS + egress whitelist (wraps the core admin API) | destructive | **admin entitlement + confirm** |
+| `get_network_policy()` *(admin)* | Show custom DNS entries + internal egress whitelist | readOnly | **admin entitlement** |
+| `set_network_policy(policy)` *(admin)* | Replace custom DNS + egress whitelist (wraps the core admin API; the deny-list still wins) | destructive | **admin entitlement + confirm** |
 | `manage_user` / `manage_group` *(admin)* | User/group/entitlement administration | destructive | **admin entitlement + confirm** |
 
 Deliberately **absent**: `read_file`, `write_file`, `list_dir`, `exec` — done
@@ -249,6 +250,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OWUI plugin gives desktop, port and console links as Markdown links (no secrets in them) | **done** |
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
+| Network policy from chat: plugin tools `get_network_policy` / `set_network_policy` (admin role, set asks for confirmation); the MCP server gets the gateway's admin key only with `deploy/docker-compose.mcp-netpolicy.yml` | **done (experimental)** |
 | OWUI plugin `open_console` tool (link to the management UI, `ui_url` valve) | **done** |
 | Port forwarding (`/<session>/<port>/` on its own origin behind `fwd-auth`, owner only; console "Open port", plugin `open_port`) | **done (experimental)** |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |

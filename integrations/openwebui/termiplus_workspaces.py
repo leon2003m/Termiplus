@@ -2,7 +2,7 @@
 title: termiplus workspaces
 author: termiplus
 description: Provision and manage your termiplus sandbox sessions. Destructive or security-sensitive actions always ask you for confirmation first.
-version: 0.1.0
+version: 0.2.0
 required_open_webui_version: 0.8.6
 license: see the termiplus repository
 """
@@ -158,6 +158,33 @@ class Tools:
         if not link:
             return "termiplus: the management console is not configured (ui_url valve)."
         return f"Give the user this link exactly as written: {link}"
+
+    async def get_network_policy(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> Any:
+        """
+        Admins only: show the terminals' network policy, i.e. the custom DNS entries and the internal destinations terminals may reach. Internet access is always allowed and not listed.
+        """
+        return await self._run("get_network_policy", {}, __oauth_token__, None, None, __user__)
+
+    async def set_network_policy(
+        self,
+        dns_entries: list,
+        egress_allow: list,
+        __oauth_token__: Optional[dict] = None,
+        __event_call__: EventCall = None,
+        __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Admins only: replace the terminals' whole network policy. Call get_network_policy first and include every existing entry that should stay; anything left out is removed. Always asks the user for confirmation. Host, link-local/metadata and other-terminal addresses can never be opened.
+        :param dns_entries: Custom DNS records, e.g. [{"name": "db.internal", "ip": "10.0.0.5"}].
+        :param egress_allow: Internal destinations terminals may reach, e.g. [{"cidr": "10.0.0.5/32", "port": 5432, "proto": "tcp"}]. proto is tcp or udp.
+        """
+        if not isinstance(dns_entries, list) or not isinstance(egress_allow, list):
+            return "termiplus: dns_entries and egress_allow must both be lists (use [] for none)."
+        policy = {"dns_entries": dns_entries, "egress_allow": egress_allow}
+        return await self._run(
+            "set_network_policy", {"policy": policy}, __oauth_token__, __event_call__, __event_emitter__, __user__
+        )
 
     # --- helpers (underscore: not exposed to the model) ---
 

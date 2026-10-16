@@ -221,6 +221,65 @@ class PluginAgainstServer(unittest.TestCase):
         self.assertEqual(rec.calls, [])
 
 
+@unittest.skipUnless(MCP_BIN, "set TERMIPLUS_MCP_BIN to the built mcp binary")
+class NetworkPolicyTools(unittest.TestCase):
+    """Admin tools: RBAC from the server, confirmation from the user."""
+
+    POLICY = ([{"name": "db.internal", "ip": "10.0.0.5"}], [{"cidr": "10.0.0.5/32", "port": 5432, "proto": "tcp"}])
+
+    @classmethod
+    def setUpClass(cls):
+        cls.admin_proc, cls.admin_url = start_mcp("termiplus-admin")
+        cls.user_proc, cls.user_url = start_mcp("termiplus-persist")
+
+    @classmethod
+    def tearDownClass(cls):
+        for p in (cls.admin_proc, cls.user_proc):
+            p.kill()
+            p.wait()
+
+    def tools(self, url):
+        t = plugin.Tools()
+        t.valves.mcp_url = url
+        t.valves.timeout_seconds = 10
+        return t
+
+    def test_admin_sets_after_yes_and_reads_back(self):
+        rec = Recorder(True)
+        out = asyncio.run(
+            self.tools(self.admin_url).set_network_policy(*self.POLICY, __oauth_token__=TOKEN, __event_call__=rec)
+        )
+        self.assertIn('"applied"', out)
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn("db.internal", rec.calls[0]["data"]["message"])
+        out = asyncio.run(self.tools(self.admin_url).get_network_policy(__oauth_token__=TOKEN))
+        self.assertIn("db.internal", out)
+
+    def test_declined_changes_nothing(self):
+        t = self.tools(self.admin_url)
+        before = asyncio.run(t.get_network_policy(__oauth_token__=TOKEN))
+        out = asyncio.run(
+            t.set_network_policy([{"name": "x.internal", "ip": "10.0.0.9"}], [], __oauth_token__=TOKEN,
+                                 __event_call__=Recorder(False))
+        )
+        self.assertIn("cancelled", out)
+        self.assertEqual(asyncio.run(t.get_network_policy(__oauth_token__=TOKEN)), before)
+
+    def test_non_admin_is_forbidden_without_a_dialog(self):
+        rec = Recorder(True)
+        t = self.tools(self.user_url)
+        self.assertIn("not allowed", asyncio.run(t.get_network_policy(__oauth_token__=TOKEN)))
+        out = asyncio.run(t.set_network_policy(*self.POLICY, __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertIn("not allowed", out)
+        self.assertEqual(rec.calls, [])
+
+    def test_lists_are_required(self):
+        out = asyncio.run(
+            self.tools("http://127.0.0.1:1/").set_network_policy("db.internal", [], __oauth_token__=TOKEN)
+        )
+        self.assertIn("must both be lists", out)
+
+
 class HeaderRecorder(http.server.BaseHTTPRequestHandler):
     seen: list = []
     reply = "[]"
