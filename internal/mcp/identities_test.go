@@ -1,6 +1,10 @@
 package mcp
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -104,4 +108,31 @@ func TestServerRecordsIdentityFromPlugin(t *testing.T) {
 	if got, _ := ids.Lookup("kc-sub"); got != "owui-7" {
 		t.Fatalf("rejected call changed mapping to %q", got)
 	}
+}
+
+
+// callWithHeaders sends one MCP tools/call request with explicit proxy/plugin
+// headers and returns the decoded JSON-RPC response.
+func callWithHeaders(t *testing.T, s *Server, headers map[string]string, toolName string) rpcResp {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params":  map[string]any{"name": toolName, "arguments": map[string]any{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var resp rpcResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v (%s)", err, w.Body.String())
+	}
+	return resp
 }
