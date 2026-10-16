@@ -21,6 +21,9 @@ const (
 	ContainerPrefix = "ot-u-"
 	EphemeralPrefix = "ot-e-"
 	VolumePrefix    = "ot-home-"
+	// ArchivePrefix names helper containers that only mount one home volume so
+	// the gateway can read or write it as a tar. They are never started.
+	ArchivePrefix = "ot-a-"
 
 	// HomeDir is the only mount target allowed inside a terminal container.
 	HomeDir = "/home/user"
@@ -34,6 +37,7 @@ var (
 	// ephemeral: 16 hex user + "-" + 12 hex session (chat) + "-" + policy
 	EphemeralName = regexp.MustCompile(`^` + EphemeralPrefix + `([0-9a-f]{16})-[0-9a-f]{12}-[a-z0-9]{1,24}$`)
 	VolumeName    = regexp.MustCompile(`^` + VolumePrefix + `(` + suffixPattern + `)$`)
+	ArchiveName   = regexp.MustCompile(`^` + ArchivePrefix + `(` + suffixPattern + `)$`)
 	PolicyName    = regexp.MustCompile(`^[a-z0-9]{1,24}$`)
 	// Open WebUI user ids are UUIDs; allow a conservative superset.
 	UserID = regexp.MustCompile(`^[A-Za-z0-9._@:-]{1,128}$`)
@@ -50,6 +54,18 @@ func Suffix(userID, policy string) string {
 func Container(userID, policy string) string { return ContainerPrefix + Suffix(userID, policy) }
 func Volume(userID, policy string) string    { return VolumePrefix + Suffix(userID, policy) }
 
+// Archive returns the name of the archive helper for the user's home.
+func Archive(userID, home string) string { return ArchivePrefix + Suffix(userID, home) }
+
+// ArchiveFor returns the archive helper name for a home volume name.
+func ArchiveFor(volume string) string {
+	m := VolumeName.FindStringSubmatch(volume)
+	if m == nil {
+		return ""
+	}
+	return ArchivePrefix + m[1]
+}
+
 // Ephemeral returns the name of a throwaway container for one session (chat).
 func Ephemeral(userID, sessionID, policy string) string {
 	u := sha256.Sum256([]byte(userID))
@@ -64,7 +80,7 @@ func IsManagedContainer(name string) bool {
 
 // UserHash returns the 16 hex user part of a managed container or volume name.
 func UserHash(name string) string {
-	for _, re := range []*regexp.Regexp{ContainerName, VolumeName, EphemeralName} {
+	for _, re := range []*regexp.Regexp{ContainerName, VolumeName, EphemeralName, ArchiveName} {
 		if m := re.FindStringSubmatch(name); m != nil {
 			return m[1][:16]
 		}

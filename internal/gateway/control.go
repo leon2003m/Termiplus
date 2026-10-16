@@ -256,8 +256,3 @@ func (m *manager) remove(ctx context.Context, userID, name string) error {
 func keyMatches(vals []string, want string) bool {
 	return len(vals) == 1 && subtle.ConstantTimeCompare([]byte(vals[0]), []byte(want)) == 1
 }
-
-func methodNotAllowed(w http.ResponseWriter, allow string) {
-	w.Header().Set("Allow", allow)
-	httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-}

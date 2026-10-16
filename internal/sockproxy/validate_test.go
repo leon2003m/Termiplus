@@ -187,6 +187,82 @@ func TestVolume(t *testing.T) {
 	}
 }
 
+func TestExtraImages(t *testing.T) {
+	r := testRules
+	r.ExtraImages = []string{"registry.local/ot-python:1"}
+	name := naming.Container("u1", "py")
+	for img, ok := range map[string]bool{testRules.Image: true, "registry.local/ot-python:1": true, "registry.local/ot-python:2": false, "alpine": false, "": false} {
+		c := goodCreate(name)
+		c["Image"] = img
+		out, err := r.ValidateCreate(name, body(t, c))
+		if (err == nil) != ok {
+			t.Errorf("image %q: allowed=%v, want %v (%v)", img, err == nil, ok, err)
+			continue
+		}
+		if ok {
+			var m map[string]any
+			_ = json.Unmarshal(out, &m)
+			if m["Image"] != img {
+				t.Errorf("forwarded image %v, want %q", m["Image"], img)
+			}
+		}
+	}
+	// Without extra images only the main one passes.
+	c := goodCreate(name)
+	c["Image"] = "registry.local/ot-python:1"
+	if _, err := testRules.ValidateCreate(name, body(t, c)); err == nil {
+		t.Fatal("extra image accepted without EXTRA_IMAGES")
+	}
+}
+
+func TestParseImageRef(t *testing.T) {
+	for _, ok := range []string{"ghcr.io/leon2003m/termiplus-python:alpha", "registry.local/x@sha256:abc", "alpine"} {
+		if _, err := ParseImageRef(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "Alpine", "../x", "a//b", "x/", "a b", "a?b", "a%2fb", "-x"} {
+		if _, err := ParseImageRef(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestRootfsQuota(t *testing.T) {
+	hostConfig := func(r Rules, name string, c map[string]any) map[string]any {
+		t.Helper()
+		out, err := r.ValidateCreate(name, body(t, c))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		_ = json.Unmarshal(out, &m)
+		return m["HostConfig"].(map[string]any)
+	}
+	name := naming.Container("u1", "default")
+	if hc := hostConfig(testRules, name, goodCreate(name)); hc["StorageOpt"] != nil {
+		t.Fatalf("no rootfs quota configured, but StorageOpt forwarded: %v", hc["StorageOpt"])
+	}
+	r := testRules
+	r.RootfsSize = "10G"
+	hc := hostConfig(r, name, goodCreate(name))
+	if so, _ := hc["StorageOpt"].(map[string]any); len(so) != 1 || so["size"] != "10G" {
+		t.Fatalf("persistent: StorageOpt must be exactly size=10G: %v", hc["StorageOpt"])
+	}
+	eph := naming.Ephemeral("u1", "chat", "scratch")
+	c := goodCreate(eph)
+	c["HostConfig"].(map[string]any)["Mounts"] = []any{}
+	if so, _ := hostConfig(r, eph, c)["StorageOpt"].(map[string]any); so["size"] != "10G" {
+		t.Fatal("ephemeral sandboxes must get the quota too")
+	}
+	// The caller cannot pass its own storage options.
+	c = goodCreate(name)
+	c["HostConfig"].(map[string]any)["StorageOpt"] = map[string]string{"size": "1T"}
+	if _, err := r.ValidateCreate(name, body(t, c)); err == nil {
+		t.Fatal("caller StorageOpt accepted")
+	}
+}
+
 func TestVolumeQuota(t *testing.T) {
 	forwarded := func(r Rules, req map[string]any) map[string]any {
 		t.Helper()

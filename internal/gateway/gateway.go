@@ -16,6 +16,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,6 +75,10 @@ const specUser = "termiplus-spec"
 
 var specPaths = map[string]bool{"/openapi.json": true, "/api/config": true, "/system": true}
 
+// imageRef is a conservative image reference; the socket proxy decides which
+// ones are actually allowed.
+var imageRef = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]{0,254}$`)
+
 func New(cfg Config) (*Gateway, error) {
 	if len(cfg.APIKey) < 32 || len(cfg.KeySecret) < 32 {
 		return nil, errors.New("API key and key secret must be at least 32 characters")
@@ -124,6 +129,9 @@ func New(cfg Config) (*Gateway, error) {
 				return nil, fmt.Errorf("policy %s: idle_timeout must be a duration of at least 1m", name)
 			}
 			p.idle = d
+		}
+		if p.Image != "" && !imageRef.MatchString(p.Image) {
+			return nil, fmt.Errorf("policy %s: invalid image %q", name, p.Image)
 		}
 		if p.MaxPerUser < 0 {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
@@ -291,8 +299,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) ensureError(w http.ResponseWriter, userID, policy string, err error) {
 	log.Printf("ensure %s/%s: %v", userID, policy, err)
+	g.mgr.stats.startFailures.Add(1)
 	switch {
 	case errors.Is(err, errCapacity):
+		g.mgr.stats.capacityRefusals.Add(1)
 		httpError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	case errors.Is(err, errUserLimit):
