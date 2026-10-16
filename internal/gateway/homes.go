@@ -75,6 +75,11 @@ func (m *manager) withHelper(ctx context.Context, userID, home string, fn func(h
 	}
 	pol := m.policies[pols[0]]
 	helper := naming.Archive(userID, home)
+	// One helper per home at a time: a second export or import of the same
+	// home waits instead of replacing the helper under the first.
+	l := m.lockFor(helper)
+	l.Lock()
+	defer l.Unlock()
 	// A helper left over from an interrupted run is replaced.
 	if err := m.docker.Remove(ctx, helper); err != nil {
 		return fmt.Errorf("remove old helper: %w", err)
@@ -195,7 +200,13 @@ func (m *manager) removeHome(ctx context.Context, userID, home string) error {
 			return err
 		}
 	}
-	if err := m.docker.Remove(ctx, naming.Archive(userID, home)); err != nil {
+	// Wait for a running export of this home (same lock order as importHome:
+	// container locks, then the helper's).
+	helper := naming.Archive(userID, home)
+	hl := m.lockFor(helper)
+	hl.Lock()
+	defer hl.Unlock()
+	if err := m.docker.Remove(ctx, helper); err != nil {
 		return err
 	}
 	return m.docker.RemoveVolume(ctx, volume)
