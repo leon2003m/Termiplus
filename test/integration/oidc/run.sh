@@ -47,6 +47,10 @@ openssl rand -hex 16 | tr -d '\n' >"$WORK/cookie_secret"
 OWUI_KEY="$(openssl rand -hex 32)"
 printf '%s' "$OWUI_KEY" >"$WORK/owui_key"
 chmod 644 "$WORK/client_secret" "$WORK/cookie_secret" "$WORK/owui_key"
+# The identity store must survive a restart, so it lives on a bind mount the
+# image's user (65534) can write, not on a tmpfs.
+mkdir "$WORK/mcp-data"
+chmod 777 "$WORK/mcp-data"
 
 # $P-net reaches Keycloak; $P-auth is internal and shared only by proxy and
 # mcp, as ot-mcp-auth is in the overlay.
@@ -63,7 +67,9 @@ KC="http://$(docker port "$P-kc" 8080/tcp | head -1)"
 docker run -d --name "$P-mcp" --network "$P-auth" --network-alias mcp \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   -v "$WORK/owui_key:/run/secrets/mcp_owui_plugin_key:ro" \
+  -v "$WORK/mcp-data:/data" \
   -e MCP_OWUI_PLUGIN_KEY_FILE=/run/secrets/mcp_owui_plugin_key \
+  -e MCP_IDENTITY_FILE=/data/identities.json \
   -e MCP_AUTH=proxy -e MCP_STUB_BACKEND=1 "$MCP_IMAGE" >/dev/null
 
 for _ in $(seq 1 90); do
@@ -140,10 +146,15 @@ expect "alg=none is rejected" "401" "$(rpc "$NONE" list_sessions '{}')"
 expect "valid token reaches the server" "200 ok" "$(rpc "$A" list_workspaces '{}')"
 expect "group termiplus-persist grants a confirmed persistent session" "200 ok" \
   "$(rpc "$A" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
+# Bob calls as his own Open WebUI user, so these denials come from RBAC and
+# not from the identity binding.
+AS="owui-bob"
+expect "bob's first plugin call binds him" "200 ok" "$(rpc "$B" list_workspaces '{}')"
 expect "user without the group is forbidden" "200 -32003" \
   "$(rpc "$B" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
 expect "forged X-Forwarded-Groups does not grant the role" "200 -32003" \
   "$(rpc "$B" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}' -H 'X-Forwarded-Groups: termiplus-persist')"
+AS="owui-alice"
 expect "alice sees her session" "200 ok [{" "$(rpc "$A" list_sessions '{}')"
 AS="owui-bob"
 expect "forged X-Forwarded-User does not impersonate" "200 ok []" \
@@ -156,8 +167,24 @@ expect "wrong plugin key is unauthenticated" "200 -32001" \
   "$(rpc "$A" list_sessions '{}' -H 'X-Termiplus-Owui-Key: wrong' -H 'X-Termiplus-Owui-User: owui-alice')"
 expect "plugin key without a token is rejected by the proxy" "401" \
   "$(rpc "" list_sessions '{}' -H "X-Termiplus-Owui-Key: $OWUI_KEY" -H 'X-Termiplus-Owui-User: owui-alice')"
+
+# Identity binding: the first plugin call bound alice's subject to owui-alice
+# and bob's to owui-bob. A valid token plus the plugin key cannot change that.
 AS="owui-alice-2"
-expect "sessions are keyed by the Open WebUI user, not the token subject" "200 ok []" "$(rpc "$A" list_sessions '{}')"
+expect "a bound subject cannot switch to another Open WebUI user" "200 -32003" "$(rpc "$A" list_sessions '{}')"
+AS="owui-alice"
+# list_sessions needs no role, so without the binding bob would see alice's.
+expect "another subject cannot claim a bound Open WebUI user" "200 -32003" "$(rpc "$B" list_sessions '{}')"
+expect "the bound pair keeps its sessions" "200 ok [{" "$(rpc "$A" list_sessions '{}')"
+mode="$(stat -c %a "$WORK/mcp-data/identities.json" 2>/dev/null || echo missing)"
+if [ "$mode" = 600 ]; then pass "identity file is mode 0600"; else fail "identity file mode: $mode"; fi
+docker restart "$P-mcp" >/dev/null
+for _ in $(seq 1 30); do
+  [ "$(rpc "$A" list_workspaces '{}')" = "200 ok" ] && break
+  sleep 1
+done
+AS="owui-alice-2"
+expect "bindings survive an mcp restart" "200 -32003" "$(rpc "$A" list_sessions '{}')"
 AS="owui-alice"
 
 # Expiry: shorten the realm's token lifespan, then outwait a fresh token.
