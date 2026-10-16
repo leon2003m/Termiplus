@@ -13,6 +13,7 @@ import threading
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import types
 import unittest
@@ -75,6 +76,7 @@ def start_mcp(roles: str):
         "MCP_DEV_USER": "plugin-user",
         "MCP_DEV_ROLES": roles,
         "MCP_STUB_BACKEND": "1",
+        "MCP_AUDIT_FILE": os.path.join(tempfile.mkdtemp(), "audit.log"),
     }
     proc = subprocess.Popen([MCP_BIN], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}/"
@@ -304,6 +306,15 @@ class NetworkPolicyTools(unittest.TestCase):
         rec = Recorder(True)
         asyncio.run(self.tools(self.admin_url).manage_user("show", "bob", __oauth_token__=TOKEN, __event_call__=rec))
         self.assertEqual(rec.calls, [])
+
+    def test_audit_log_shows_changes_to_admins_only(self):
+        t = self.tools(self.admin_url)
+        asyncio.run(t.set_network_policy(*self.POLICY, __oauth_token__=TOKEN, __event_call__=Recorder(True)))
+        out = asyncio.run(t.get_audit_log(tool="set_network_policy", limit=5, __oauth_token__=TOKEN))
+        self.assertIn('"actor":"plugin-user"', out)
+        self.assertIn('"outcome":"ok"', out)
+        self.assertNotIn("_confirmed", out)
+        self.assertIn("not allowed", asyncio.run(self.tools(self.user_url).get_audit_log(__oauth_token__=TOKEN)))
 
     def test_lists_are_required(self):
         out = asyncio.run(

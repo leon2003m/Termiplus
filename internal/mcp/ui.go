@@ -176,11 +176,12 @@ func (u *UI) invokeJSON(w http.ResponseWriter, r *http.Request, p Principal, too
 }
 
 // admin serves admin/netpolicy and admin/entitlements (GET shows, PUT
-// replaces). The tools check the admin role.
+// replaces) and admin/audit (GET only). The tools check the admin role.
 func (u *UI) admin(w http.ResponseWriter, r *http.Request, p Principal, what string) {
 	tools := map[string][3]string{ // get tool, set tool, set argument
 		"netpolicy":    {"get_network_policy", "set_network_policy", "policy"},
 		"entitlements": {"get_entitlements", "set_entitlements", "entitlements"},
+		"audit":        {"get_audit_log", "", ""},
 	}
 	t, ok := tools[what]
 	switch {
@@ -188,7 +189,7 @@ func (u *UI) admin(w http.ResponseWriter, r *http.Request, p Principal, what str
 		uiError(w, http.StatusNotFound, "not found")
 	case r.Method == http.MethodGet:
 		u.run(w, r, p, t[0], nil)
-	case r.Method == http.MethodPut:
+	case r.Method == http.MethodPut && t[1] != "":
 		var body map[string]any
 		dec := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
 		if err := dec.Decode(&body); err != nil || body == nil {

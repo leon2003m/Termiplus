@@ -2,7 +2,7 @@
 title: termiplus workspaces
 author: termiplus
 description: Provision and manage your termiplus sandbox sessions. Destructive or security-sensitive actions always ask you for confirmation first.
-version: 0.3.0
+version: 0.4.0
 required_open_webui_version: 0.8.6
 license: see the termiplus repository
 """
@@ -223,6 +223,28 @@ class Tools:
         if group:
             args["group"] = group
         return await self._run("manage_user", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
+
+    async def get_audit_log(
+        self,
+        actor: str = "",
+        tool: str = "",
+        since: str = "",
+        limit: int = 50,
+        __oauth_token__: Optional[dict] = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Admins only: show who changed what in termiplus and when (sessions started or ended, workspace entitlements, network policy, group membership), newest first, with the outcome (ok, error or denied).
+        :param actor: Only entries by this user id.
+        :param tool: Only this action, e.g. set_network_policy, manage_user or request_session.
+        :param since: Only entries at or after this time, in RFC 3339 form, e.g. 2026-10-16T00:00:00Z.
+        :param limit: How many entries to show, 1 to 500 (default 50).
+        """
+        args: dict = {"limit": limit}
+        for k, v in (("actor", actor), ("tool", tool), ("since", since)):
+            if v:
+                args[k] = v
+        return await self._run("get_audit_log", args, __oauth_token__, None, None, __user__)
 
     # --- helpers (underscore: not exposed to the model) ---
 

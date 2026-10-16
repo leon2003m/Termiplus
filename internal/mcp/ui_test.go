@@ -171,3 +171,25 @@ func TestUIRefusesCrossSiteWrites(t *testing.T) {
 		t.Fatalf("unknown field accepted: %d", code)
 	}
 }
+
+func TestUIAuditLog(t *testing.T) {
+	f := newUIFixture(t)
+	a, err := OpenAuditLog(filepath.Join(t.TempDir(), "audit.log"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ui.srv.WithAuditLog(a)
+	if code, body, _ := f.do(t, http.MethodPost, "/ui/api/sessions", "kc-alice", "", `{"workspace":"default"}`, nil); code != http.StatusOK {
+		t.Fatalf("start: %d %s", code, body)
+	}
+	if code, _, _ := f.do(t, http.MethodGet, "/ui/api/admin/audit", "kc-alice", "", "", nil); code != http.StatusForbidden {
+		t.Fatalf("non-admin read the audit log: %d", code)
+	}
+	code, body, _ := f.do(t, http.MethodGet, "/ui/api/admin/audit", "kc-bob", RoleAdmin, "", nil)
+	if code != http.StatusOK || !strings.Contains(body, `"actor":"owui-alice"`) || !strings.Contains(body, `"tool":"request_session"`) {
+		t.Fatalf("admin read: %d %s", code, body)
+	}
+	if code, _, _ := f.do(t, http.MethodPut, "/ui/api/admin/audit", "kc-bob", RoleAdmin, `{}`, nil); code != http.StatusMethodNotAllowed {
+		t.Fatalf("the audit log must not be writable: %d", code)
+	}
+}

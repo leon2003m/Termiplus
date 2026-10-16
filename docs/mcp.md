@@ -127,6 +127,7 @@ one's entitlement are autonomous.
 | `set_network_policy(policy)` *(admin)* | Replace custom DNS + egress whitelist (wraps the core admin API; the deny-list still wins) | destructive | **admin entitlement + confirm** |
 | `manage_group(action, group?)` *(admin)* | List the `termiplus-*` groups or one group's members | readOnly | **admin entitlement** |
 | `manage_user(action, username, group?)` *(admin)* | Show a user's `termiplus-*` groups, add or remove them (see *User management*) | destructive | **admin entitlement + confirm** for changes |
+| `get_audit_log(actor?, tool?, since?, limit?)` *(admin)* | Recorded state-changing calls, newest first (see *Audit log*) | readOnly | **admin entitlement** |
 
 Deliberately **absent**: `read_file`, `write_file`, `list_dir`, `exec` — done
 natively inside the session.
@@ -172,7 +173,7 @@ of scope.
 ## 8. Management UI
 
 A standalone **web console** served by termiplus (OAuth/OIDC-protected, same IdP;
-RBAC-aware) for sessions, workspaces, entitlements and network policy — the v1.0
+RBAC-aware) for sessions, workspaces, entitlements, network policy and the audit log — the v1.0
 successor to the #12 admin API's planned small web UI. Surfaced in OWUI two ways:
 
 - **Direct link:** an Action/toolbar button that opens the full console in a new
@@ -257,6 +258,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Port forwarding (`/<session>/<port>/` on its own origin behind `fwd-auth`, owner only; console "Open port", plugin `open_port`) | **done (experimental)** |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
 | Workspace entitlements per group (`MCP_ENTITLEMENTS_FILE`, editable by admins) | **done** |
+| Audit log of state-changing calls (`MCP_AUDIT_FILE`), `get_audit_log` (MCP, plugin) and a table in the console's admin part | **done (experimental)** — Go and plugin tests |
 
 ### Gateway control API
 
@@ -449,6 +451,30 @@ top-level `termiplus-*` group that workspace entitlements use), from chat
 - Tested against a real Keycloak in `test/integration/oidc/run.sh`, including
   that the new group reaches the user's next token and that an issuer
   hostname different from the internal admin URL works.
+
+### Audit log
+
+With `MCP_AUDIT_FILE` set (`/data/audit.log` in `deploy/docker-compose.mcp.yml`)
+the MCP server records every tool call that can change something:
+`request_session`, `destroy_session`, `set_entitlements`, `set_network_policy`
+and the changes of `manage_user`. That covers chat and the management console,
+which call the same tools. Each entry has the time (UTC), the user id the call
+acted as, the OIDC subject, the tool, its arguments (control arguments such as
+`_confirmed` dropped, at most 4 KiB) and the outcome: `ok`, `error` (with the
+message) or `denied` (refused by the role or entitlement check).
+
+- Not recorded: read-only calls, and calls still waiting for the human
+  confirmation (the confirmed repeat is recorded).
+- The file is JSON lines, mode 0600, synced after each entry. Past
+  `MCP_AUDIT_MAX_MB` (default 5) it moves to `audit.log.1`, replacing the
+  previous one, so at most twice that is kept.
+- `termiplus-admin` users read it with `get_audit_log` (filters `actor`,
+  `tool`, `since`, `limit` up to 500) from chat, or in the console's
+  *Audit log* table (newest 50). Nobody can change it through termiplus.
+- Direct calls to the gateway's admin API (`X-Admin-Key`) bypass the MCP server
+  and appear only in the gateway log. An entry is written after the call, so
+  if writing fails (full disk) the action has still happened; the failure is
+  logged.
 
 ### Authentication (oauth2-proxy)
 

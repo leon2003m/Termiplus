@@ -29,6 +29,9 @@
     <p class="hint">Custom DNS entries and internal egress allowances for all terminals.</p>
     <textarea id="netpolicy" spellcheck="false" rows="10" aria-label="Network policy (JSON)"></textarea>
     <button id="save-netpolicy" class="primary" type="button">Save network policy</button>
+    <h3>Audit log</h3>
+    <p class="hint">The newest changes made through chat or this console: sessions, entitlements, network policy and group membership.</p>
+    <div class="audit-wrap"><table id="audit"><thead><tr><th>Time (UTC)</th><th>Who</th><th>Action</th><th>Result</th></tr></thead><tbody></tbody></table></div>
   </section>
 </main>
 </body>

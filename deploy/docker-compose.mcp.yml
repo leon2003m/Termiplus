@@ -98,6 +98,7 @@ services:
       MCP_ENTITLEMENTS_FILE: /data/entitlements.json
       MCP_OWUI_PLUGIN_KEY_FILE: /run/secrets/mcp_owui_plugin_key
       MCP_IDENTITY_FILE: /data/identities.json
+      MCP_AUDIT_FILE: /data/audit.log
     volumes:
       - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]

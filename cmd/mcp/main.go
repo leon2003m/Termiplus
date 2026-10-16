@@ -91,6 +91,17 @@ func main() {
 		entDesc += ", user management via " + kc
 	}
 
+	// Every state-changing tool call (chat and console) is recorded here and
+	// admins read it with get_audit_log.
+	if f := config.Get("MCP_AUDIT_FILE", ""); f != "" {
+		a, err := mcp.OpenAuditLog(f, int64(config.Int("MCP_AUDIT_MAX_MB", 5))<<20)
+		if err != nil {
+			log.Fatal(err)
+		}
+		srv.WithAuditLog(a)
+		entDesc += ", audit log " + f
+	}
+
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
 	// calls; the management UI needs it.
 	var ids *mcp.IdentityStore

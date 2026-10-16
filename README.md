@@ -345,7 +345,7 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 - Instance state lives in gateway memory: run one gateway replica. After a restart it adopts running containers.
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
 - Disk usage is capped only for home volumes created with `HOME_VOLUME_SIZE` set. Ephemeral sandboxes and container layers are not capped.
-- No per-user audit log beyond the gateway and proxy logs.
+- The audit log (`get_audit_log`) covers changes made through the MCP server: chat and the management console. Direct calls to the gateway's admin API only appear in the gateway log.
 
 ## Development
 

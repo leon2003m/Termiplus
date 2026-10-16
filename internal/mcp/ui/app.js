@@ -139,7 +139,31 @@ async function loadAdmin() {
     $("netpolicy").readOnly = true;
     $("save-netpolicy").disabled = true;
   }
+  await loadAudit();
   $("admin-section").hidden = false;
+}
+
+async function loadAudit() {
+  const body = $("audit").tBodies[0];
+  body.replaceChildren();
+  let entries;
+  try {
+    entries = (await api("admin/audit")).entries;
+  } catch (e) {
+    body.append(el("tr", {}, [el("td", { colspan: "4", text: e.message })]));
+    return;
+  }
+  if (!entries.length) body.append(el("tr", {}, [el("td", { colspan: "4", text: "Nothing recorded yet." })]));
+  for (const e of entries) {
+    const args = e.args ? " " + JSON.stringify(e.args) : "";
+    const result = e.outcome + (e.error ? ": " + e.error : "");
+    body.append(el("tr", {}, [
+      el("td", { text: e.time.replace("T", " ").replace(/\.\d+Z$|Z$/, "") }),
+      el("td", { text: e.actor }),
+      el("td", { class: "mono", text: e.tool + args }),
+      el("td", { class: e.outcome === "ok" ? "" : "bad", text: result }),
+    ]));
+  }
 }
 
 function saver(button, field, path, what) {
