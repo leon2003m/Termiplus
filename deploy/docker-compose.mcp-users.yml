@@ -1,0 +1,38 @@
+# Opt-in overlay: lets termiplus-admin users manage group membership (who is
+# in termiplus-users / -persist / -admin) through the MCP tools manage_user and
+# manage_group. Needs the bundled Keycloak and the MCP overlay:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
+#     -f docker-compose.keycloak.yml -f docker-compose.mcp-users.yml up -d
+#
+# The MCP server signs in to Keycloak's admin API as the service account of the
+# client termiplus-mcp-admin (realm-management roles view-users, query-groups,
+# manage-users). New installs get that client from setup-alpha.sh's realm; for
+# an existing realm run deploy/keycloak/add-mcp-admin-client.sh once.
+#
+# The tools only change membership of top-level termiplus-* groups, need the
+# termiplus-admin role, ask for a human confirmation before every change and
+# never remove the last enabled admin. Users and passwords stay in Keycloak.
+name: termiplus
+
+services:
+  mcp:
+    environment:
+      MCP_KC_ADMIN_URL: http://keycloak:8080
+      MCP_KC_REALM: termiplus
+      MCP_KC_CLIENT_ID: termiplus-mcp-admin
+      MCP_KC_CLIENT_SECRET_FILE: /run/secrets/mcp_kc_admin_client_secret
+    secrets: [control_api_key, mcp_owui_plugin_key, mcp_kc_admin_client_secret]
+    networks: [ot-mcp-kc]
+
+  keycloak:
+    networks: [ot-mcp-kc]
+
+networks:
+  # Shared only by mcp and Keycloak, so the admin API stays off every other
+  # network and mcp gains no route anywhere else.
+  ot-mcp-kc:
+    internal: true
+
+secrets:
+  mcp_kc_admin_client_secret: { file: ./secrets/mcp_kc_admin_client_secret }

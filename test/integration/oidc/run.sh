@@ -23,7 +23,7 @@ WORK="$(mktemp -d)"
 
 cleanup() {
   docker rm -f "$P-kc" "$P-mcp" "$P-proxy" >/dev/null 2>&1 || true
-  docker network rm "$P-net" "$P-auth" >/dev/null 2>&1 || true
+  docker network rm "$P-net" "$P-auth" "$P-dir" >/dev/null 2>&1 || true
 }
 trap 'cleanup; rm -rf "$WORK"' EXIT
 cleanup
@@ -57,6 +57,11 @@ chmod 777 "$WORK/mcp-data"
 # mcp, as ot-mcp-auth is in the overlay.
 docker network create "$P-net" >/dev/null
 docker network create --internal "$P-auth" >/dev/null
+# $P-dir is internal and shared only by mcp and Keycloak, for the admin API
+# (manage_user / manage_group), as ot-mcp-kc in docker-compose.mcp-users.yml.
+docker network create --internal "$P-dir" >/dev/null
+printf 'mcp-admin-secret-it-0123456789abcdef' >"$WORK/kc_admin_secret"
+chmod 644 "$WORK/kc_admin_secret"
 
 docker run -d --name "$P-kc" --network "$P-net" --network-alias keycloak -p 127.0.0.1::8080 \
   -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin-it \
@@ -64,6 +69,7 @@ docker run -d --name "$P-kc" --network "$P-net" --network-alias keycloak -p 127.
   -v "$HERE/realm.json:/opt/keycloak/data/import/realm.json:ro" \
   "$KC_IMAGE" start-dev --import-realm >/dev/null
 KC="http://$(docker port "$P-kc" 8080/tcp | head -1)"
+docker network connect --alias keycloak "$P-dir" "$P-kc"
 
 docker run -d --name "$P-mcp" --network "$P-auth" --network-alias mcp \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
@@ -71,7 +77,11 @@ docker run -d --name "$P-mcp" --network "$P-auth" --network-alias mcp \
   -v "$WORK/mcp-data:/data" \
   -e MCP_OWUI_PLUGIN_KEY_FILE=/run/secrets/mcp_owui_plugin_key \
   -e MCP_IDENTITY_FILE=/data/identities.json \
+  -v "$WORK/kc_admin_secret:/run/secrets/mcp_kc_admin_client_secret:ro" \
+  -e MCP_KC_ADMIN_URL=http://keycloak:8080 \
+  -e MCP_KC_CLIENT_SECRET_FILE=/run/secrets/mcp_kc_admin_client_secret \
   -e MCP_AUTH=proxy -e MCP_STUB_BACKEND=1 "$MCP_IMAGE" >/dev/null
+docker network connect "$P-dir" "$P-mcp"
 
 for _ in $(seq 1 90); do
   curl -sf -m 2 "$KC/realms/termiplus/.well-known/openid-configuration" >/dev/null && break
@@ -188,6 +198,34 @@ AS="owui-alice-2"
 expect "bindings survive an mcp restart" "200 -32003" "$(rpc "$A" list_sessions '{}')"
 AS="owui-alice"
 
+# User management through Keycloak's admin API (service account of
+# termiplus-mcp-admin). carol is the only member of termiplus-admin.
+C="$(token owui owui-secret-it carol carol-pw)"
+AS="owui-carol"
+expect "admin lists the termiplus groups" '200 ok {"groups":["termiplus-admin","termiplus-persist"]}' \
+  "$(rpc "$C" manage_group '{"action":"list"}')"
+expect "a group outside the prefix is refused" '200 ok group "ops-admins" is not managed' \
+  "$(rpc "$C" manage_user '{"action":"add_to_group","username":"bob","group":"ops-admins","_confirmed":true}')"
+expect "membership changes need confirmation" "200 -32010" \
+  "$(rpc "$C" manage_user '{"action":"add_to_group","username":"bob","group":"termiplus-persist"}')"
+AS="owui-bob"
+expect "a non-admin cannot manage users" "200 -32003" "$(rpc "$B" manage_user '{"action":"show","username":"bob"}')"
+AS="owui-carol"
+expect "admin adds bob to termiplus-persist" '200 ok {"changed":true' \
+  "$(rpc "$C" manage_user '{"action":"add_to_group","username":"bob","group":"termiplus-persist","_confirmed":true}')"
+AS="owui-bob"
+expect "bob's next token carries the new role" "200 ok" \
+  "$(rpc "$(token owui owui-secret-it bob bob-pw)" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
+AS="owui-carol"
+expect "the last admin cannot be removed" '200 ok refusing to remove the last enabled member' \
+  "$(rpc "$C" manage_user '{"action":"remove_from_group","username":"carol","group":"termiplus-admin","_confirmed":true}')"
+expect "admin removes bob again" '200 ok {"changed":true' \
+  "$(rpc "$C" manage_user '{"action":"remove_from_group","username":"bob","group":"termiplus-persist","_confirmed":true}')"
+AS="owui-bob"
+expect "bob's next token no longer carries it" "200 -32003" \
+  "$(rpc "$(token owui owui-secret-it bob bob-pw)" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
+AS="owui-alice"
+
 # Expiry: shorten the realm's token lifespan, then outwait a fresh token.
 kc() { docker exec "$P-kc" /opt/keycloak/bin/kcadm.sh "$@"; }
 kc config credentials --server http://localhost:8080 --realm master --user admin --password admin-it >/dev/null 2>&1
@@ -199,7 +237,7 @@ sleep 8
 expect "expired token is rejected" "401" "$(rpc "$SHORT" list_workspaces '{}')"
 
 nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$P-mcp")"
-if [ "$nets" = "$P-auth " ]; then pass "mcp is attached only to the internal auth network"; else fail "mcp networks: $nets"; fi
+if [ "$nets" = "$P-auth $P-dir " ]; then pass "mcp is attached only to the internal auth and directory networks"; else fail "mcp networks: $nets"; fi
 
 if [ "$FAILED" -ne 0 ]; then
   echo "OIDC integration test FAILED"

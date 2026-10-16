@@ -1,6 +1,6 @@
 {
   "realm": "termiplus", "enabled": true,
-  "groups": [{"name": "termiplus-persist"}, {"name": "termiplus-admin"}],
+  "groups": [{"name": "termiplus-persist"}, {"name": "termiplus-admin"}, {"name": "ops-admins"}],
   "clients": [
     {"clientId": "owui", "enabled": true, "publicClient": false, "secret": "owui-secret-it",
      "directAccessGrantsEnabled": true, "standardFlowEnabled": false,
@@ -12,6 +12,8 @@
      ]},
     {"clientId": "termiplus-mcp", "enabled": true, "publicClient": false, "secret": "mcp-secret-it",
      "directAccessGrantsEnabled": false, "standardFlowEnabled": false},
+    {"clientId": "termiplus-mcp-admin", "enabled": true, "publicClient": false, "secret": "mcp-admin-secret-it-0123456789abcdef",
+     "serviceAccountsEnabled": true, "directAccessGrantsEnabled": false, "standardFlowEnabled": false},
     {"clientId": "other", "enabled": true, "publicClient": false, "secret": "other-secret-it",
      "directAccessGrantsEnabled": true, "standardFlowEnabled": false},
     {"clientId": "termiplus-desktop", "enabled": true, "publicClient": false, "secret": "desk-secret-it",
@@ -26,6 +28,10 @@
     {"username": "alice", "enabled": true, "email": "alice@example.test", "emailVerified": true, "firstName": "Alice", "lastName": "Test",
      "credentials": [{"type": "password", "value": "alice-pw", "temporary": false}], "groups": ["termiplus-persist"]},
     {"username": "bob", "enabled": true, "email": "bob@example.test", "emailVerified": true, "firstName": "Bob", "lastName": "Test",
-     "credentials": [{"type": "password", "value": "bob-pw", "temporary": false}]}
+     "credentials": [{"type": "password", "value": "bob-pw", "temporary": false}]},
+    {"username": "carol", "enabled": true, "email": "carol@example.test", "emailVerified": true, "firstName": "Carol", "lastName": "Test",
+     "credentials": [{"type": "password", "value": "carol-pw", "temporary": false}], "groups": ["termiplus-admin"]},
+    {"username": "service-account-termiplus-mcp-admin", "enabled": true, "serviceAccountClientId": "termiplus-mcp-admin",
+     "clientRoles": {"realm-management": ["view-users", "query-groups", "manage-users"]}}
   ]
 }

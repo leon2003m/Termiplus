@@ -26,6 +26,9 @@ type Server struct {
 	ent     atomic.Pointer[Entitlements]
 	entPath string // where set_entitlements persists; "" makes them read-only
 	ids     *IdentityStore
+	// dir backs manage_user / manage_group; nil leaves them unconfigured.
+	dir         Directory
+	groupPrefix string
 }
 
 // NewServer builds the server with its fixed tool surface.
@@ -460,6 +463,26 @@ func (s *Server) buildTools() []tool {
 					return nil, err
 				}
 				return map[string]any{"applied": true}, nil
+			},
+		},
+		{
+			name:        "manage_group",
+			description: "List the termiplus groups (action \"list\") or the members of one (action \"members\", group) (admin).",
+			inputSchema: `{"type":"object","properties":{"action":{"type":"string","enum":["list","members"]},"group":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
+			readOnly:    true,
+			gate:        adminOnly("user management", false),
+			handle: func(ctx context.Context, _ Principal, args map[string]any) (any, error) {
+				return s.manageGroup(ctx, args)
+			},
+		},
+		{
+			name:        "manage_user",
+			description: "Show a user's termiplus groups (action \"show\", username) or add/remove them to/from one (actions \"add_to_group\" / \"remove_from_group\", username, group) (admin). Changes are security-sensitive: they require the termiplus-admin role and explicit human confirmation. Users themselves are created in the identity provider.",
+			inputSchema: `{"type":"object","properties":{"action":{"type":"string","enum":["show","add_to_group","remove_from_group"]},"username":{"type":"string"},"group":{"type":"string"}},"required":["action","username"],"additionalProperties":true}`,
+			destructive: true,
+			gate:        manageUserGate,
+			handle: func(ctx context.Context, p Principal, args map[string]any) (any, error) {
+				return s.manageUser(ctx, p, args)
 			},
 		},
 	}

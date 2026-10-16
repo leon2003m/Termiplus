@@ -79,6 +79,18 @@ func main() {
 		entDesc = "entitlements from " + f + " (admins can change them)"
 	}
 
+	// manage_user / manage_group: group membership in Keycloak, through the
+	// admin API as a service account. Off unless MCP_KC_ADMIN_URL is set.
+	if kc := config.Get("MCP_KC_ADMIN_URL", ""); kc != "" {
+		dir, err := mcp.NewKeycloakDirectory(kc, config.Get("MCP_KC_REALM", "termiplus"),
+			config.Get("MCP_KC_CLIENT_ID", "termiplus-mcp-admin"), config.Secret("MCP_KC_CLIENT_SECRET", true))
+		if err != nil {
+			log.Fatalf("MCP_KC_ADMIN_URL: %v", err)
+		}
+		srv.WithDirectory(dir, config.Get("MCP_KC_GROUP_PREFIX", "termiplus-"))
+		entDesc += ", user management via " + kc
+	}
+
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
 	// calls; the management UI needs it.
 	var ids *mcp.IdentityStore

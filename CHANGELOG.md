@@ -21,6 +21,9 @@ All notable changes to this project are documented here. The format is based on 
 - Internal DNS forwarder image (`deploy/dns-forwarder/`, dnsmasq) that forwards to the operator's resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the admin-set records from a watched `hostsdir` (auto-reload, no signal).
 - Opt-in Compose overlay `deploy/docker-compose.netpolicy.yml` that adds the forwarder and wires the admin API, the rendered-policy volume and the DNS pin. Without it the base deployment is unchanged (no forwarder, admin API returns 404).
 - `deploy/termiplus-firewall.path`: reapplies the sandbox firewall when the rendered egress rules change.
+- MCP and Open WebUI plugin tools `manage_user` / `manage_group` for `termiplus-admin` users: show `termiplus-*` groups and their members, add or remove users (with confirmation; the last admin cannot be removed). Uses Keycloak's admin API as the new service-account client `termiplus-mcp-admin` (`setup-alpha.sh` for new realms, `deploy/keycloak/add-mcp-admin-client.sh` for existing ones), opt-in via `deploy/docker-compose.mcp-users.yml`.
+- Open WebUI plugin tools `get_network_policy` / `set_network_policy` for `termiplus-admin` users (set always asks for confirmation), and the opt-in overlay `deploy/docker-compose.mcp-netpolicy.yml` that gives the MCP server the gateway's admin key. Completes the admin side of #12.
+- Stopped persistent workspaces are recreated on their next start when the image tag now points to a newer image (home volume kept, running workspaces untouched). The socket proxy allows `GET /images/<configured image>/json` for this and returns only the image ID.
 - Docker inside Sysbox workspaces: installing `docker.io` starts the daemon (apt hook), the entrypoint restarts it with the container, `start-docker` starts it by hand, and the tool description tells the model so under Sysbox only.
 
 ### Changed

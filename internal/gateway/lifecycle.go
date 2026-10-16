@@ -172,6 +172,14 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 				return nil, err
 			}
 			ct = nil
+		} else if !pol.ephemeral() && !ct.State.Running && m.imageOutdated(ctx, ct) {
+			// Same config but the image tag now points to a newer image. Only a
+			// stopped workspace is recreated; its home volume is kept.
+			log.Printf("recreating %s: stopped and image updated", name)
+			if err := m.docker.Remove(ctx, name); err != nil {
+				return nil, err
+			}
+			ct = nil
 		}
 	}
 
@@ -224,6 +232,21 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	m.instances[name] = inst
 	m.mu.Unlock()
 	return inst, nil
+}
+
+// imageOutdated reports whether ct was created from another image than the
+// one m.image points to now. When that cannot be determined (an older socket
+// proxy denies the lookup, the image is missing), the container is kept.
+func (m *manager) imageOutdated(ctx context.Context, ct *dockerapi.Container) bool {
+	if ct.Image == "" {
+		return false
+	}
+	id, err := m.docker.ImageID(ctx, m.image)
+	if err != nil {
+		log.Printf("image check for %s skipped: %v", strings.TrimPrefix(ct.Name, "/"), err)
+		return false
+	}
+	return id != ct.Image
 }
 
 func (m *manager) checkCapacity(ctx context.Context) error {

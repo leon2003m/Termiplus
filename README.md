@@ -40,7 +40,9 @@ image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
-                            docker-compose.netpolicy.yml (opt-in), dns-forwarder/
+                            docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
+                            docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP),
+                            docker-compose.mcp-users.yml (opt-in: group membership via MCP)
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
 
@@ -55,6 +57,9 @@ sudo systemctl restart docker
 docker info | grep -i runtimes                       # must list runsc and/or sysbox-runc
 #    deploy/daemon.json starts runsc with --allow-suid, without it sudo inside gVisor fails
 #    (gVisor ignores setuid bits by default). If you merge by hand, keep that runtimeArgs entry.
+#    gVisor terminals have no DNS without the netpolicy overlay (internal DNS forwarder, see
+#    "Custom DNS and internal egress" below): deploy it whenever a policy uses runsc. Sysbox
+#    terminals resolve with or without it.
 
 # 2. Terminal image (push to your registry and pin by digest in production)
 docker build -t ot-terminal:0.14.0 image/
@@ -143,7 +148,7 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
 
-**Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays.
+**Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image reference, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays. A new image under the same tag (after a pull or rebuild) is picked up when a stopped workspace starts again: it is recreated on the new image with the same volume. A running workspace is never recreated for that. Anything installed outside `/home/user` is lost on recreation.
 
 **Ephemeral.** One container per user, chat and policy (`ot-e-<user>-<chat>-<policy>`), no volume. Files live in the container and disappear with it. Docker deletes it as soon as it stops (`AutoRemove`, forced by the proxy). The same chat keeps its sandbox until it goes idle, then gets a fresh one. At `max_per_user`, the user's least recently used sandbox without an open terminal is deleted; if all are in use, the request gets 429. Requests without a chat id share one `nochat` sandbox per user. Open WebUI's file browser sends the chat id only once the chat is saved (after the first message): in a new chat it shows the `nochat` sandbox, while the model's first tool call already gets the chat's own sandbox.
 
@@ -158,9 +163,10 @@ Everything not listed is 403.
 | `POST /containers/create` | Name must be `ot-u-...` or `ot-e-...`. Body decoded strictly (unknown fields rejected) and rebuilt from checked values. Only the configured image, a runtime from the allowlist (runc refused), the sandbox network, capped memory/CPU/PIDs. Persistent: exactly one volume at `/home/user` belonging to the same user. Ephemeral: no mounts, `AutoRemove` forced. Env only `OPEN_TERMINAL_*`. `Privileged:false` forced. No ports, binds, capabilities, devices, security options, namespaces |
 | `POST /volumes/create` | Name `ot-home-...`, local driver, no driver options (blocks `o=bind,device=/`) |
 | `GET /volumes/<name>` | termiplus volumes only |
+| `GET /images/<configured image>/json` | exactly the configured terminal image, no query. The proxy answers with the image ID only; labels, environment and history are not passed on |
 | `GET .../json`, `POST .../start`, `POST .../stop`, `DELETE` | Target resolved by the daemon first, must carry the termiplus label and name, then addressed by full ID. `DELETE` without `v` |
 
-Also rejected: `exec`, `attach`, image pulls, builds, connection upgrades, encoded paths, `..`, `//`, missing or duplicate `X-Proxy-Token`.
+Also rejected: `exec`, `attach`, any other image call, image pulls, builds, connection upgrades, encoded paths, `..`, `//`, missing or duplicate `X-Proxy-Token`.
 
 ## Network isolation
 
@@ -302,10 +308,11 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 ### Known issues found
 
 - **No job control in the interactive terminal.** Open Terminal starts `$SHELL` (falling back to `/bin/sh`, the image does not set `SHELL`) with `start_new_session=True` but does not make the PTY the controlling terminal, so the shell prints `can't access tty; job control turned off`. This is Open Terminal behaviour and happens under every runtime. Setting `ENV SHELL=/bin/bash` in `image/Dockerfile` would at least give users bash.
-- **gVisor DNS and sudo**, see above. Until decided, Sysbox is the runtime that passes the full integration test.
+- **gVisor DNS and sudo**, see above. Both are solved by configuration: `deploy/daemon.json` (`--allow-suid`) and the netpolicy overlay (DNS). With both, gVisor passes the full acceptance set; the base stack alone has no DNS under gVisor.
 
 ## Known limits
 
+- gVisor policies need the netpolicy overlay for DNS (#3). Without it, terminals under runsc connect by IP only.
 - Instance state lives in gateway memory: run one gateway replica. After a restart it adopts running containers.
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
 - Disk usage is not capped: neither home volumes nor ephemeral container layers. Use a filesystem with project quotas or monitor.
