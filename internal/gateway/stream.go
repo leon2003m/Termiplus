@@ -25,8 +25,16 @@ const streamPrefix = "stream/"
 // desktopPort is where KasmVNC listens inside a desktop container.
 const desktopPort = 6901
 
-// desktopUser is KasmVNC's only user (image/desktop/start-desktop.sh).
-const desktopUser = "user"
+// desktopUser is KasmVNC's user with input rights; desktopViewer may only
+// watch (image/desktop/start-desktop.sh).
+const (
+	desktopUser   = "user"
+	desktopViewer = "viewer"
+)
+
+// streamViewHeader, set by the MCP server for a shared desktop, makes the
+// gateway sign in as the view-only user. Only control-key callers reach here.
+const streamViewHeader = "X-Stream-View"
 
 // serveStream handles control-API paths below stream/. rest is
 // "<container>/<path>".
@@ -40,7 +48,11 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, re
 	}
 	addr := g.mgr.addrFor(name, desktopPort)
 	target := &url.URL{Scheme: "http", Host: addr}
-	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(desktopUser+":"+g.mgr.desktopPassword(name)))
+	creds := desktopUser + ":" + g.mgr.desktopPassword(name)
+	if r.Header.Get(streamViewHeader) == "1" {
+		creds = desktopViewer + ":" + g.mgr.desktopViewPassword(name)
+	}
+	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(creds))
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
@@ -50,7 +62,7 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, re
 			pr.Out.Host = addr
 			for _, h := range []string{controlKeyHeader, "X-User-Id", "X-Proxy-Token", "Cookie",
 				"X-Forwarded-User", "X-Forwarded-Groups", "X-Forwarded-Email",
-				"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", forwardPrefixHeader} {
+				"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", forwardPrefixHeader, streamViewHeader} {
 				pr.Out.Header.Del(h)
 			}
 			pr.Out.Header.Set("Authorization", auth)

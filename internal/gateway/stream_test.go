@@ -22,17 +22,21 @@ import (
 )
 
 // fakeKasm stands in for KasmVNC: it requires basic auth "user" with the
-// password the container was created with and echoes what reached it.
-func fakeKasm(t *testing.T, password string) *httptest.Server {
+// password the container was created with (or "viewer" with the view-only
+// password) and echoes what reached it.
+func fakeKasm(t *testing.T, password string, viewPassword ...string) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
-		if !ok || u != "user" || p != password {
+		okUser := ok && u == "user" && p == password
+		okViewer := ok && u == "viewer" && len(viewPassword) == 1 && viewPassword[0] != "" && p == viewPassword[0]
+		if !okUser && !okViewer {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Websockify"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"path": r.URL.Path, "cookie": r.Header.Get("Cookie"), "user": r.Header.Get("X-User-Id"),
+			"path": r.URL.Path, "cookie": r.Header.Get("Cookie"), "user": r.Header.Get("X-User-Id"), "as": u,
+			"view": r.Header.Get("X-Stream-View"),
 		})
 	}))
 	t.Cleanup(srv.Close)
@@ -60,14 +64,17 @@ func withDesktop(hp **harness) func(*harnessOpts) {
 				}
 				h := *hp
 				h.docker.mu.Lock()
-				pw := ""
+				pw, vpw := "", ""
 				for _, e := range h.docker.ctrs[name].body["Env"].([]any) {
 					if v, ok := strings.CutPrefix(e.(string), "OPEN_TERMINAL_DESKTOP_PASSWORD="); ok {
 						pw = v
 					}
+					if v, ok := strings.CutPrefix(e.(string), "OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD="); ok {
+						vpw = v
+					}
 				}
 				h.docker.mu.Unlock()
-				kasm[name] = strings.TrimPrefix(fakeKasm(h.docker.t, pw).URL, "http://")
+				kasm[name] = strings.TrimPrefix(fakeKasm(h.docker.t, pw, vpw).URL, "http://")
 				return kasm[name]
 			}
 		}
@@ -93,6 +100,22 @@ func streamGet(t *testing.T, base, path, user string, hdr map[string]string) (in
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, resp.Header, string(b)
+}
+
+func TestDesktopStreamViewMode(t *testing.T) {
+	var h *harness
+	h = newHarness(t, withDesktop(&h))
+	_, b := h.control(t, http.MethodPost, "sessions", testControlKey, "alice", `{"workspace":"desk"}`)
+	var s sessionInfo
+	_ = json.Unmarshal([]byte(b), &s)
+	_, _, body := streamGet(t, h.gw.URL, s.ID+"/app.js", "alice", map[string]string{"X-Stream-View": "1"})
+	if !strings.Contains(body, `"as":"viewer"`) || !strings.Contains(body, `"view":""`) {
+		t.Fatalf("view mode: %s (and the header must not reach KasmVNC)", body)
+	}
+	_, _, body = streamGet(t, h.gw.URL, s.ID+"/app.js", "alice", nil)
+	if !strings.Contains(body, `"as":"user"`) {
+		t.Fatalf("owner mode: %s", body)
+	}
 }
 
 func TestDesktopStream(t *testing.T) {

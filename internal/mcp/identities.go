@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"termiplus/internal/naming"
@@ -59,6 +60,18 @@ func (s *IdentityStore) Lookup(sub string) (string, bool) {
 	defer s.mu.Unlock()
 	owui, ok := s.subjects[sub]
 	return owui, ok
+}
+
+// Subjects returns every OIDC subject the store knows.
+func (s *IdentityStore) Subjects() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.subjects))
+	for sub := range s.subjects {
+		out = append(out, sub)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Record stores sub -> owui and persists it when it changed. The newest pair

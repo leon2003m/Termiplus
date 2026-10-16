@@ -31,6 +31,9 @@ All notable changes to this project are documented here. The format is based on 
 - Admin API `GET`/`PUT /admin/homes/<home>/archive` (back up and restore a user's home as a tar) and `DELETE /admin/homes/<home>` (with `ALLOW_HOME_REMOVE=1` on the proxy). File access goes through never-started archive helper containers (`ot-a-...`); the proxy allows archive calls only on them, only for `/home/user`, and rewrites uploaded tars entry by entry.
 - Gateway metrics: Prometheus endpoint (`METRICS_LISTEN_ADDR`) and an MQTT publisher with Home Assistant discovery (`MQTT_URL`, `deploy/docker-compose.mqtt.yml`). Minimal MQTT 3.1.1 client in the standard library. The socket proxy counts allowed, denied and failed calls (`GET /termiplus/stats`).
 - Audit log in the MCP server (`MCP_AUDIT_FILE`, on in `deploy/docker-compose.mcp.yml`): every state-changing tool call from chat or the console, with actor, arguments and outcome, including refused calls. `termiplus-admin` users read it with the new `get_audit_log` tool (MCP and plugin 0.4.0) or in the console.
+- Workspace reset and home backups (alpha): `reset_workspace`, `manage_snapshots` (list, create, restore, delete; download links) in MCP, plugin 0.5.0 and the console. Snapshots are gzip'd tars in the gateway's `BACKUP_DIR`, `SNAPSHOT_KEEP` per home.
+- View-only shared desktops (alpha): `share_desktop` creates expiring links (`/share/<token>/`, optionally for one user) that sign in to KasmVNC as the new read-only user `viewer`. The desktop image creates it from `OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD`.
+- Departed users (alpha): with `MCP_DEPARTED_AFTER`, homes of users disabled or deleted in Keycloak are archived and their workspaces deleted after that time, and restored when a disabled user returns; `manage_departed` for admins.
 
 ### Changed
 

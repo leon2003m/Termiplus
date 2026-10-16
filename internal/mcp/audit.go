@@ -172,10 +172,16 @@ func auditArgs(args map[string]any) map[string]any {
 	return out
 }
 
-// audited reports whether a call to t with args can change something. The
-// only read action of a writing tool is manage_user "show".
+// readActions are the read-only actions of tools that can also write.
+var readActions = map[string]string{"manage_user": "show", "manage_snapshots": "list", "share_desktop": "list", "manage_departed": "list"}
+
+// audited reports whether a call to t with args can change something.
 func audited(t *tool, args map[string]any) bool {
-	return !t.readOnly && !(t.name == "manage_user" && argString(args, "action") == "show")
+	if t.readOnly {
+		return false
+	}
+	a, ok := readActions[t.name]
+	return !ok || argString(args, "action") != a
 }
 
 func (s *Server) audit(p Principal, t *tool, args map[string]any, outcome string, err error) {

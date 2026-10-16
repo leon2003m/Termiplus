@@ -13,6 +13,12 @@
 # The tools only change membership of top-level termiplus-* groups, need the
 # termiplus-admin role, ask for a human confirmation before every change and
 # never remove the last enabled admin. Users and passwords stay in Keycloak.
+#
+# Departed users (optional): with MCP_DEPARTED_AFTER (e.g. 720h = 30 days) in
+# deploy/.env, users disabled or deleted in Keycloak get their homes archived
+# (BACKUP_DIR of the gateway, see docker-compose.mcp.yml) and their workspaces
+# deleted after that time; homes are only deleted too with ALLOW_HOME_REMOVE=1
+# on the socket proxy. Re-enabled users get their homes back. docs/mcp.md.
 name: termiplus
 
 services:
@@ -22,6 +28,8 @@ services:
       MCP_KC_REALM: termiplus
       MCP_KC_CLIENT_ID: termiplus-mcp-admin
       MCP_KC_CLIENT_SECRET_FILE: /run/secrets/mcp_kc_admin_client_secret
+      MCP_DEPARTED_AFTER: ${MCP_DEPARTED_AFTER:-}
+      MCP_DEPARTED_FILE: /data/departed.json
     secrets: [control_api_key, mcp_owui_plugin_key, mcp_kc_admin_client_secret]
     networks: [ot-mcp-kc]
 

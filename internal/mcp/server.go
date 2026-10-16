@@ -30,12 +30,18 @@ type Server struct {
 	dir         Directory
 	groupPrefix string
 	auditLog    *AuditLog // nil: calls are not recorded (WithAuditLog)
+	uiBase      string    // browser-facing console base URL, for download links
+	shares      *ShareStore
+	departed    *departed
 }
 
 // NewServer builds the server with its fixed tool surface.
 func NewServer(auth Authenticator, backend Backend, version string) *Server {
 	s := &Server{auth: auth, backend: backend, version: version}
 	s.tools = s.buildTools()
+	for _, extra := range [][]tool{s.homeTools(), s.shareTools(), s.departedTools()} {
+		s.tools = append(s.tools, extra...)
+	}
 	return s
 }
 

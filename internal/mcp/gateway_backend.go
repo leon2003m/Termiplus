@@ -213,6 +213,12 @@ func (b *GatewayBackend) send(req *http.Request, out any) error {
 		return fmt.Errorf("gateway: %w", err)
 	}
 	defer resp.Body.Close()
+	return decodeGateway(req, resp, out)
+}
+
+// decodeGateway turns a gateway answer into out, or an error carrying the
+// gateway's message.
+func decodeGateway(req *http.Request, resp *http.Response, out any) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 300 {
 		var e struct {

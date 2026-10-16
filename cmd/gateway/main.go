@@ -73,6 +73,8 @@ func main() {
 		NetPolicy:    store,
 		ControlKey:   config.Secret("CONTROL_API_KEY", false),
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
+		BackupDir:    config.Get("BACKUP_DIR", ""),
+		SnapshotKeep: int(config.Int("SNAPSHOT_KEEP", 5)),
 	})
 	if err != nil {
 		log.Fatal(err)

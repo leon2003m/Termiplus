@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strings"
@@ -102,6 +103,9 @@ func main() {
 		entDesc += ", audit log " + f
 	}
 
+	// Download links and share links point at the console's public origin.
+	srv.WithUIBase(config.Get("STREAM_PUBLIC_URL", ""))
+
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
 	// calls; the management UI needs it.
 	var ids *mcp.IdentityStore
@@ -113,12 +117,33 @@ func main() {
 		srv.WithIdentities(ids)
 	}
 
+	// Departed users: archive the homes of users disabled or deleted in
+	// Keycloak after MCP_DEPARTED_AFTER (off unless set).
+	if after := config.Duration("MCP_DEPARTED_AFTER", 0); after > 0 {
+		if config.Get("MCP_KC_ADMIN_URL", "") == "" || ids == nil {
+			log.Fatal("MCP_DEPARTED_AFTER needs user management (MCP_KC_ADMIN_URL) and MCP_IDENTITY_FILE")
+		}
+		store, err := mcp.OpenDepartedStore(config.Get("MCP_DEPARTED_FILE", "/data/departed.json"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		srv.WithDeparted(store, after)
+		go srv.RunDeparted(context.Background(), config.Duration("MCP_DEPARTED_INTERVAL", 6*time.Hour))
+		entDesc += ", departed users archived after " + after.String()
+	}
+
 	// The management UI trusts the sign-in proxy's identity headers, so it
 	// only runs behind it (MCP_AUTH=proxy) on its own listener.
 	if uiAddr := config.Get("UI_LISTEN_ADDR", ""); uiAddr != "" {
 		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil {
 			log.Fatal("UI_LISTEN_ADDR needs MCP_AUTH=proxy and MCP_IDENTITY_FILE")
 		}
+		// View-only desktop share links (share_desktop).
+		shares, err := mcp.OpenShareStore(config.Get("MCP_SHARES_FILE", ""))
+		if err != nil {
+			log.Fatal(err)
+		}
+		srv.WithShares(shares)
 		handler := mcp.NewUI(srv, ids)
 		// Desktops (/stream/) go through the gateway's control API.
 		if controlKey := config.Secret("CONTROL_API_KEY", false); controlKey != "" {

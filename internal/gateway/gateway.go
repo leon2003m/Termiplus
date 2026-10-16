@@ -54,6 +54,11 @@ type Config struct {
 	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
 	ForwarderDNS string
+	// BackupDir stores snapshots and archived homes (control API). Empty
+	// disables them; downloads of the current home still work.
+	BackupDir string
+	// SnapshotKeep is how many snapshots per home are kept (default 5).
+	SnapshotKeep int
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
@@ -66,6 +71,7 @@ type Gateway struct {
 	// specPolicy maps every policy to the policy whose container answers
 	// user-less spec requests for it (see specPolicies).
 	specPolicy map[string]string
+	backups    *backupStore // nil without BackupDir
 }
 
 // The user-less "spec" identity serves Open WebUI's connection checks and
@@ -156,7 +162,15 @@ func New(cfg Config) (*Gateway, error) {
 		instances:    map[string]*instance{},
 		locks:        map[string]*sync.Mutex{},
 	}
-	return &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}, nil
+	g := &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}
+	if cfg.BackupDir != "" {
+		b, err := newBackupStore(cfg.BackupDir, cfg.SnapshotKeep)
+		if err != nil {
+			return nil, err
+		}
+		g.backups = b
+	}
+	return g, nil
 }
 
 // specPolicies picks, for each runtime, one policy whose container answers the

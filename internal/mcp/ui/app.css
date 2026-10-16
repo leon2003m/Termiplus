@@ -29,3 +29,8 @@ input.port { width: 6.5em; font: inherit; padding: 5px 8px; border: 1px solid va
 #audit th, #audit td { text-align: left; vertical-align: top; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 #audit td.mono { font: 12px ui-monospace, monospace; overflow-wrap: anywhere; }
 #audit td.bad { color: var(--danger); }
+.home { margin: 8px 0 16px; }
+.home-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.home-head .name { font-weight: 600; flex: 1 1 200px; }
+.home-head .meta { color: var(--muted); font-size: 13px; width: 100%; }
+#share-link input.secret { margin-top: 4px; }

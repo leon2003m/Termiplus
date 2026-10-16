@@ -53,6 +53,10 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		u.stream.ServeHTTP(w, r)
 		return
 	}
+	if u.stream != nil && u.srv.shares != nil && strings.HasPrefix(r.URL.Path, sharePathPrefix) {
+		u.stream.serveShare(w, r, u.srv.shares)
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -120,6 +124,57 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		u.run(w, r, p, "request_session", map[string]any{
 			"workspace": req.Workspace, "persistent": req.Persistent, "label": req.Label, "_confirmed": true,
 		})
+	case strings.HasPrefix(rest, "workspaces/") && r.Method == http.MethodGet:
+		u.download(w, r, p, strings.TrimPrefix(rest, "workspaces/"))
+	case strings.HasPrefix(rest, "sessions/") && strings.HasSuffix(rest, "/reset") && r.Method == http.MethodPost:
+		u.run(w, r, p, "reset_workspace", map[string]any{
+			"session_id": strings.TrimSuffix(strings.TrimPrefix(rest, "sessions/"), "/reset"), "_confirmed": true,
+		})
+	case strings.HasPrefix(rest, "snapshots/") && (r.Method == http.MethodGet || r.Method == http.MethodPost):
+		// snapshots/<workspace> (GET list, POST create) and
+		// snapshots/<workspace>/<id>/restore (POST)
+		parts := strings.Split(strings.TrimPrefix(rest, "snapshots/"), "/")
+		args := map[string]any{"workspace": parts[0], "_confirmed": true}
+		switch {
+		case len(parts) == 1 && r.Method == http.MethodGet:
+			args["action"] = "list"
+		case len(parts) == 1:
+			args["action"] = "create"
+		case len(parts) == 3 && parts[2] == "restore" && r.Method == http.MethodPost:
+			args["action"], args["snapshot_id"] = "restore", parts[1]
+		default:
+			uiError(w, http.StatusNotFound, "not found")
+			return
+		}
+		u.run(w, r, p, "manage_snapshots", args)
+	case strings.HasPrefix(rest, "snapshots/") && r.Method == http.MethodDelete:
+		parts := strings.Split(strings.TrimPrefix(rest, "snapshots/"), "/")
+		if len(parts) != 2 {
+			uiError(w, http.StatusNotFound, "not found")
+			return
+		}
+		u.run(w, r, p, "manage_snapshots", map[string]any{"workspace": parts[0], "action": "delete", "snapshot_id": parts[1], "_confirmed": true})
+	case rest == "shares" && r.Method == http.MethodGet:
+		u.run(w, r, p, "share_desktop", map[string]any{"action": "list"})
+	case rest == "shares" && r.Method == http.MethodPost:
+		var req struct {
+			SessionID string `json:"session_id"`
+			Minutes   int    `json:"minutes"`
+			ForUser   string `json:"for_user"`
+		}
+		dec := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			uiError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		args := map[string]any{"action": "create", "session_id": req.SessionID, "for_user": req.ForUser, "_confirmed": true}
+		if req.Minutes != 0 {
+			args["minutes"] = float64(req.Minutes)
+		}
+		u.run(w, r, p, "share_desktop", args)
+	case strings.HasPrefix(rest, "shares/") && r.Method == http.MethodDelete:
+		u.run(w, r, p, "share_desktop", map[string]any{"action": "revoke", "share_id": strings.TrimPrefix(rest, "shares/")})
 	case strings.HasPrefix(rest, "desktops/") && r.Method == http.MethodGet:
 		u.desktop(w, r, p, strings.TrimPrefix(rest, "desktops/"))
 	case strings.HasPrefix(rest, "sessions/") && r.Method == http.MethodDelete:
@@ -249,4 +304,44 @@ func uiJSON(w http.ResponseWriter, status int, v any) {
 
 func uiError(w http.ResponseWriter, status int, msg string) {
 	uiJSON(w, status, map[string]string{"error": msg})
+}
+
+// download streams <workspace>/home/archive (the current home as a tar) or
+// <workspace>/home/snapshots/<id> (a stored snapshot) to the browser.
+func (u *UI) download(w http.ResponseWriter, r *http.Request, p Principal, rest string) {
+	ws, sub, ok := strings.Cut(rest, "/home/")
+	id := ""
+	switch {
+	case !ok:
+		uiError(w, http.StatusNotFound, "not found")
+		return
+	case sub == "archive":
+	case strings.HasPrefix(sub, "snapshots/") && snapshotIDPattern.MatchString(strings.TrimPrefix(sub, "snapshots/")):
+		id = strings.TrimPrefix(sub, "snapshots/")
+	default:
+		uiError(w, http.StatusNotFound, "not found")
+		return
+	}
+	hb, err := u.srv.homeBackend()
+	if err != nil {
+		uiError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err := u.srv.entitledWorkspace(r.Context(), p, ws); err != nil {
+		uiError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	resp, err := hb.HomeDownload(r.Context(), p, ws, id)
+	if err != nil {
+		uiError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	for _, h := range []string{"Content-Type", "Content-Disposition"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, resp.Body)
 }

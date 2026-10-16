@@ -224,6 +224,73 @@ class PluginAgainstServer(unittest.TestCase):
 
 
 @unittest.skipUnless(MCP_BIN, "set TERMIPLUS_MCP_BIN to the built mcp binary")
+class HomeTools(unittest.TestCase):
+    """New tools reach the server, which asks for confirmation where needed (the
+    stub backend has no homes, so it then reports that)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.proc, cls.url = start_mcp("termiplus-persist")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.kill()
+        cls.proc.wait()
+
+    def tools(self):
+        t = plugin.Tools()
+        t.valves.mcp_url = self.url
+        t.valves.timeout_seconds = 10
+        return t
+
+    def test_reset_asks_first(self):
+        rec = Recorder(False)
+        out = asyncio.run(self.tools().reset_workspace("ot-u-x", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn("cancelled", out)
+
+    def test_snapshot_list_needs_no_dialog(self):
+        rec = Recorder(True)
+        out = asyncio.run(self.tools().manage_snapshots("list", "desk", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertEqual(rec.calls, [])
+        self.assertIn("not available", out)
+
+    def test_snapshot_restore_asks_first(self):
+        rec = Recorder(False)
+        out = asyncio.run(
+            self.tools().manage_snapshots("restore", "desk", "20261016T221500Z", __oauth_token__=TOKEN, __event_call__=rec)
+        )
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn("cancelled", out)
+
+    def test_share_create_asks_first_list_does_not(self):
+        rec = Recorder(False)
+        out = asyncio.run(self.tools().share_desktop("create", "ot-u-x", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn("cancelled", out)
+        rec = Recorder(True)
+        out = asyncio.run(self.tools().share_desktop("list", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertEqual(rec.calls, [])
+        self.assertIn("not configured", out)
+
+    def test_departed_is_admin_only(self):
+        out = asyncio.run(self.tools().manage_departed("list", __oauth_token__=TOKEN))
+        self.assertIn("not allowed", out)
+
+    def test_result_links(self):
+        share = json.dumps({"share_id": "abc", "url": "https://desk.example/share/" + "a" * 64 + "/"})
+        out = plugin._with_result_links("share_desktop", share)
+        self.assertIn("[Shared desktop (view only)](https://desk.example/share/", out)
+        snaps = json.dumps({"current_home_download_url": "https://desk.example/ui/api/workspaces/default/home/archive",
+                            "snapshots": [{"id": "20261016T221500Z", "download_url": "https://desk.example/x"},
+                                          {"id": "bad", "download_url": "javascript:alert(1)"}]})
+        out = plugin._with_result_links("manage_snapshots", snaps)
+        self.assertIn("[Download the current home](https://desk.example/ui/api/workspaces/default/home/archive)", out)
+        self.assertIn("[Download snapshot 20261016T221500Z](https://desk.example/x)", out)
+        self.assertNotIn("javascript", out.split("\n", 1)[1])
+        self.assertEqual(plugin._with_result_links("list_sessions", snaps), snaps)
+
+
 class NetworkPolicyTools(unittest.TestCase):
     """Admin tools: RBAC from the server, confirmation from the user."""
 

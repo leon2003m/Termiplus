@@ -117,6 +117,14 @@ func (m *manager) desktopPassword(name string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// desktopViewPassword is the password of KasmVNC's view-only user "viewer"
+// (shared desktops), in its own domain.
+func (m *manager) desktopViewPassword(name string) string {
+	mac := hmac.New(sha256.New, m.keySecret)
+	mac.Write([]byte("desktop-view\x00" + name))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 // containerKey derives the per-container API key. Nothing to store, and
 // rotating KEY_SECRET changes the config hash so containers get recreated.
 func (m *manager) containerKey(name string) string {
@@ -410,7 +418,8 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 		env = append(env, "OPEN_TERMINAL_RESOLVER="+m.forwarderDNS)
 	}
 	if pol.Desktop {
-		env = append(env, "OPEN_TERMINAL_DESKTOP_PASSWORD="+m.desktopPassword(name))
+		env = append(env, "OPEN_TERMINAL_DESKTOP_PASSWORD="+m.desktopPassword(name),
+			"OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD="+m.desktopViewPassword(name))
 	}
 	spec := map[string]any{
 		"Image":      m.imageFor(pol),

@@ -24,3 +24,4 @@ coverage.*
 # Python bytecode from the Open WebUI plugin tests
 __pycache__/
 deploy/mcp-data/
+deploy/backups/
