@@ -115,12 +115,14 @@ type fakeDocker struct {
 	creates int
 	addrs   map[string]string
 	seen    []string // raw create bodies received from the proxy
+	image   string   // ID testImage currently points to; "" = no such image
 }
 
 type fakeCtr struct {
 	id      string
 	name    string
 	body    map[string]any
+	image   string // image ID at create time
 	running bool
 	srv     *httptest.Server
 }
@@ -159,7 +161,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		d.creates++
 		id := fmt.Sprintf("%064x", d.creates)
-		d.ctrs[name] = &fakeCtr{id: id, name: name, body: b}
+		d.ctrs[name] = &fakeCtr{id: id, name: name, body: b, image: d.image}
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"Id":%q}`, id)
 	case p == "/containers/json":
@@ -172,6 +174,17 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = append(out, map[string]any{"Id": c.id, "Names": []string{"/" + c.name}, "State": st, "Labels": c.body["Labels"]})
 		}
 		_ = json.NewEncoder(w).Encode(out)
+	case p == "/images/"+testImage+"/json":
+		if d.image == "" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"message":"No such image"}`)
+			return
+		}
+		// Everything but Id must be stripped by the proxy.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"Id": d.image, "RepoTags": []string{testImage},
+			"Config": map[string]any{"Env": []string{"BUILD_SECRET=leak"}},
+		})
 	case strings.HasPrefix(p, "/containers/"):
 		parts := strings.Split(strings.TrimPrefix(p, "/containers/"), "/")
 		c := d.find(parts[0])
@@ -183,7 +196,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case len(parts) == 2 && parts[1] == "json":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"Id": c.id, "Name": "/" + c.name,
+				"Id": c.id, "Name": "/" + c.name, "Image": c.image,
 				"State":  map[string]any{"Running": c.running},
 				"Config": map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
 			})
@@ -258,7 +271,7 @@ func newHarness(t *testing.T, opts ...func(*harnessOpts)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fd := &fakeDocker{t: t, ctrs: map[string]*fakeCtr{}, volumes: map[string]map[string]string{}, addrs: map[string]string{}}
+	fd := &fakeDocker{t: t, image: imageV1, ctrs: map[string]*fakeCtr{}, volumes: map[string]map[string]string{}, addrs: map[string]string{}}
 	dsrv := &http.Server{Handler: fd}
 	go dsrv.Serve(l)
 	t.Cleanup(func() {
@@ -754,6 +767,106 @@ func TestEphemeralPerUserCap(t *testing.T) {
 	h.g.mgr.mu.Unlock()
 	if code, _ := h.getChat(t, "/p/scratch/files/cwd", "alice", "c4", testAPIKey); code != 429 {
 		t.Fatalf("expected 429 when every sandbox is in use, got %d", code)
+	}
+}
+
+const (
+	imageV1 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	imageV2 = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+)
+
+// stopBehindGateway stops a container as `docker stop` or a host reboot would
+// and makes the gateway re-check it on the next request.
+func (h *harness) stopBehindGateway(name string) {
+	h.docker.mu.Lock()
+	if c := h.docker.ctrs[name]; c.running {
+		c.srv.Close()
+		c.running = false
+	}
+	h.docker.mu.Unlock()
+	h.g.mgr.invalidate(name)
+}
+
+func (h *harness) setImage(id string) {
+	h.docker.mu.Lock()
+	h.docker.image = id
+	h.docker.mu.Unlock()
+}
+
+func TestImageUpdateRecreatesStoppedWorkspace(t *testing.T) {
+	h := newHarness(t)
+	name := naming.Container("alice", "default")
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 {
+		t.Fatal("first request failed")
+	}
+	vol := h.ctr(name).body["HostConfig"].(map[string]any)["Mounts"].([]any)[0].(map[string]any)["Source"]
+
+	// stopped, same image: just started again
+	h.stopBehindGateway(name)
+	if code, b := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 || h.docker.creates != 1 {
+		t.Fatalf("unchanged image must not recreate: %d %s creates=%d", code, b, h.docker.creates)
+	}
+
+	// running, image updated: never touched
+	h.setImage(imageV2)
+	h.g.mgr.invalidate(name)
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 || h.docker.creates != 1 {
+		t.Fatalf("a running workspace must not be recreated, creates=%d", h.docker.creates)
+	}
+
+	// stopped, image updated: recreated on the new image with the same home
+	h.stopBehindGateway(name)
+	if code, b := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 {
+		t.Fatalf("%d %s", code, b)
+	}
+	c := h.ctr(name)
+	if h.docker.creates != 2 || c.image != imageV2 {
+		t.Fatalf("stopped workspace should be recreated on the new image, creates=%d image=%s", h.docker.creates, c.image)
+	}
+	if got := c.body["HostConfig"].(map[string]any)["Mounts"].([]any)[0].(map[string]any)["Source"]; got != vol {
+		t.Fatalf("home volume changed: %v -> %v", vol, got)
+	}
+}
+
+func TestImageCheckFailureKeepsWorkspace(t *testing.T) {
+	h := newHarness(t)
+	name := naming.Container("alice", "default")
+	h.get(t, "/files/cwd", "alice", testAPIKey)
+	h.setImage("") // image lookup answers 404
+	h.stopBehindGateway(name)
+	if code, b := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 || h.docker.creates != 1 {
+		t.Fatalf("an unknown current image must keep the container: %d %s creates=%d", code, b, h.docker.creates)
+	}
+}
+
+func TestProxyImageLookupIsNarrow(t *testing.T) {
+	h := newHarness(t)
+	do := func(path string) (int, map[string]any) {
+		req, _ := http.NewRequest(http.MethodGet, h.proxy.URL+path, nil)
+		req.Header.Set("X-Proxy-Token", "proxy-token")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	code, body := do("/v1.47/images/" + testImage + "/json")
+	if code != 200 || body["Id"] != imageV1 || len(body) != 1 {
+		t.Fatalf("allowed image lookup must return only the id: %d %v", code, body)
+	}
+	for _, p := range []string{
+		"/images/alpine/json",
+		"/images/" + testImage + "/history",
+		"/images/" + testImage + "/json?x=1",
+		"/images/json",
+		"/images/" + testImage + "x/json",
+	} {
+		if code, _ := do(p); code != 403 {
+			t.Errorf("GET %s: got %d want 403", p, code)
+		}
 	}
 }
 

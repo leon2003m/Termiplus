@@ -29,6 +29,7 @@ func New(base, token string) *Client {
 type Container struct {
 	ID    string `json:"Id"`
 	Name  string `json:"Name"`
+	Image string `json:"Image"` // ID of the image the container was created from
 	State struct {
 		Running bool   `json:"Running"`
 		Status  string `json:"Status"`
@@ -95,6 +96,17 @@ func (c *Client) Inspect(ctx context.Context, name string) (*Container, error) {
 		return nil, err
 	}
 	return &ct, nil
+}
+
+// ImageID returns the ID of the image ref currently points to, or ErrNotFound.
+func (c *Client) ImageID(ctx context.Context, ref string) (string, error) {
+	var img struct {
+		ID string `json:"Id"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/images/"+ref+"/json", nil, nil, &img); err != nil {
+		return "", err
+	}
+	return img.ID, nil
 }
 
 func (c *Client) List(ctx context.Context) ([]ListItem, error) {
