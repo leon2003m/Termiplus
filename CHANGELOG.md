@@ -51,3 +51,7 @@ All notable changes to this project are documented here. The format is based on 
 - The gateway verifies a persistent home volume's owner label before reusing it, as it already did for containers, so a user-hash collision cannot hand one user another user's home. (#16)
 - The socket proxy refuses to start without `PROXY_TOKEN` (at least 32 characters) instead of running unauthenticated. (#15)
 - With the netpolicy overlay, `firewall.sh` lets terminals reach the DNS forwarder (udp/tcp 53 only) and the forwarder reach its `DNS_UPSTREAM` (port 53 only), and pins the forwarder's IP to its MAC like the gateway's. Before, the #13/#14 rework dropped all DNS to the forwarder. (live validation)
+- MCP: the binding between an OIDC subject and an Open WebUI user id is now one-to-one and immutable. A plugin call that would rebind either side is rejected (`-32003`) before any tool runs, and a call whose binding cannot be stored fails closed (`-32603`). Previously the newest pair won, so a valid token plus the plugin key could move a linked user's home to another subject.
+- MCP: `MCP_OWUI_PLUGIN_KEY` now requires `MCP_IDENTITY_FILE`; without it the server refuses to start instead of trusting the plugin-supplied user id without a binding.
+- MCP: the identity file is fsynced before and after the atomic rename.
+- Upgrade note: an identity file that maps two subjects to one Open WebUI user id makes the MCP server refuse to start; remove the stale entry first (docs/mcp.md).

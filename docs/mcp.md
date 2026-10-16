@@ -79,9 +79,14 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      is unauthenticated. The first valid plugin call creates a persistent
      subject-to-Open-WebUI-user binding. That binding is one-to-one and
      immutable through normal requests: a later request trying to rebind either
-     side is rejected before any tool runs. Re-linking requires an explicit
-     administrator edit of `MCP_IDENTITY_FILE`. This prevents a stolen/reused
-     plugin key from silently transferring an already-linked user's home.
+     side is rejected before any tool runs (JSON-RPC error `-32003`). If the
+     binding cannot be stored, the call fails with `-32603` and no tool runs.
+     `MCP_OWUI_PLUGIN_KEY` without `MCP_IDENTITY_FILE` refuses to start, since
+     there would be nothing to bind against. Re-linking requires stopping the
+     MCP server, editing `MCP_IDENTITY_FILE` and starting it again: the file is
+     read only at startup and rewritten from memory on the next enrollment, so
+     an edit made while it runs is lost. This prevents a stolen/reused plugin
+     key from silently transferring an already-linked user's home.
      The plugin key remains a bootstrap trust anchor: keep it only in the
      Open WebUI admin-controlled valve and Docker secret. Keycloak remains the
      source of authentication and groups.
@@ -451,6 +456,11 @@ WebUI (another MCP client with a Keycloak token) cannot use the MCP server while
 the key is set. If you need stronger first-enrollment assurance than this shared
 bootstrap secret, pre-provision the subject-to-user mapping through a trusted
 admin workflow before enabling user access.
+
+Upgrading from a version where the newest pair won: an existing
+`MCP_IDENTITY_FILE` that maps two subjects to the same Open WebUI user id now
+makes the MCP server refuse to start. Decide which subject owns that user,
+remove the other entry, then start it.
 
 Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
 isolated throwaway stack: ephemeral and persistent creation, the mismatch and
