@@ -145,10 +145,22 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 | `home` | Persistent only. Policies with the same `home` share the user's volume |
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
+| `image` | Optional. Runs this policy on another image than `TERMINAL_IMAGE`, e.g. a Python or Node image. The socket proxy must list it in `EXTRA_IMAGES` |
 
 **Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image reference, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays. A new image under the same tag (after a pull or rebuild) is picked up when a stopped workspace starts again: it is recreated on the new image with the same volume. A running workspace is never recreated for that. Anything installed outside `/home/user` is lost on recreation.
 
 **Ephemeral.** One container per user, chat and policy (`ot-e-<user>-<chat>-<policy>`), no volume. Files live in the container and disappear with it. Docker deletes it as soon as it stops (`AutoRemove`, forced by the proxy). The same chat keeps its sandbox until it goes idle, then gets a fresh one. At `max_per_user`, the user's least recently used sandbox without an open terminal is deleted; if all are in use, the request gets 429. Requests without a chat id share one `nochat` sandbox per user. Open WebUI's file browser sends the chat id only once the chat is saved (after the first message): in a new chat it shows the `nochat` sandbox, while the model's first tool call already gets the chat's own sandbox.
+
+### More than one image
+
+Each policy may name its own `image`, for example a data-science image next to the default terminal:
+
+```json
+"python": { "runtime": "runsc", "memory_mb": 4096, "cpus": 2, "pids": 512,
+            "home": "default", "image": "ghcr.io/you/termiplus-python:1.0" }
+```
+
+List every such image in the socket proxy's `EXTRA_IMAGES` (comma-separated, exact references, ideally pinned by digest); the proxy refuses any other. Build them `FROM` the termiplus terminal image (`image/Dockerfile`) so Open Terminal, the start script and the user stay the same. Policies with the same `home` share the user's files across images. Changing a policy's image recreates its containers on their next use; the home stays. Policies without `image` keep using `TERMINAL_IMAGE` and are not recreated by this feature.
 
 ### Disk quota for home volumes
 
@@ -178,6 +190,12 @@ Limits:
 - Ephemeral sandboxes and the container layer of persistent workspaces (everything outside `/home/user`) are not covered.
 - `df` inside the workspace shows the whole filesystem, not the quota.
 
+### Disk quota for everything else (container layer)
+
+`CONTAINER_ROOTFS_SIZE` (same format, e.g. `10G`) caps each terminal's writable container layer: everything outside `/home/user`, and all of an ephemeral sandbox. The proxy forces it as `HostConfig.StorageOpt` on every container it creates. Docker supports this with the `overlay2` storage driver when its data root (`/var/lib/docker`) is on XFS mounted with `pquota`; otherwise it refuses to create the container, so again nothing runs without the limit. The loopback-XFS recipe above works for the whole data root too (mount it at `/var/lib/docker` instead of `/var/lib/docker/volumes`, with `pquota`), but it moves all images and containers, and Docker installations that use the containerd image store may not support the option at all.
+
+Verified in a VM with Docker 26 and `overlay2` on XFS: writes stop at the limit with "No space left on device" under gVisor (its root overlay is file-backed, `overlay2=root:self`), Sysbox and in ephemeral sandboxes. Changing the setting applies to containers created afterwards.
+
 ## What the socket proxy allows
 
 Everything not listed is 403.
@@ -189,8 +207,13 @@ Everything not listed is 403.
 | `POST /containers/create` | Name must be `ot-u-...` or `ot-e-...`. Body decoded strictly (unknown fields rejected) and rebuilt from checked values. Only the configured image, a runtime from the allowlist (runc refused), the sandbox network, capped memory/CPU/PIDs. Persistent: exactly one volume at `/home/user` belonging to the same user. Ephemeral: no mounts, `AutoRemove` forced. Env only `OPEN_TERMINAL_*`. `Privileged:false` forced. No ports, binds, capabilities, devices, security options, namespaces |
 | `POST /volumes/create` | Name `ot-home-...`, local driver, no driver options from the caller (blocks `o=bind,device=/`). With `HOME_VOLUME_SIZE` the proxy adds exactly `size=<that value>` |
 | `GET /volumes/<name>` | termiplus volumes only |
-| `GET /images/<configured image>/json` | exactly the configured terminal image, no query. The proxy answers with the image ID only; labels, environment and history are not passed on |
+| `DELETE /volumes/<name>` | Only with `ALLOW_HOME_REMOVE=1` (off by default), `ot-home-...` only, never forced: Docker refuses a volume any container still uses |
+| `GET /images/<image>/json` | exactly `TERMINAL_IMAGE` or an `EXTRA_IMAGES` entry, no query. The proxy answers with the image ID only; labels, environment and history are not passed on |
 | `GET .../json`, `POST .../start`, `POST .../stop`, `DELETE` | Target resolved by the daemon first, must carry the termiplus label and name, then addressed by full ID. `DELETE` without `v` |
+| `GET`/`PUT .../archive?path=/home/user` | Only on archive helpers (`ot-a-...`): containers that mount exactly one home of the same user and that the proxy never starts. Exactly that path. Uploaded tars are rewritten entry by entry: only files, directories, symlinks and hard links with clean relative names, nothing below a symlink of the same archive, no device files, no extended attributes or setuid bits |
+| `GET /termiplus/stats` | The proxy's own allowed/denied/failed counters (for the gateway's metrics) |
+
+Containers are created with the configured image(s) only; `CONTAINER_ROOTFS_SIZE` adds a forced `StorageOpt` size. Archive helpers are created like persistent terminals but must mount the home they are named after.
 
 Also rejected: `exec`, `attach`, any other image call, image pulls, builds, connection upgrades, encoded paths, `..`, `//`, missing or duplicate `X-Proxy-Token`.
 
@@ -248,6 +271,30 @@ curl -X PUT -H "X-Admin-Key: $ADMIN_API_KEY" http://gateway:8080/admin/netpolicy
 
 `cidr` is a single host (`/32`) or a subnet; `port` `0` means every port; `proto` is `tcp` or `udp`. An entry overlapping the deny-list is refused with a 400 and nothing changes.
 
+### Back up, restore and delete homes (admin API)
+
+With the admin API on, an operator can copy a user's home out and back in, for backups or moving a user, and delete it:
+
+```sh
+# the home "default" of Open WebUI user <id> as a tar (entries start with user/)
+curl -H "X-Admin-Key: $ADMIN_API_KEY" -H "X-User-Id: <id>" \
+     http://gateway:8080/admin/homes/default/archive -o home.tar
+# put it back (creates the home if needed; the user's workspaces using it are stopped first)
+curl -X PUT --data-binary @home.tar -H "X-Admin-Key: $ADMIN_API_KEY" -H "X-User-Id: <id>" \
+     http://gateway:8080/admin/homes/default/archive
+# delete the user's containers using the home and the home itself (needs ALLOW_HOME_REMOVE=1 on the proxy)
+curl -X DELETE -H "X-Admin-Key: $ADMIN_API_KEY" -H "X-User-Id: <id>" http://gateway:8080/admin/homes/default
+```
+
+The gateway reads and writes the home through a short-lived archive helper container that mounts only that volume and is never started, so a process in the running workspace cannot interfere with the copy; a running workspace keeps running during a backup (files changed meanwhile may be caught half-written). A restore adds and overwrites files; files that are not in the archive stay. A tar that does not come from a backup is checked by the proxy (see the table above).
+
+## Metrics and MQTT
+
+The gateway counts what it runs and does, without user ids or names: running and stopped workspaces, running sandboxes, open sessions, users with something running, starts, failed requests, idle stops, deleted sandboxes, refusals at `MAX_RUNNING`, image-update recreations, and the socket proxy's allowed, denied and failed calls.
+
+- **Prometheus:** set `METRICS_LISTEN_ADDR` (e.g. `:9100`) and scrape `/metrics` on that port. It is a separate listener; publish it only to your monitoring network.
+- **MQTT / Home Assistant:** add `deploy/docker-compose.mqtt.yml` with `MQTT_URL` (e.g. `mqtt://homeassistant.local:1883`), optional `MQTT_USERNAME` and `deploy/secrets/mqtt_password`. The gateway publishes the numbers as JSON to `termiplus/state` (retained, every `MQTT_INTERVAL`, default 30s) and `online`/`offline` to `termiplus/status` (also its last will). With Home Assistant's MQTT discovery (prefix `homeassistant`, `MQTT_DISCOVERY_PREFIX=off` to disable) the values appear as sensors of a "termiplus" device. `mqtts://` uses TLS; `MQTT_CA_FILE` adds your own CA. The overlay gives the gateway a network with a route out to reach the broker.
+
 ## Settings
 
 | Variable | Used by | Default |
@@ -257,6 +304,11 @@ curl -X PUT -H "X-Admin-Key: $ADMIN_API_KEY" http://gateway:8080/admin/netpolicy
 | `PROXY_TOKEN` / `PROXY_TOKEN_FILE` | both | optional, recommended |
 | `ALLOWED_RUNTIMES` | sockproxy | `runsc,sysbox-runc` |
 | `MAX_MEMORY_MB`, `MAX_CPUS`, `MAX_PIDS` | sockproxy | `8192`, `4`, `2048` |
+| `EXTRA_IMAGES` | sockproxy | empty; further images policies may name with `image`, comma-separated |
+| `CONTAINER_ROOTFS_SIZE` | sockproxy | empty (no limit); cap on each terminal's container layer, e.g. `10G` |
+| `ALLOW_HOME_REMOVE` | sockproxy | empty; `1` lets the gateway delete home volumes |
+| `METRICS_LISTEN_ADDR` | gateway | empty (off); Prometheus `/metrics` listener, e.g. `:9100` |
+| `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` / `_FILE`, `MQTT_CLIENT_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, `MQTT_INTERVAL`, `MQTT_CA_FILE` | gateway | MQTT off unless `MQTT_URL` is set; defaults `termiplus-gateway`, `termiplus`, `homeassistant`, `30s` |
 | `HOME_VOLUME_SIZE` | sockproxy | empty (no limit); quota for new home volumes, e.g. `20G` (needs XFS project quotas, see *Disk quota for home volumes*) |
 | `DOCKER_SOCKET` | sockproxy | `/var/run/docker.sock` |
 | `GATEWAY_API_KEY` / `_FILE` | gateway | required, min. 32 chars |
@@ -342,7 +394,7 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 - gVisor policies need the netpolicy overlay for DNS (#3). Without it, terminals under runsc connect by IP only.
 - Instance state lives in gateway memory: run one gateway replica. After a restart it adopts running containers.
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
-- Disk usage is capped only for home volumes created with `HOME_VOLUME_SIZE` set. Ephemeral sandboxes and container layers are not capped.
+- Disk usage is capped only where `HOME_VOLUME_SIZE` (homes, set at creation) and `CONTAINER_ROOTFS_SIZE` (container layers) apply, which needs XFS project quotas.
 - No per-user audit log beyond the gateway and proxy logs.
 
 ## Development

@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"termiplus/internal/config"
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/gateway"
+	"termiplus/internal/mqtt"
 	"termiplus/internal/netpolicy"
 )
 
@@ -76,6 +79,44 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	g.Run(ctx)
+
+	// Prometheus metrics on their own listener, off unless configured.
+	if addr := config.Get("METRICS_LISTEN_ADDR", ""); addr != "" {
+		ms := &http.Server{Addr: addr, Handler: g.MetricsHandler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() { log.Fatal(ms.ListenAndServe()) }()
+		log.Printf("metrics on %s/metrics", addr)
+	}
+	// The same metrics to an MQTT broker (e.g. Home Assistant's), off unless
+	// MQTT_URL is set.
+	if mqttURL := config.Get("MQTT_URL", ""); mqttURL != "" {
+		opts := mqtt.Options{
+			URL:      mqttURL,
+			ClientID: config.Get("MQTT_CLIENT_ID", "termiplus-gateway"),
+			Username: config.Get("MQTT_USERNAME", ""),
+			Password: config.Secret("MQTT_PASSWORD", false),
+		}
+		if ca := config.Get("MQTT_CA_FILE", ""); ca != "" {
+			pem, err := os.ReadFile(ca)
+			if err != nil {
+				log.Fatalf("MQTT_CA_FILE: %v", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(pem) {
+				log.Fatal("MQTT_CA_FILE: no certificates found")
+			}
+			opts.TLS = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+		}
+		discovery := config.Get("MQTT_DISCOVERY_PREFIX", "homeassistant")
+		if discovery == "off" {
+			discovery = ""
+		}
+		go g.RunMQTT(ctx, gateway.MQTTConfig{
+			Options:         opts,
+			Prefix:          config.Get("MQTT_TOPIC_PREFIX", "termiplus"),
+			DiscoveryPrefix: discovery,
+			Interval:        config.Duration("MQTT_INTERVAL", 30*time.Second),
+		})
+	}
 
 	srv := &http.Server{
 		Addr:              config.Get("LISTEN_ADDR", ":8080"),

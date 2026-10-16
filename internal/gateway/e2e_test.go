@@ -5,9 +5,12 @@ package gateway
 //                         \-> fake Open Terminal instances (one per container)
 
 import (
+	"archive/tar"
 	"bufio"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -114,8 +118,65 @@ type fakeDocker struct {
 	volumes map[string]map[string]string // name -> labels
 	creates int
 	addrs   map[string]string
-	seen    []string // raw create bodies received from the proxy
-	image   string   // ID testImage currently points to; "" = no such image
+	seen    []string                     // raw create bodies received from the proxy
+	image   string                       // ID testImage currently points to; "" = no such image
+	files   map[string]map[string]string // volume -> path below the home -> content
+	tarPuts []string                     // entry names of extracted tars, as received
+}
+
+// mountedVolume returns the volume a fake container mounts, or "".
+func (c *fakeCtr) mountedVolume() string {
+	hc, _ := c.body["HostConfig"].(map[string]any)
+	ms, _ := hc["Mounts"].([]any)
+	if len(ms) != 1 {
+		return ""
+	}
+	src, _ := ms[0].(map[string]any)["Source"].(string)
+	return src
+}
+
+// archive serves GET/PUT /containers/<c>/archive?path=/home/user.
+func (d *fakeDocker) archive(w http.ResponseWriter, r *http.Request, c *fakeCtr) {
+	vol := c.mountedVolume()
+	if vol == "" || r.URL.Query().Get("path") != naming.HomeDir {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if d.files[vol] == nil {
+		d.files[vol] = map[string]string{}
+	}
+	if r.Method == http.MethodGet {
+		tw := tar.NewWriter(w)
+		_ = tw.WriteHeader(&tar.Header{Name: "user/", Typeflag: tar.TypeDir, Mode: 0o755})
+		names := make([]string, 0, len(d.files[vol]))
+		for n := range d.files[vol] {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			_ = tw.WriteHeader(&tar.Header{Name: "user/" + n, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(d.files[vol][n]))})
+			_, _ = io.WriteString(tw, d.files[vol][n])
+		}
+		_ = tw.Close()
+		return
+	}
+	tr := tar.NewReader(r.Body)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		d.tarPuts = append(d.tarPuts, h.Name)
+		if h.Typeflag == tar.TypeReg {
+			b, _ := io.ReadAll(tr)
+			d.files[vol][h.Name] = string(b)
+		}
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 type fakeCtr struct {
@@ -144,6 +205,22 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.volumes[v["Name"].(string)] = labels
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, "{}")
+	case strings.HasPrefix(p, "/volumes/") && r.Method == http.MethodDelete:
+		name := strings.TrimPrefix(p, "/volumes/")
+		if _, ok := d.volumes[name]; !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		for _, c := range d.ctrs {
+			if c.mountedVolume() == name {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = io.WriteString(w, `{"message":"volume is in use"}`)
+				return
+			}
+		}
+		delete(d.volumes, name)
+		delete(d.files, name)
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(p, "/volumes/"):
 		name := strings.TrimPrefix(p, "/volumes/")
 		labels, ok := d.volumes[name]
@@ -174,7 +251,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = append(out, map[string]any{"Id": c.id, "Names": []string{"/" + c.name}, "State": st, "Labels": c.body["Labels"]})
 		}
 		_ = json.NewEncoder(w).Encode(out)
-	case p == "/images/"+testImage+"/json":
+	case strings.HasPrefix(p, "/images/") && strings.HasSuffix(p, "/json"):
 		if d.image == "" {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, `{"message":"No such image"}`)
@@ -200,6 +277,8 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"State":  map[string]any{"Running": c.running},
 				"Config": map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
 			})
+		case len(parts) == 2 && parts[1] == "archive":
+			d.archive(w, r, c)
 		case len(parts) == 2 && parts[1] == "start":
 			if !c.running {
 				key := strings.TrimPrefix(c.body["Env"].([]any)[0].(string), "OPEN_TERMINAL_API_KEY=")
@@ -271,7 +350,7 @@ func newHarness(t *testing.T, opts ...func(*harnessOpts)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fd := &fakeDocker{t: t, image: imageV1, ctrs: map[string]*fakeCtr{}, volumes: map[string]map[string]string{}, addrs: map[string]string{}}
+	fd := &fakeDocker{t: t, image: imageV1, ctrs: map[string]*fakeCtr{}, volumes: map[string]map[string]string{}, addrs: map[string]string{}, files: map[string]map[string]string{}}
 	dsrv := &http.Server{Handler: fd}
 	go dsrv.Serve(l)
 	t.Cleanup(func() {
@@ -892,5 +971,64 @@ func TestRemovedContainerIsRecreated(t *testing.T) {
 	}
 	if h.docker.creates != 2 {
 		t.Fatalf("container should have been recreated, creates=%d", h.docker.creates)
+	}
+}
+
+func TestPolicyImage(t *testing.T) {
+	const pyImage = "registry.local/ot-python:1"
+	h := newHarness(t, func(o *harnessOpts) {
+		o.rules = func(r *sockproxy.Rules) { r.ExtraImages = []string{pyImage} }
+		o.gateway = func(c *Config) {
+			c.Policies["py"] = Policy{Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256, Image: pyImage}
+			c.Policies["rogue"] = Policy{Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256, Image: "registry.local/evil:1"}
+		}
+	})
+	if code, b := h.get(t, "/p/py/files/cwd", "alice", testAPIKey); code != 200 {
+		t.Fatalf("py: %d %s", code, b)
+	}
+	if img := h.ctr(naming.Container("alice", "py")).body["Image"]; img != pyImage {
+		t.Fatalf("py runs %v, want %s", img, pyImage)
+	}
+	if code, b := h.get(t, "/files/cwd", "alice", testAPIKey); code != 200 || h.ctr(naming.Container("alice", "default")).body["Image"] != testImage {
+		t.Fatalf("default must keep TERMINAL_IMAGE: %d %s", code, b)
+	}
+	// An image the proxy does not allow is refused there.
+	if code, _ := h.get(t, "/p/rogue/files/cwd", "alice", testAPIKey); code != http.StatusBadGateway {
+		t.Fatalf("rogue image: got %d", code)
+	}
+	if h.ctr(naming.Container("alice", "rogue")) != nil {
+		t.Fatal("container with a disallowed image created")
+	}
+}
+
+func TestPolicyImageValidated(t *testing.T) {
+	cfg := Config{APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Policies: map[string]Policy{
+		"default": {Runtime: "runsc", MemoryMB: 1, CPUs: 1, Pids: 1, Image: "../x"},
+	}}
+	if _, err := New(cfg); err == nil {
+		t.Fatal("invalid image accepted")
+	}
+}
+
+// Policies without their own image must hash exactly as before the field
+// existed, or every existing workspace would be recreated on upgrade.
+func TestConfigHashUnchangedWithoutImage(t *testing.T) {
+	m := &manager{image: testImage, network: "ot-sandbox", port: 8000, keySecret: []byte(testKeySecret)}
+	pol := Policy{Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256}
+	secretFP := sha256.Sum256(m.keySecret)
+	legacyPol := struct {
+		Runtime  string  `json:"runtime"`
+		MemoryMB int64   `json:"memory_mb"`
+		CPUs     float64 `json:"cpus"`
+		Pids     int64   `json:"pids"`
+	}{pol.Runtime, pol.MemoryMB, pol.CPUs, pol.Pids}
+	b, _ := json.Marshal([]any{testImage, "ot-sandbox", 8000, legacyPol, "default", hex.EncodeToString(secretFP[:4]), ""})
+	sum := sha256.Sum256(b)
+	if got, want := m.configHash(pol, "default"), hex.EncodeToString(sum[:8]); got != want {
+		t.Fatalf("hash changed: %s != %s", got, want)
+	}
+	pol.Image = "registry.local/ot-python:1"
+	if m.configHash(pol, "default") == hex.EncodeToString(sum[:8]) {
+		t.Fatal("a policy image must change the hash")
 	}
 }

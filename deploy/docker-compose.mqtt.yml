@@ -1,0 +1,37 @@
+# Opt-in overlay: the gateway publishes its metrics to an MQTT broker, for
+# example the Mosquitto app of Home Assistant, which then shows them as
+# sensors of a "termiplus" device (MQTT discovery).
+#
+#   docker compose -f docker-compose.yml [other overlays] -f docker-compose.mqtt.yml up -d
+#
+# Settings (deploy/.env):
+#   MQTT_URL              required: mqtt://host:1883 or mqtts://host:8883
+#   MQTT_USERNAME         optional
+#   MQTT_TOPIC_PREFIX     default termiplus  (state: <prefix>/state, <prefix>/status)
+#   MQTT_DISCOVERY_PREFIX default homeassistant; "off" disables discovery
+#   MQTT_INTERVAL         default 30s
+# The password is read from deploy/secrets/mqtt_password (create it, empty if
+# the broker needs none).
+#
+# Security impact: the gateway gets a network with a route out (ot-mqtt) so it
+# can reach the broker. It publishes counts only, never user ids or names.
+# Restrict that network to the broker in your host firewall if you can.
+services:
+  gateway:
+    environment:
+      MQTT_URL: ${MQTT_URL:?set MQTT_URL, e.g. mqtt://homeassistant.local:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-termiplus}
+      MQTT_DISCOVERY_PREFIX: ${MQTT_DISCOVERY_PREFIX:-homeassistant}
+      MQTT_INTERVAL: ${MQTT_INTERVAL:-30s}
+    secrets: [mqtt_password]
+    networks:
+      ot-mqtt: {}
+
+networks:
+  ot-mqtt:
+    driver: bridge
+
+secrets:
+  mqtt_password: { file: ./secrets/mqtt_password }

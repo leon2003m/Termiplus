@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 
+	"termiplus/internal/naming"
 	"termiplus/internal/netpolicy"
 )
 
@@ -37,6 +39,10 @@ func (g *Gateway) serveAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if !g.checkAdminKey(r) {
 		httpError(w, http.StatusUnauthorized, "unauthorized")
+		return true
+	}
+	if rest, ok := strings.CutPrefix(r.URL.Path, "/admin/homes/"); ok {
+		g.serveHomes(w, r, rest)
 		return true
 	}
 	if r.URL.Path != "/admin/netpolicy" {
@@ -90,4 +96,94 @@ func (g *Gateway) putNetPolicy(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) checkAdminKey(r *http.Request) bool {
 	got := r.Header.Get(adminKeyHeader)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(g.cfg.AdminKey)) == 1
+}
+
+// serveHomes handles /admin/homes/<home>[/archive] for the user in X-User-Id:
+//
+//	GET    .../<home>/archive  the home as a tar (entries "user/...")
+//	PUT    .../<home>/archive  extract such a tar into the home (stops the
+//	                           user's workspaces using it; creates the home)
+//	DELETE .../<home>          delete the user's containers using the home and
+//	                           the home itself (needs ALLOW_HOME_REMOVE=1 on
+//	                           the socket proxy)
+func (g *Gateway) serveHomes(w http.ResponseWriter, r *http.Request, rest string) {
+	userID := r.Header.Get("X-User-Id")
+	if !naming.UserID.MatchString(userID) || userID == specUser {
+		httpError(w, http.StatusBadRequest, "valid X-User-Id required")
+		return
+	}
+	home, sub, _ := strings.Cut(rest, "/")
+	if !naming.PolicyName.MatchString(home) || len(g.mgr.policiesForHome(home)) == 0 {
+		httpError(w, http.StatusNotFound, "unknown home")
+		return
+	}
+	switch {
+	case sub == "archive" && r.Method == http.MethodGet:
+		g.exportHome(w, r, userID, home)
+	case sub == "archive" && r.Method == http.MethodPut:
+		if err := g.mgr.importHome(r.Context(), userID, home, r.Body); err != nil {
+			log.Printf("admin: import home %s of %s: %v", home, userID, err)
+			httpError(w, http.StatusBadGateway, "could not restore the home")
+			return
+		}
+		log.Printf("admin: restored home %s of %s", home, userID)
+		w.WriteHeader(http.StatusNoContent)
+	case sub == "archive":
+		methodNotAllowed(w, "GET, PUT")
+	case sub == "" && r.Method == http.MethodDelete:
+		if err := g.mgr.removeHome(r.Context(), userID, home); err != nil {
+			log.Printf("admin: remove home %s of %s: %v", home, userID, err)
+			httpError(w, http.StatusBadGateway, "could not remove the home")
+			return
+		}
+		log.Printf("admin: removed home %s of %s", home, userID)
+		w.WriteHeader(http.StatusNoContent)
+	case sub == "":
+		methodNotAllowed(w, "DELETE")
+	default:
+		httpError(w, http.StatusNotFound, "not found")
+	}
+}
+
+// exportHome streams the home as a tar. Errors after the first byte can only
+// end the stream early; tar's missing end marker makes that detectable.
+func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, home string) {
+	sw := &startWriter{w: w, header: func() {
+		w.Header().Set("Content-Type", "application/x-tar")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="home-%s.tar"`, home))
+	}}
+	err := g.mgr.exportHome(r.Context(), userID, home, sw)
+	switch {
+	case err == nil && !sw.started:
+		sw.header()
+		w.WriteHeader(http.StatusOK)
+	case errors.Is(err, errNoHome) && !sw.started:
+		httpError(w, http.StatusNotFound, "no such home")
+	case err != nil && !sw.started:
+		log.Printf("export home %s of %s: %v", home, userID, err)
+		httpError(w, http.StatusBadGateway, "could not read the home")
+	case err != nil:
+		log.Printf("export home %s of %s: %v (stream cut)", home, userID, err)
+	}
+}
+
+// startWriter sets the response headers just before the first byte.
+type startWriter struct {
+	w       http.ResponseWriter
+	header  func()
+	started bool
+}
+
+func (s *startWriter) Write(p []byte) (int, error) {
+	if !s.started {
+		s.started = true
+		s.header()
+		s.w.WriteHeader(http.StatusOK)
+	}
+	return s.w.Write(p)
+}
+
+func methodNotAllowed(w http.ResponseWriter, allow string) {
+	w.Header().Set("Allow", allow)
+	httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 }

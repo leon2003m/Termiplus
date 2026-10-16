@@ -15,7 +15,10 @@ import (
 // Rules is the complete policy the proxy enforces. Anything not expressible
 // here cannot be requested through the proxy.
 type Rules struct {
-	Image       string          // exact image reference, ideally pinned by digest
+	Image string // exact image reference, ideally pinned by digest
+	// ExtraImages are further exact image references terminals may use (one
+	// per policy that names its own "image"). Image is always allowed.
+	ExtraImages []string
 	Runtimes    map[string]bool // allowed OCI runtimes, e.g. runsc, sysbox-runc
 	Network     string          // the only network terminals may join
 	MaxMemory   int64           // bytes
@@ -32,6 +35,45 @@ type Rules struct {
 	// with prjquota; without that support Docker refuses to create the
 	// volume, so the limit can never be silently skipped. Empty: no limit.
 	HomeVolumeSize string
+	// RootfsSize, when set (same format), caps the writable container layer
+	// of every terminal (HostConfig.StorageOpt size): everything outside the
+	// home volume, and all of an ephemeral sandbox. Docker supports it with
+	// overlay2 on XFS mounted with pquota (and btrfs/zfs storage drivers);
+	// elsewhere it refuses to create the container. Empty: no limit.
+	RootfsSize string
+	// AllowHomeRemove permits DELETE /volumes/<home volume> (no force; Docker
+	// refuses volumes still used by a container). Off by default: homes are
+	// then never deleted through the proxy. The gateway needs it only to
+	// archive the homes of departed users.
+	AllowHomeRemove bool
+}
+
+// ImageAllowed reports whether ref is one of the exact image references
+// terminals may run.
+func (r *Rules) ImageAllowed(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	if ref == r.Image {
+		return true
+	}
+	for _, x := range r.ExtraImages {
+		if ref == x {
+			return true
+		}
+	}
+	return false
+}
+
+var imageRefPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]{0,254}$`)
+
+// ParseImageRef checks an image reference given in the configuration.
+func ParseImageRef(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if !imageRefPattern.MatchString(ref) || strings.Contains(ref, "..") || strings.Contains(ref, "//") || strings.HasSuffix(ref, "/") {
+		return "", fmt.Errorf("image reference %q not allowed", ref)
+	}
+	return ref, nil
 }
 
 var volumeSizePattern = regexp.MustCompile(`^([1-9][0-9]{0,5})([MGT])$`)
@@ -91,7 +133,8 @@ type createRequest struct {
 // body to forward. The forwarded body is rebuilt from validated values only.
 func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 	ephemeral := naming.EphemeralName.MatchString(name)
-	if !ephemeral && !naming.ContainerName.MatchString(name) {
+	helper := naming.ArchiveName.MatchString(name)
+	if !ephemeral && !helper && !naming.ContainerName.MatchString(name) {
 		return nil, fmt.Errorf("container name %q not allowed", name)
 	}
 	userHash := naming.UserHash(name)
@@ -101,7 +144,7 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 		return nil, err
 	}
 
-	if req.Image != r.Image {
+	if !r.ImageAllowed(req.Image) {
 		return nil, fmt.Errorf("image %q not allowed", req.Image)
 	}
 	hc := req.HostConfig
@@ -150,6 +193,10 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 		if !naming.VolumeName.MatchString(mt.Source) || naming.UserHash(mt.Source) != userHash {
 			return nil, fmt.Errorf("volume %q does not belong to %q", mt.Source, name)
 		}
+		// An archive helper mounts exactly the home it is named after.
+		if helper && naming.ArchiveFor(mt.Source) != name {
+			return nil, fmt.Errorf("archive helper %q must mount its own home volume", name)
+		}
 		mounts = []map[string]any{{"Type": "volume", "Source": mt.Source, "Target": naming.HomeDir}}
 	}
 	if len(req.Env) > 32 {
@@ -171,7 +218,7 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 		dns = []string{hc.Dns[0]}
 	}
 	out := map[string]any{
-		"Image":    r.Image,
+		"Image":    req.Image,
 		"Env":      req.Env,
 		"Labels":   labels,
 		"Hostname": "terminal",
@@ -194,6 +241,9 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 				"Config": map[string]string{"max-size": "10m", "max-file": "2"},
 			},
 		},
+	}
+	if r.RootfsSize != "" {
+		out["HostConfig"].(map[string]any)["StorageOpt"] = map[string]string{"size": r.RootfsSize}
 	}
 	return json.Marshal(out)
 }

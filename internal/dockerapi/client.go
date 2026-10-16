@@ -152,3 +152,81 @@ func (c *Client) Remove(ctx context.Context, name string) error {
 	}
 	return err
 }
+
+// archiveHTTP is used for tar streams, which may take long; ctx bounds them.
+var archiveHTTP = &http.Client{}
+
+func (c *Client) archiveRequest(ctx context.Context, method, name string, body io.Reader) (*http.Response, error) {
+	u := c.Base + "/containers/" + name + "/archive?" + url.Values{"path": {"/home/user"}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/x-tar")
+	}
+	if c.Token != "" {
+		req.Header.Set("X-Proxy-Token", c.Token)
+	}
+	hc := archiveHTTP
+	if c.HTTP != nil && c.HTTP.Transport != nil {
+		hc = &http.Client{Transport: c.HTTP.Transport}
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		return nil, ErrNotFound
+	}
+	if resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		resp.Body.Close()
+		return nil, fmt.Errorf("docker %s archive: %d %s", method, resp.StatusCode, bytes.TrimSpace(data))
+	}
+	return resp, nil
+}
+
+// GetHomeArchive streams /home/user of container name (an archive helper) as
+// a tar whose entries start with "user/". The caller closes it.
+func (c *Client) GetHomeArchive(ctx context.Context, name string) (io.ReadCloser, error) {
+	resp, err := c.archiveRequest(ctx, http.MethodGet, name, nil)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
+// PutHomeArchive extracts tar (entries relative to /home/user) into
+// /home/user of container name (an archive helper).
+func (c *Client) PutHomeArchive(ctx context.Context, name string, tar io.Reader) error {
+	resp, err := c.archiveRequest(ctx, http.MethodPut, name, tar)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// RemoveVolume deletes a volume (only when the proxy allows it).
+func (c *Client) RemoveVolume(ctx context.Context, name string) error {
+	err := c.do(ctx, http.MethodDelete, "/volumes/"+name, nil, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// ProxyStats are the socket proxy's request counters.
+type ProxyStats struct {
+	Allowed int64 `json:"allowed"`
+	Denied  int64 `json:"denied"`
+	Failed  int64 `json:"failed"`
+}
+
+func (c *Client) ProxyStats(ctx context.Context) (ProxyStats, error) {
+	var s ProxyStats
+	err := c.do(ctx, http.MethodGet, "/termiplus/stats", nil, nil, &s)
+	return s, err
+}

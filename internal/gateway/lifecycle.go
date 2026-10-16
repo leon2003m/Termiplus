@@ -38,6 +38,11 @@ type Policy struct {
 	// MaxPerUser caps concurrent ephemeral sandboxes per user (default 3).
 	// When reached, the user's least recently used idle sandbox is deleted.
 	MaxPerUser int `json:"max_per_user,omitempty"`
+	// Image runs this policy on another image than TERMINAL_IMAGE (e.g. a
+	// data-science or Node image). The socket proxy must list it in
+	// EXTRA_IMAGES. It must be built on the termiplus terminal image (Open
+	// Terminal on the same port, the same start script).
+	Image string `json:"image,omitempty"`
 
 	idle time.Duration
 }
@@ -74,6 +79,8 @@ type manager struct {
 	addrFor      func(name string, port int) string // overridable in tests
 	forwarderDNS string                             // resolver to pin terminals to, or ""
 
+	stats counters
+
 	mu        sync.Mutex
 	instances map[string]*instance
 	locks     map[string]*sync.Mutex
@@ -98,9 +105,19 @@ func (m *manager) containerKey(name string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// imageFor returns the image a policy's containers run.
+func (m *manager) imageFor(pol Policy) string {
+	if pol.Image != "" {
+		return pol.Image
+	}
+	return m.image
+}
+
 func (m *manager) configHash(pol Policy, policyName string) string {
 	secretFP := sha256.Sum256(m.keySecret)
-	b, _ := json.Marshal([]any{m.image, m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
+	// Policies without their own image hash exactly as before, so existing
+	// containers are not recreated by this field's introduction.
+	b, _ := json.Marshal([]any{m.imageFor(pol), m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }
@@ -153,10 +170,11 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 				return nil, err
 			}
 			ct = nil
-		} else if !pol.ephemeral() && !ct.State.Running && m.imageOutdated(ctx, ct) {
+		} else if !pol.ephemeral() && !ct.State.Running && m.imageOutdated(ctx, ct, m.imageFor(pol)) {
 			// Same config but the image tag now points to a newer image. Only a
 			// stopped workspace is recreated; its home volume is kept.
 			log.Printf("recreating %s: stopped and image updated", name)
+			m.stats.imageRecreates.Add(1)
 			if err := m.docker.Remove(ctx, name); err != nil {
 				return nil, err
 			}
@@ -185,6 +203,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 			return nil, err
 		}
 		log.Printf("started %s (policy %s)", name, policyName)
+		m.stats.starts.Add(1)
 	}
 
 	inst = &instance{
@@ -211,13 +230,13 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 }
 
 // imageOutdated reports whether ct was created from another image than the
-// one m.image points to now. When that cannot be determined (an older socket
+// one ref points to now. When that cannot be determined (an older socket
 // proxy denies the lookup, the image is missing), the container is kept.
-func (m *manager) imageOutdated(ctx context.Context, ct *dockerapi.Container) bool {
+func (m *manager) imageOutdated(ctx context.Context, ct *dockerapi.Container, ref string) bool {
 	if ct.Image == "" {
 		return false
 	}
-	id, err := m.docker.ImageID(ctx, m.image)
+	id, err := m.docker.ImageID(ctx, ref)
 	if err != nil {
 		log.Printf("image check for %s skipped: %v", strings.TrimPrefix(ct.Name, "/"), err)
 		return false
@@ -307,6 +326,7 @@ func (m *manager) makeRoomForEphemeral(ctx context.Context, userHash string, pol
 			return err
 		}
 		log.Printf("deleted %s to make room for a new sandbox", victim)
+		m.stats.sandboxesDeleted.Add(1)
 		for i, n := range mine {
 			if n == victim {
 				mine = append(mine[:i], mine[i+1:]...)
@@ -365,7 +385,7 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 		env = append(env, "OPEN_TERMINAL_RESOLVER="+m.forwarderDNS)
 	}
 	spec := map[string]any{
-		"Image":      m.image,
+		"Image":      m.imageFor(pol),
 		"Env":        env,
 		"Labels":     labels,
 		"HostConfig": hostConfig,
@@ -489,12 +509,14 @@ func (m *manager) reap(ctx context.Context) {
 				log.Printf("remove %s: %v", name, err)
 			} else {
 				log.Printf("deleted idle sandbox %s", name)
+				m.stats.sandboxesDeleted.Add(1)
 			}
 		case still:
 			if err := m.docker.Stop(ctx, name, 10); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
 				log.Printf("stop %s: %v", name, err)
 			} else {
 				log.Printf("stopped idle %s", name)
+				m.stats.idleStops.Add(1)
 			}
 		}
 		l.Unlock()
