@@ -3,6 +3,7 @@ package gateway
 import (
 	"archive/tar"
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -242,4 +243,30 @@ func TestRerootHomeTar(t *testing.T) {
 			t.Errorf("%q accepted", bad)
 		}
 	}
+}
+
+func TestHomeExportsOfOneHomeDoNotCollide(t *testing.T) {
+	h := homesHarness(t, false)
+	h.get(t, "/files/cwd", "alice", testAPIKey)
+	vol := naming.Volume("alice", "default")
+	h.docker.mu.Lock()
+	h.docker.files[vol] = map[string]string{"a": strings.Repeat("x", 1<<20)}
+	h.docker.mu.Unlock()
+	errs := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			code, b := h.homes(t, http.MethodGet, "default/archive", "alice", nil)
+			if code != 200 || len(tarNames(t, b)["user/a"]) != 1<<20 {
+				errs <- fmt.Sprintf("%d, %d bytes", code, len(b))
+				return
+			}
+			errs <- ""
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		if e := <-errs; e != "" {
+			t.Fatalf("concurrent export: %s", e)
+		}
+	}
+	h.noHelpersLeft(t)
 }
