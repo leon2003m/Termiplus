@@ -1,7 +1,7 @@
 // Package sockproxy is a deny-by-default filter in front of the Docker
 // socket. It only allows what the gateway needs to run terminal containers:
 // create/start/stop/remove/inspect labelled containers, create volumes and
-// read the ID of the one allowed terminal image.
+// read the IDs of the allowed terminal images.
 package sockproxy
 
 import (
@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"termiplus/internal/naming"
@@ -27,6 +29,17 @@ type Proxy struct {
 	Rules  Rules
 	Token  string // optional shared secret with the gateway (X-Proxy-Token)
 	daemon *http.Client
+	// archiveClient has no overall timeout: home archives can take long.
+	archiveClient *http.Client
+
+	allowed, denied, failed atomic.Int64
+}
+
+// Stats are the proxy's request counters since it started.
+type Stats struct {
+	Allowed int64 `json:"allowed"`
+	Denied  int64 `json:"denied"`
+	Failed  int64 `json:"failed"` // allowed but the daemon call failed
 }
 
 func New(rules Rules, socketPath, token string) *Proxy {
@@ -38,7 +51,7 @@ func New(rules Rules, socketPath, token string) *Proxy {
 		MaxIdleConns:    16,
 		IdleConnTimeout: 30 * time.Second,
 	}
-	return &Proxy{Rules: rules, Token: token, daemon: &http.Client{Transport: tr, Timeout: 120 * time.Second}}
+	return &Proxy{Rules: rules, Token: token, daemon: &http.Client{Transport: tr, Timeout: 120 * time.Second}, archiveClient: &http.Client{Transport: tr}}
 }
 
 var (
@@ -64,10 +77,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if d, ok := err.(*denial); ok {
 			status = d.status
+			p.denied.Add(1)
+		} else {
+			p.failed.Add(1)
 		}
 		log.Printf("DENY %s %s: %v", r.Method, r.URL.RequestURI(), err)
 		writeJSON(w, status, map[string]string{"message": "termiplus-sockproxy: " + err.Error()})
+		return
 	}
+	p.allowed.Add(1)
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
@@ -84,6 +102,11 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
 	}
 	if r.Header.Get("Upgrade") != "" {
 		return deny("connection upgrades not allowed")
+	}
+	// The proxy's own counters, for the gateway's metrics. Token required.
+	if r.Method == http.MethodGet && r.URL.Path == "/termiplus/stats" && r.URL.RawQuery == "" {
+		writeJSON(w, http.StatusOK, Stats{Allowed: p.allowed.Load(), Denied: p.denied.Load(), Failed: p.failed.Load()})
+		return nil
 	}
 
 	p2, err := normalizePath(r.URL)
@@ -143,14 +166,26 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
 		}
 		return p.forward(w, r, http.MethodGet, p2, nil, nil)
 
-	// image ID of the allowed terminal image, and nothing else about it: the
+	// Deleting a home: only when explicitly enabled, never forced (Docker
+	// refuses a volume any container still uses).
+	case r.Method == http.MethodDelete && len(parts) == 2 && parts[0] == "volumes":
+		if !p.Rules.AllowHomeRemove {
+			return deny("removing volumes not allowed")
+		}
+		if !naming.VolumeName.MatchString(parts[1]) || len(q) != 0 {
+			return deny("volume %q not allowed", parts[1])
+		}
+		return p.forward(w, r, http.MethodDelete, p2, nil, nil)
+
+	// image ID of an allowed terminal image, and nothing else about it: the
 	// gateway compares it with a stopped container's image to recreate
 	// workspaces after an image update.
-	case r.Method == http.MethodGet && p.Rules.Image != "" && p2 == "/images/"+p.Rules.Image+"/json":
+	case r.Method == http.MethodGet && strings.HasPrefix(p2, "/images/") && strings.HasSuffix(p2, "/json") &&
+		p.Rules.ImageAllowed(strings.TrimSuffix(strings.TrimPrefix(p2, "/images/"), "/json")):
 		if len(q) != 0 {
 			return deny("no query allowed")
 		}
-		return p.imageID(w, r, p2)
+		return p.imageID(w, r, p2, strings.TrimSuffix(strings.TrimPrefix(p2, "/images/"), "/json"))
 
 	case len(parts) >= 2 && parts[0] == "containers":
 		return p.containerOp(w, r, parts, q)
@@ -164,23 +199,33 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
 // so prefix or name tricks cannot redirect it to another container.
 func (p *Proxy) containerOp(w http.ResponseWriter, r *http.Request, parts []string, q url.Values) error {
 	ref := parts[1]
-	if !naming.IsManagedContainer(ref) && !fullID.MatchString(ref) {
+	if !ownedName(ref) && !fullID.MatchString(ref) {
 		return deny("container reference %q not allowed", ref)
 	}
 	var method, action string
 	out := url.Values{}
+	// Terminals may be started and stopped; archive helpers never run and are
+	// the only containers whose files can be read or written as a tar.
+	needHelper, needTerminal := false, false
 	switch {
 	case len(parts) == 3 && parts[2] == "json" && r.Method == http.MethodGet:
 		method, action = http.MethodGet, "json"
 		if len(q) != 0 {
 			return deny("no query allowed")
 		}
+	case len(parts) == 3 && parts[2] == "archive" && (r.Method == http.MethodGet || r.Method == http.MethodPut):
+		method, action, needHelper = r.Method, "archive", true
+		if len(q) != 1 || q.Get("path") != naming.HomeDir || len(q["path"]) != 1 {
+			return deny("archive only of path=%s", naming.HomeDir)
+		}
+		out.Set("path", naming.HomeDir)
 	case len(parts) == 3 && parts[2] == "start" && r.Method == http.MethodPost:
-		method, action = http.MethodPost, "start"
+		method, action, needTerminal = http.MethodPost, "start", true
 		if len(q) != 0 {
 			return deny("no query allowed")
 		}
 	case len(parts) == 3 && parts[2] == "stop" && r.Method == http.MethodPost:
+		needTerminal = true
 		method, action = http.MethodPost, "stop"
 		for k := range q {
 			if k != "t" || !digits.MatchString(q.Get("t")) {
@@ -201,7 +246,7 @@ func (p *Proxy) containerOp(w http.ResponseWriter, r *http.Request, parts []stri
 		return deny("container operation not allowed")
 	}
 
-	id, status, err := p.resolveOwned(r.Context(), ref)
+	id, name, status, err := p.resolveOwned(r.Context(), ref)
 	if err != nil {
 		if status == http.StatusNotFound {
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "No such container: " + ref})
@@ -209,16 +254,68 @@ func (p *Proxy) containerOp(w http.ResponseWriter, r *http.Request, parts []stri
 		}
 		return err
 	}
+	isHelper := naming.ArchiveName.MatchString(name)
+	if needHelper && !isHelper {
+		return deny("archives only through an archive helper")
+	}
+	if needTerminal && isHelper {
+		return deny("archive helpers are never started")
+	}
 	target := "/containers/" + id
 	if action != "" {
 		target += "/" + action
 	}
+	switch {
+	case action == "archive" && method == http.MethodGet:
+		return p.forwardStream(w, r, method, target, out, nil)
+	case action == "archive":
+		pr, pw := io.Pipe()
+		go func() { pw.CloseWithError(filterHomeTar(r.Body, pw)) }()
+		defer pr.Close()
+		return p.forwardStream(w, r, method, target, out, pr)
+	}
 	return p.forward(w, r, method, target, out, nil)
+}
+
+// ownedName reports whether name is a container the gateway may address.
+func ownedName(name string) bool {
+	return naming.IsManagedContainer(name) || naming.ArchiveName.MatchString(name)
+}
+
+// forwardStream is forward without the response size cap, for tar streams.
+// The request body, if any, is streamed too.
+func (p *Proxy) forwardStream(w http.ResponseWriter, r *http.Request, method, p2 string, q url.Values, body io.Reader) error {
+	u := "http://docker" + p2 + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(r.Context(), method, u, body)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/x-tar")
+	}
+	resp, err := p.archiveClient.Do(req)
+	if err != nil {
+		var d *denial
+		if errors.As(err, &d) {
+			return d
+		}
+		return fmt.Errorf("daemon: %w", err)
+	}
+	defer resp.Body.Close()
+	log.Printf("ALLOW %s %s -> %d", method, p2, resp.StatusCode)
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("copy archive: %v", err)
+	}
+	return nil
 }
 
 // imageID inspects the allowed image and answers with its ID only, so labels,
 // environment and history of the image never pass the proxy.
-func (p *Proxy) imageID(w http.ResponseWriter, r *http.Request, p2 string) error {
+func (p *Proxy) imageID(w http.ResponseWriter, r *http.Request, p2, ref string) error {
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://docker"+p2, nil)
 	resp, err := p.daemon.Do(req)
 	if err != nil {
@@ -226,7 +323,7 @@ func (p *Proxy) imageID(w http.ResponseWriter, r *http.Request, p2 string) error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		writeJSON(w, http.StatusNotFound, map[string]string{"message": "No such image: " + p.Rules.Image})
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "No such image: " + ref})
 		return nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -262,18 +359,18 @@ func (p *Proxy) healthz(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (p *Proxy) resolveOwned(ctx context.Context, ref string) (string, int, error) {
+func (p *Proxy) resolveOwned(ctx context.Context, ref string) (string, string, int, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/"+url.PathEscape(ref)+"/json", nil)
 	resp, err := p.daemon.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("daemon: %w", err)
+		return "", "", 0, fmt.Errorf("daemon: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return "", http.StatusNotFound, fmt.Errorf("not found")
+		return "", "", http.StatusNotFound, fmt.Errorf("not found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", resp.StatusCode, fmt.Errorf("daemon inspect returned %d", resp.StatusCode)
+		return "", "", resp.StatusCode, fmt.Errorf("daemon inspect returned %d", resp.StatusCode)
 	}
 	var info struct {
 		ID     string `json:"Id"`
@@ -283,14 +380,13 @@ func (p *Proxy) resolveOwned(ctx context.Context, ref string) (string, int, erro
 		} `json:"Config"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&info); err != nil {
-		return "", 0, fmt.Errorf("decode inspect: %w", err)
+		return "", "", 0, fmt.Errorf("decode inspect: %w", err)
 	}
-	if info.Config.Labels[naming.ManagedLabel] != naming.ManagedValue ||
-		!naming.IsManagedContainer(strings.TrimPrefix(info.Name, "/")) ||
-		!fullID.MatchString(info.ID) {
-		return "", 0, deny("container %q is not managed by termiplus", ref)
+	name := strings.TrimPrefix(info.Name, "/")
+	if info.Config.Labels[naming.ManagedLabel] != naming.ManagedValue || !ownedName(name) || !fullID.MatchString(info.ID) {
+		return "", "", 0, deny("container %q is not managed by termiplus", ref)
 	}
-	return info.ID, http.StatusOK, nil
+	return info.ID, name, http.StatusOK, nil
 }
 
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, method, p2 string, q url.Values, body []byte) error {

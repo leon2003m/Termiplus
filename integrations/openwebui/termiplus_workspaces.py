@@ -2,7 +2,7 @@
 title: termiplus workspaces
 author: termiplus
 description: Provision and manage your termiplus sandbox sessions. Destructive or security-sensitive actions always ask you for confirmation first.
-version: 0.3.0
+version: 0.5.0
 required_open_webui_version: 0.8.6
 license: see the termiplus repository
 """
@@ -114,6 +114,92 @@ class Tools:
             "destroy_session", {"session_id": session_id}, __oauth_token__, __event_call__, __event_emitter__, __user__
         )
 
+    async def reset_workspace(
+        self,
+        session_id: str,
+        __oauth_token__: Optional[dict] = None,
+        __event_call__: EventCall = None,
+        __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Start one of the user's sessions over from a fresh container. A persistent workspace keeps everything in /home/user (programs installed elsewhere are lost); a temporary sandbox is removed. Use it when a workspace is broken. Always asks the user for confirmation.
+        :param session_id: The session_id from list_sessions.
+        """
+        return await self._run(
+            "reset_workspace", {"session_id": session_id}, __oauth_token__, __event_call__, __event_emitter__, __user__
+        )
+
+    async def manage_snapshots(
+        self,
+        action: str,
+        workspace: str,
+        snapshot_id: str = "",
+        __oauth_token__: Optional[dict] = None,
+        __event_call__: EventCall = None,
+        __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Backups of the home (/home/user) of one of the user's persistent workspaces. "list" shows the snapshots with download links (also a link to download the current home), "create" takes one now (do this before risky changes), "restore" writes a snapshot's files back (stops the workspace first; files created since then stay), "delete" removes one. Restore and delete always ask the user for confirmation.
+        :param action: "list", "create", "restore" or "delete".
+        :param workspace: The workspace name, e.g. "default".
+        :param snapshot_id: For restore and delete: the id from the list, e.g. 20261016T221500Z.
+        """
+        args: dict = {"action": action, "workspace": workspace}
+        if snapshot_id:
+            args["snapshot_id"] = snapshot_id
+        return await self._run("manage_snapshots", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
+
+    async def share_desktop(
+        self,
+        action: str,
+        session_id: str = "",
+        minutes: int = 60,
+        for_user: str = "",
+        share_id: str = "",
+        __oauth_token__: Optional[dict] = None,
+        __event_call__: EventCall = None,
+        __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Let other people watch one of the user's desktop sessions, view only (they cannot type or click), through a link that expires. "create" makes a link (always asks the user for confirmation), "list" shows the active links, "revoke" ends one.
+        :param action: "create", "list" or "revoke".
+        :param session_id: For create: the desktop session_id from list_sessions.
+        :param minutes: For create: how long the link works, 5 to 1440 (default 60).
+        :param for_user: For create, optional: only this user name may watch. Empty: anyone who can sign in to termiplus and has the link.
+        :param share_id: For revoke: the share_id from the list.
+        """
+        args: dict = {"action": action}
+        if action == "create":
+            args["session_id"] = session_id
+            args["minutes"] = minutes
+            if for_user:
+                args["for_user"] = for_user
+        if share_id:
+            args["share_id"] = share_id
+        return await self._run("share_desktop", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
+
+    async def manage_departed(
+        self,
+        action: str,
+        username: str = "",
+        __oauth_token__: Optional[dict] = None,
+        __event_call__: EventCall = None,
+        __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Admins only: users who left (disabled or deleted in the identity provider) and their archived homes. "list" shows them; "archive" archives a disabled user's homes now; "restore" puts a user's archived homes back. Archive and restore always ask the user for confirmation. Homes are archived automatically after the configured time anyway.
+        :param action: "list", "archive" or "restore".
+        :param username: For archive and restore: the user's login name.
+        """
+        args: dict = {"action": action}
+        if username:
+            args["username"] = username
+        return await self._run("manage_departed", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
+
     async def open_port(
         self,
         session_id: str,
@@ -224,6 +310,28 @@ class Tools:
             args["group"] = group
         return await self._run("manage_user", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
 
+    async def get_audit_log(
+        self,
+        actor: str = "",
+        tool: str = "",
+        since: str = "",
+        limit: int = 50,
+        __oauth_token__: Optional[dict] = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Admins only: show who changed what in termiplus and when (sessions started or ended, workspace entitlements, network policy, group membership), newest first, with the outcome (ok, error or denied).
+        :param actor: Only entries by this user id.
+        :param tool: Only this action, e.g. set_network_policy, manage_user or request_session.
+        :param since: Only entries at or after this time, in RFC 3339 form, e.g. 2026-10-16T00:00:00Z.
+        :param limit: How many entries to show, 1 to 500 (default 50).
+        """
+        args: dict = {"limit": limit}
+        for k, v in (("actor", actor), ("tool", tool), ("since", since)):
+            if v:
+                args[k] = v
+        return await self._run("get_audit_log", args, __oauth_token__, None, None, __user__)
+
     # --- helpers (underscore: not exposed to the model) ---
 
     async def _run(
@@ -272,7 +380,7 @@ class Tools:
             text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
             if result.get("isError"):
                 return f"termiplus: {tool} failed: {text}"
-            return _with_desktop_links(text)
+            return _with_result_links(tool, _with_desktop_links(text))
         except Exception as e:  # network, HTTP or decoding problems
             return f"termiplus: {tool} failed: {e}"
         finally:
@@ -383,6 +491,37 @@ def _with_desktop_links(text: str) -> str:
             "usual sign-in, with no password. Nothing else is needed to open the desktop.\n" + "\n".join(links)
         )
     return out
+
+
+def _with_result_links(tool: str, text: str) -> str:
+    """Adds Markdown links for share links and home downloads in a result."""
+    if tool not in ("share_desktop", "manage_snapshots"):
+        return text
+    try:
+        data = json.loads(text.split("\n", 1)[0])
+    except ValueError:
+        return text
+    if not isinstance(data, dict):
+        return text
+    links = []
+    if tool == "share_desktop" and data.get("url"):
+        link = _link("Shared desktop (view only)", str(data["url"]))
+        if link:
+            links.append(link)
+    if tool == "manage_snapshots":
+        if data.get("current_home_download_url"):
+            link = _link("Download the current home", str(data["current_home_download_url"]))
+            if link:
+                links.append(link)
+        snaps = data.get("snapshots") if isinstance(data.get("snapshots"), list) else [data]
+        for sn in snaps:
+            if isinstance(sn, dict) and sn.get("download_url"):
+                link = _link(f"Download snapshot {sn.get('id', '')}", str(sn["download_url"]))
+                if link:
+                    links.append(link)
+    if not links:
+        return text
+    return text + "\nGive the user these links exactly as written; they open in the browser after the usual sign-in.\n" + "\n".join(links)
 
 
 async def _emit(emitter: EventEmitter, event: dict) -> None:

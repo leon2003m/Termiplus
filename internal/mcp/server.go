@@ -29,12 +29,19 @@ type Server struct {
 	// dir backs manage_user / manage_group; nil leaves them unconfigured.
 	dir         Directory
 	groupPrefix string
+	auditLog    *AuditLog // nil: calls are not recorded (WithAuditLog)
+	uiBase      string    // browser-facing console base URL, for download links
+	shares      *ShareStore
+	departed    *departed
 }
 
 // NewServer builds the server with its fixed tool surface.
 func NewServer(auth Authenticator, backend Backend, version string) *Server {
 	s := &Server{auth: auth, backend: backend, version: version}
 	s.tools = s.buildTools()
+	for _, extra := range [][]tool{s.homeTools(), s.shareTools(), s.departedTools()} {
+		s.tools = append(s.tools, extra...)
+	}
 	return s
 }
 
@@ -280,6 +287,7 @@ func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[
 
 	needConfirm, gerr := t.gate(p, args)
 	if gerr != nil {
+		s.audit(p, t, args, "denied", gerr)
 		return nil, &rpcError{Code: codeForbidden, Message: gerr.Error()}
 	}
 	if needConfirm && !confirmed(args) {
@@ -295,8 +303,10 @@ func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[
 
 	result, herr := t.handle(ctx, p, args)
 	if herr != nil {
+		s.audit(p, t, args, "error", herr)
 		return &toolResult{Content: []contentBlock{{Type: "text", Text: herr.Error()}}, IsError: true}, nil
 	}
+	s.audit(p, t, args, "ok", nil)
 	js, err := json.Marshal(result)
 	if err != nil {
 		return nil, &rpcError{Code: codeInternal, Message: "marshal result"}
@@ -483,6 +493,16 @@ func (s *Server) buildTools() []tool {
 			gate:        manageUserGate,
 			handle: func(ctx context.Context, p Principal, args map[string]any) (any, error) {
 				return s.manageUser(ctx, p, args)
+			},
+		},
+		{
+			name:        "get_audit_log",
+			description: "Show the newest recorded state-changing calls (sessions, entitlements, network policy, group changes): who, what, when and the outcome, newest first (admin). Optional filters: actor (user id), tool, since (RFC 3339 time), limit (1-500, default 50).",
+			inputSchema: `{"type":"object","properties":{"actor":{"type":"string"},"tool":{"type":"string"},"since":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"additionalProperties":false}`,
+			readOnly:    true,
+			gate:        adminOnly("the audit log", false),
+			handle: func(_ context.Context, _ Principal, args map[string]any) (any, error) {
+				return s.getAuditLog(args)
 			},
 		},
 	}

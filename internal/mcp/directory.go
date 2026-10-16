@@ -25,6 +25,8 @@ type Directory interface {
 	UserGroups(ctx context.Context, userID string) ([]DirGroup, error)
 	AddToGroup(ctx context.Context, userID, groupID string) error
 	RemoveFromGroup(ctx context.Context, userID, groupID string) error
+	// Users returns every user of the realm (for the departed-user cleanup).
+	Users(ctx context.Context) ([]DirUser, error)
 }
 
 type DirGroup struct {
@@ -191,4 +193,25 @@ func (k *KeycloakDirectory) AddToGroup(ctx context.Context, userID, groupID stri
 
 func (k *KeycloakDirectory) RemoveFromGroup(ctx context.Context, userID, groupID string) error {
 	return k.admin(ctx, http.MethodDelete, "users/"+url.PathEscape(userID)+"/groups/"+url.PathEscape(groupID), nil, nil)
+}
+
+// Users pages through all users of the realm.
+func (k *KeycloakDirectory) Users(ctx context.Context) ([]DirUser, error) {
+	const page = 500
+	var all []DirUser
+	for first := 0; ; first += page {
+		var us []DirUser
+		if err := k.admin(ctx, http.MethodGet, "users", url.Values{
+			"briefRepresentation": {"true"}, "first": {fmt.Sprint(first)}, "max": {fmt.Sprint(page)},
+		}, &us); err != nil {
+			return nil, err
+		}
+		all = append(all, us...)
+		if len(us) < page {
+			return all, nil
+		}
+		if first > 1_000_000 {
+			return nil, errors.New("keycloak: too many users")
+		}
+	}
 }

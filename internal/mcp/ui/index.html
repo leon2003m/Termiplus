@@ -18,6 +18,17 @@
   <section id="sessions-section" hidden>
     <h2>Your sessions</h2>
     <ul id="sessions"></ul>
+    <p id="share-link" class="hint" hidden></p>
+  </section>
+  <section id="shares-section" hidden>
+    <h2>Shared desktops</h2>
+    <p class="hint">Links that let others watch one of your desktops (view only) until they expire.</p>
+    <ul id="shares"></ul>
+  </section>
+  <section id="backups-section" hidden>
+    <h2>Backups</h2>
+    <p class="hint">Snapshots of your homes (/home/user), stored by termiplus. Downloads are tar archives.</p>
+    <div id="backups"></div>
   </section>
   <section id="admin-section" hidden>
     <h2>Administration</h2>
@@ -29,6 +40,9 @@
     <p class="hint">Custom DNS entries and internal egress allowances for all terminals.</p>
     <textarea id="netpolicy" spellcheck="false" rows="10" aria-label="Network policy (JSON)"></textarea>
     <button id="save-netpolicy" class="primary" type="button">Save network policy</button>
+    <h3>Audit log</h3>
+    <p class="hint">The newest changes made through chat or this console: sessions, entitlements, network policy and group membership.</p>
+    <div class="audit-wrap"><table id="audit"><thead><tr><th>Time (UTC)</th><th>Who</th><th>Action</th><th>Result</th></tr></thead><tbody></tbody></table></div>
   </section>
 </main>
 </body>

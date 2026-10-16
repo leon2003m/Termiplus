@@ -16,6 +16,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,11 @@ type Config struct {
 	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
 	ForwarderDNS string
+	// BackupDir stores snapshots and archived homes (control API). Empty
+	// disables them; downloads of the current home still work.
+	BackupDir string
+	// SnapshotKeep is how many snapshots per home are kept (default 5).
+	SnapshotKeep int
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
@@ -65,6 +71,7 @@ type Gateway struct {
 	// specPolicy maps every policy to the policy whose container answers
 	// user-less spec requests for it (see specPolicies).
 	specPolicy map[string]string
+	backups    *backupStore // nil without BackupDir
 }
 
 // The user-less "spec" identity serves Open WebUI's connection checks and
@@ -73,6 +80,10 @@ type Gateway struct {
 const specUser = "termiplus-spec"
 
 var specPaths = map[string]bool{"/openapi.json": true, "/api/config": true, "/system": true}
+
+// imageRef is a conservative image reference; the socket proxy decides which
+// ones are actually allowed.
+var imageRef = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]{0,254}$`)
 
 func New(cfg Config) (*Gateway, error) {
 	if len(cfg.APIKey) < 32 || len(cfg.KeySecret) < 32 {
@@ -125,6 +136,9 @@ func New(cfg Config) (*Gateway, error) {
 			}
 			p.idle = d
 		}
+		if p.Image != "" && !imageRef.MatchString(p.Image) {
+			return nil, fmt.Errorf("policy %s: invalid image %q", name, p.Image)
+		}
 		if p.MaxPerUser < 0 {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
 		}
@@ -148,7 +162,15 @@ func New(cfg Config) (*Gateway, error) {
 		instances:    map[string]*instance{},
 		locks:        map[string]*sync.Mutex{},
 	}
-	return &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}, nil
+	g := &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}
+	if cfg.BackupDir != "" {
+		b, err := newBackupStore(cfg.BackupDir, cfg.SnapshotKeep)
+		if err != nil {
+			return nil, err
+		}
+		g.backups = b
+	}
+	return g, nil
 }
 
 // specPolicies picks, for each runtime, one policy whose container answers the
@@ -291,8 +313,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) ensureError(w http.ResponseWriter, userID, policy string, err error) {
 	log.Printf("ensure %s/%s: %v", userID, policy, err)
+	g.mgr.stats.startFailures.Add(1)
 	switch {
 	case errors.Is(err, errCapacity):
+		g.mgr.stats.capacityRefusals.Add(1)
 		httpError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	case errors.Is(err, errUserLimit):

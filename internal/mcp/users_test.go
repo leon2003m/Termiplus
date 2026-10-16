@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,8 @@ type fakeKeycloak struct {
 	tokens  int
 	writes  []string
 	badCred bool
+	// listFails makes the full user listing fail.
+	listFails bool
 }
 
 func newFakeKeycloak() *fakeKeycloak {
@@ -73,6 +76,19 @@ func (f *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if f.member[parts[1]][u.ID] {
 				out = append(out, u)
 			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	case r.Method == http.MethodGet && rest == "users" && r.URL.Query().Get("exact") == "":
+		// full listing, paged by first/max
+		first, _ := strconv.Atoi(r.URL.Query().Get("first"))
+		max, _ := strconv.Atoi(r.URL.Query().Get("max"))
+		if f.listFails {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		out := []DirUser{}
+		for i := first; i < len(f.users) && i < first+max; i++ {
+			out = append(out, f.users[i])
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	case r.Method == http.MethodGet && rest == "users":

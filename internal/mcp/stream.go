@@ -49,24 +49,57 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		forwardError(w, http.StatusForbidden, "Your sign-in is not linked to an Open WebUI user yet: use the termiplus tool in Open WebUI once.")
 		return
 	}
-	session, _, hasSlash := strings.Cut(strings.TrimPrefix(r.URL.Path, streamPathPrefix), "/")
+	session, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, streamPathPrefix), "/")
 	if session == "" {
 		forwardError(w, http.StatusNotFound, "Open a desktop from the console or from Open WebUI.")
 		return
 	}
-	if !hasSlash {
-		// KasmVNC's client uses relative URLs, so it needs the trailing slash.
-		http.Redirect(w, r, streamPathPrefix+session+"/", http.StatusFound)
+	s.proxy(w, r, streamPathPrefix+session, session, owui, false)
+}
+
+// serveShare serves /share/<token>/: the shared desktop, view only, to any
+// signed-in user (or only the one it was shared with) while the link lasts.
+func (s *streamProxy) serveShare(w http.ResponseWriter, r *http.Request, shares *ShareStore) {
+	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
+	if err != nil {
+		forwardError(w, http.StatusUnauthorized, "Not signed in.")
 		return
 	}
-	page := strings.TrimPrefix(r.URL.Path, streamPathPrefix+session+"/")
-	isPage := r.Method == http.MethodGet && (page == "" || page == "index.html" || page == "vnc.html")
+	token, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, sharePathPrefix), "/")
+	sh, ok := shares.Lookup(token)
+	if !ok {
+		forwardError(w, http.StatusNotFound, "This share link is not valid or has expired.")
+		return
+	}
+	if sh.ForSubject != "" && sh.ForSubject != p.UserID {
+		forwardError(w, http.StatusForbidden, "This desktop was shared with someone else.")
+		return
+	}
+	if r.URL.Path == sharePathPrefix+token+"/" && r.Method == http.MethodGet {
+		log.Printf("share %s (%s of %s) opened by %s", sh.ID, sh.Session, sh.Owner, p.UserID)
+	}
+	s.proxy(w, r, sharePathPrefix+token, sh.Session, sh.Owner, true)
+}
+
+// proxy passes a desktop request below base (e.g. /stream/<session>) to the
+// gateway's stream of session as owner, view only if view.
+func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, session, owner string, view bool) {
+	rest, hasSlash := strings.CutPrefix(r.URL.Path, base+"/")
+	if !hasSlash {
+		// KasmVNC's client uses relative URLs, so it needs the trailing slash.
+		http.Redirect(w, r, base+"/", http.StatusFound)
+		return
+	}
+	isPage := r.Method == http.MethodGet && (rest == "" || rest == "index.html" || rest == "vnc.html")
 	if isPage && !r.URL.Query().Has("path") {
 		// KasmVNC's client opens its WebSocket at /<path> of the host, default
 		// /websockify, which is outside this session; its "path" URL parameter
 		// moves it here.
 		q := r.URL.Query()
-		q.Set("path", strings.TrimPrefix(streamPathPrefix, "/")+session+"/websockify")
+		q.Set("path", strings.TrimPrefix(base, "/")+"/websockify")
+		if view {
+			q.Set("view_only", "1")
+		}
 		http.Redirect(w, r, r.URL.Path+"?"+q.Encode(), http.StatusFound)
 		return
 	}
@@ -77,28 +110,34 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(s.gateway)
-			pr.Out.URL.Path = s.gateway.Path + "/control/v1/stream/" + strings.TrimPrefix(pr.In.URL.Path, streamPathPrefix)
+			pr.Out.URL.Path = s.gateway.Path + "/control/v1/stream/" + session + "/" + rest
 			pr.Out.URL.RawPath = ""
 			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			pr.Out.Host = s.gateway.Host
 			for _, h := range []string{"X-Forwarded-User", "X-Forwarded-Groups", "X-Forwarded-Email",
 				"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", "X-User-Id",
-				"Authorization", "Cookie", owuiKeyHeader, owuiUserHeader} {
+				"Authorization", "Cookie", owuiKeyHeader, owuiUserHeader, streamViewHeader} {
 				pr.Out.Header.Del(h)
 			}
 			pr.Out.Header.Set(controlKeyHeaderMCP, s.controlKey)
-			pr.Out.Header.Set("X-User-Id", owui)
+			pr.Out.Header.Set("X-User-Id", owner)
+			if view {
+				pr.Out.Header.Set(streamViewHeader, "1")
+			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			resp.Header.Del("Www-Authenticate")
 			if isPage && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadGateway) {
-				// Stopped, gone or still starting: a page that says so and
-				// can start it, instead of the gateway's JSON.
 				resp.Body.Close()
 				resp.Header = http.Header{}
+				page := stoppedPage
+				if view {
+					// A viewer cannot start someone else's desktop.
+					page = sharedStoppedPage
+				}
 				setStoppedPage(resp.Header)
-				resp.Body = io.NopCloser(strings.NewReader(stoppedPage))
-				resp.ContentLength = int64(len(stoppedPage))
+				resp.Body = io.NopCloser(strings.NewReader(page))
+				resp.ContentLength = int64(len(page))
 			}
 			return nil
 		},
@@ -110,6 +149,10 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	rp.ServeHTTP(w, r)
 }
+
+// streamViewHeader asks the gateway for the view-only desktop user. Only this
+// server sets it; client copies are removed.
+const streamViewHeader = "X-Stream-View"
 
 func isUpgrade(r *http.Request) bool {
 	for _, v := range r.Header.Values("Connection") {
@@ -138,6 +181,23 @@ const stoppedPage = `<!doctype html>
 <main>
   <p id="status" role="status">Loading …</p>
   <p><button id="start" class="primary" type="button" hidden>Start desktop</button> <a class="button" href="/ui/">Console</a></p>
+</main>
+</body>
+</html>
+`
+
+const sharedStoppedPage = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>termiplus desktop</title>
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<header><h1>termiplus</h1></header>
+<main>
+  <p role="status">The shared desktop is not running right now. Ask its owner to start it, then reload this page.</p>
 </main>
 </body>
 </html>

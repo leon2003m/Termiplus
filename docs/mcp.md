@@ -137,6 +137,11 @@ one's entitlement are autonomous.
 | `set_network_policy(policy)` *(admin)* | Replace custom DNS + egress whitelist (wraps the core admin API; the deny-list still wins) | destructive | **admin entitlement + confirm** |
 | `manage_group(action, group?)` *(admin)* | List the `termiplus-*` groups or one group's members | readOnly | **admin entitlement** |
 | `manage_user(action, username, group?)` *(admin)* | Show a user's `termiplus-*` groups, add or remove them (see *User management*) | destructive | **admin entitlement + confirm** for changes |
+| `get_audit_log(actor?, tool?, since?, limit?)` *(admin)* | Recorded state-changing calls, newest first (see *Audit log*) | readOnly | **admin entitlement** |
+| `reset_workspace(session_id)` | Start a session over from a fresh container (persistent: home kept) | destructive | **confirm** |
+| `manage_snapshots(action, workspace, snapshot_id?)` | Snapshots of a persistent workspace's home: list (with download links), create, restore, delete (see *Backups*) | destructive | workspace entitlement; **confirm** for restore and delete |
+| `share_desktop(action, session_id?, minutes?, for_user?, share_id?)` | View-only links to one of your desktops: create, list, revoke (see *Shared desktops*) | destructive | **confirm** for create |
+| `manage_departed(action, username?)` *(admin)* | Departed users and their archived homes: list, archive now, restore (see *Departed users*) | destructive | **admin entitlement + confirm** for archive and restore |
 
 Deliberately **absent**: `read_file`, `write_file`, `list_dir`, `exec` — done
 natively inside the session.
@@ -182,7 +187,7 @@ of scope.
 ## 8. Management UI
 
 A standalone **web console** served by termiplus (OAuth/OIDC-protected, same IdP;
-RBAC-aware) for sessions, workspaces, entitlements and network policy — the v1.0
+RBAC-aware) for sessions, workspaces, entitlements, network policy and the audit log — the v1.0
 successor to the #12 admin API's planned small web UI. Surfaced in OWUI two ways:
 
 - **Direct link:** an Action/toolbar button that opens the full console in a new
@@ -267,6 +272,10 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | Port forwarding (`/<session>/<port>/` on its own origin behind `fwd-auth`, owner only; console "Open port", plugin `open_port`) | **done (experimental)** |
 | Desktop image built and smoke-tested in CI (`desktop image` job, `.github/scripts/desktop-smoke.sh`) | **done** |
 | Workspace entitlements per group (`MCP_ENTITLEMENTS_FILE`, editable by admins) | **done** |
+| Audit log of state-changing calls (`MCP_AUDIT_FILE`), `get_audit_log` (MCP, plugin) and a table in the console's admin part | **done (experimental)** — Go and plugin tests |
+| Workspace reset, home downloads and snapshots (`reset_workspace`, `manage_snapshots`, console *Backups*; gateway `BACKUP_DIR`) | **done (experimental)** — end-to-end tests through the real gateway and socket proxy; archive engine verified against a real Docker |
+| View-only shared desktops (`share_desktop`, `/share/<token>/`, KasmVNC user `viewer`) | **done (experimental)** — end-to-end tests with a fake KasmVNC |
+| Departed users: archive homes of users disabled or deleted in Keycloak (`MCP_DEPARTED_AFTER`, `manage_departed`), restore on return | **done (experimental)** — end-to-end tests through the real gateway |
 
 ### Gateway control API
 
@@ -459,6 +468,97 @@ top-level `termiplus-*` group that workspace entitlements use), from chat
 - Tested against a real Keycloak in `test/integration/oidc/run.sh`, including
   that the new group reaches the user's next token and that an issuer
   hostname different from the internal admin URL works.
+
+### Audit log
+
+With `MCP_AUDIT_FILE` set (`/data/audit.log` in `deploy/docker-compose.mcp.yml`)
+the MCP server records every tool call that can change something:
+`request_session`, `destroy_session`, `set_entitlements`, `set_network_policy`
+and the changes of `manage_user`. That covers chat and the management console,
+which call the same tools. Each entry has the time (UTC), the user id the call
+acted as, the OIDC subject, the tool, its arguments (control arguments such as
+`_confirmed` dropped, at most 4 KiB) and the outcome: `ok`, `error` (with the
+message) or `denied` (refused by the role or entitlement check).
+
+- Not recorded: read-only calls, and calls still waiting for the human
+  confirmation (the confirmed repeat is recorded).
+- The file is JSON lines, mode 0600, synced after each entry. Past
+  `MCP_AUDIT_MAX_MB` (default 5) it moves to `audit.log.1`, replacing the
+  previous one, so at most twice that is kept.
+- `termiplus-admin` users read it with `get_audit_log` (filters `actor`,
+  `tool`, `since`, `limit` up to 500) from chat, or in the console's
+  *Audit log* table (newest 50). Nobody can change it through termiplus.
+- Direct calls to the gateway's admin API (`X-Admin-Key`) bypass the MCP server
+  and appear only in the gateway log. An entry is written after the call, so
+  if writing fails (full disk) the action has still happened; the failure is
+  logged.
+
+### Backups
+
+Users can reset a workspace and keep snapshots of their homes, from chat
+(`reset_workspace`, `manage_snapshots`) or in the console (*Reset* on a
+session, *Backups* section):
+
+- **Reset** removes the session's container; a persistent workspace starts
+  again from a fresh container with the same home (programs installed outside
+  `/home/user` are gone), a temporary sandbox is just removed.
+- **Download home**: the current home as a tar, straight from the console
+  (`/ui/api/workspaces/<workspace>/home/archive`, behind the browser sign-in).
+- **Snapshots** are gzip-compressed tars of a home in the gateway's
+  `BACKUP_DIR` (`deploy/backups` in `docker-compose.mcp.yml`), at most
+  `SNAPSHOT_KEEP` (default 5) per home; the oldest go first. Taking one does
+  not stop the workspace (files written meanwhile may be caught
+  half-written). Restoring stops the workspace's containers and writes the
+  snapshot's files back, overwriting newer versions; files created since then
+  stay. Each snapshot can be downloaded.
+- Homes are shared between workspaces with the same `home`; their snapshots
+  are the same.
+- File access goes through the gateway's archive helpers and the socket
+  proxy's archive rules (README, *What the socket proxy allows*). Snapshots
+  hold users' files: size and protect `deploy/backups` accordingly.
+
+### Shared desktops
+
+`share_desktop` (or *Share (view only)* on a desktop session in the console)
+creates a link `${DESKTOP_PUBLIC_URL}/share/<token>/` that lets other people
+watch the desktop until it expires (5 minutes to 24 hours, default 60) or is
+revoked.
+
+- **View only.** The gateway signs in to KasmVNC as the user `viewer`, which
+  has read permission only (`kasmvncpasswd -r`, its own password derived from
+  `KEY_SECRET`), so keyboard and mouse input from viewers is ignored. Viewers
+  do receive what KasmVNC sends to every client, including clipboard
+  contents of the desktop.
+- **Who.** Viewers must sign in (desk-auth). Without `for_user`, anyone who can
+  sign in and has the link may watch; with `for_user` (needs user management),
+  only that user. They need no Open WebUI link and never get the owner's
+  session or console.
+- **The link** carries 256 random bits; the MCP server stores only its hash
+  (`MCP_SHARES_FILE`). At most 10 active links per user. Opening a link is
+  logged with the viewer's subject; creating and revoking are in the audit log.
+- **Rollout.** The viewer user exists in desktop containers created after the
+  updated desktop image and gateway. Older containers are recreated when they
+  are stopped and the image changed, or with a reset.
+
+### Departed users
+
+With user management configured and `MCP_DEPARTED_AFTER` set (e.g. `720h`),
+the MCP server checks Keycloak every `MCP_DEPARTED_INTERVAL` (default 6h):
+
+1. A user who is **disabled**, or who was known here (identity store) and is
+   **deleted** in Keycloak, is departed from that check on
+   (`MCP_DEPARTED_FILE`). A failed or empty user listing changes nothing.
+2. After `MCP_DEPARTED_AFTER`, the gateway stores each of their homes as an
+   archive in `BACKUP_DIR/archived/` and deletes their containers. With
+   `ALLOW_HOME_REMOVE=1` on the socket proxy it also deletes the homes;
+   otherwise they stay (and keep their disk space).
+3. A disabled user who is **enabled again** gets the newest archive of each
+   home restored automatically.
+
+Admins see the list and can archive a disabled user right away or restore
+someone with `manage_departed` (confirmation required). All of it is in the
+audit log with the actor `termiplus`. Archives are never deleted
+automatically.
 
 ### Authentication (oauth2-proxy)
 

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -99,7 +100,62 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 
+	if ws, sub, ok := strings.Cut(strings.TrimPrefix(rest, "workspaces/"), "/home/"); ok && strings.HasPrefix(rest, "workspaces/") {
+		g.serveHomeControl(w, r, userID, ws, sub)
+		return true
+	}
+
 	switch {
+	case rest == "user/archive" && r.Method == http.MethodPost:
+		res, err := g.archiveUser(r.Context(), userID)
+		if err != nil {
+			log.Printf("archive user %s: %v", userID, err)
+			writeJSON(w, http.StatusBadGateway, map[string]any{"detail": "could not archive all homes: " + err.Error(), "homes": res})
+			return true
+		}
+		log.Printf("archived user %s: %d home(s)", userID, len(res))
+		writeJSON(w, http.StatusOK, map[string]any{"homes": res})
+	case rest == "user/restore" && r.Method == http.MethodPost:
+		res, err := g.restoreUser(r.Context(), userID)
+		if err != nil {
+			log.Printf("restore user %s: %v", userID, err)
+			writeJSON(w, http.StatusBadGateway, map[string]any{"detail": "could not restore all homes: " + err.Error(), "homes": res})
+			return true
+		}
+		log.Printf("restored user %s: %d home(s)", userID, len(res))
+		writeJSON(w, http.StatusOK, map[string]any{"homes": res})
+	case rest == "user/archives" && r.Method == http.MethodGet:
+		if g.backups == nil {
+			httpError(w, http.StatusNotFound, errNoBackups.Error())
+			return true
+		}
+		out := map[string][]Backup{}
+		for _, home := range g.mgr.homeNames() {
+			list, err := g.backups.list(kindArchived, naming.Volume(userID, home))
+			if err != nil {
+				httpError(w, http.StatusInternalServerError, "could not list archives")
+				return true
+			}
+			if len(list) > 0 {
+				out[home] = list
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"archives": out})
+	case strings.HasPrefix(rest, "user/"):
+		httpError(w, http.StatusNotFound, "not found")
+	case strings.HasPrefix(rest, "sessions/") && strings.HasSuffix(rest, "/reset") && r.Method == http.MethodPost:
+		name := strings.TrimSuffix(strings.TrimPrefix(rest, "sessions/"), "/reset")
+		s, err := g.reset(r.Context(), userID, name)
+		switch {
+		case errors.Is(err, errNoSession):
+			httpError(w, http.StatusNotFound, "no such session")
+		case err != nil:
+			g.ensureError(w, userID, name, err)
+		case s == nil:
+			writeJSON(w, http.StatusOK, map[string]any{"reset": name, "note": "temporary sandbox removed; the next use starts a fresh one"})
+		default:
+			writeJSON(w, http.StatusOK, s)
+		}
 	case strings.HasPrefix(rest, forwardPrefix):
 		g.serveForward(w, r, userID, strings.TrimPrefix(rest, forwardPrefix))
 	case strings.HasPrefix(rest, streamPrefix):
@@ -255,9 +311,4 @@ func (m *manager) remove(ctx context.Context, userID, name string) error {
 // keyMatches requires exactly one header value equal to want (constant time).
 func keyMatches(vals []string, want string) bool {
 	return len(vals) == 1 && subtle.ConstantTimeCompare([]byte(vals[0]), []byte(want)) == 1
-}
-
-func methodNotAllowed(w http.ResponseWriter, allow string) {
-	w.Header().Set("Allow", allow)
-	httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 }

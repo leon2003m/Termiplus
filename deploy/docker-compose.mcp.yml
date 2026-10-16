@@ -32,6 +32,9 @@
 #   - deploy/mcp-data writable by uid 65534 (the MCP server remembers which
 #     Open WebUI user each Keycloak subject belongs to, for the management UI):
 #       mkdir -p deploy/mcp-data && sudo chown 65534:65534 deploy/mcp-data
+#   - deploy/backups writable by uid 65534 (the gateway keeps snapshots of
+#     homes and archived homes there; size it for your users' homes):
+#       mkdir -p deploy/backups && sudo chown 65534:65534 deploy/backups && sudo chmod 700 deploy/backups
 #   - Workspace entitlements (which groups may see and launch which workspace,
 #     docs/mcp.md) live in deploy/mcp-data/entitlements.json and are edited by
 #     admins in the management UI or with set_entitlements. Without the file
@@ -98,6 +101,8 @@ services:
       MCP_ENTITLEMENTS_FILE: /data/entitlements.json
       MCP_OWUI_PLUGIN_KEY_FILE: /run/secrets/mcp_owui_plugin_key
       MCP_IDENTITY_FILE: /data/identities.json
+      MCP_AUDIT_FILE: /data/audit.log
+      MCP_SHARES_FILE: /data/shares.json
     volumes:
       - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]
@@ -109,6 +114,11 @@ services:
   gateway:
     environment:
       CONTROL_API_KEY_FILE: /run/secrets/control_api_key
+      # Snapshots of homes and archived homes of departed users.
+      BACKUP_DIR: /data/backups
+      SNAPSHOT_KEEP: ${SNAPSHOT_KEEP:-5}
+    volumes:
+      - ./backups:/data/backups
     secrets: [control_api_key]
     networks:
       ot-mcp: {}

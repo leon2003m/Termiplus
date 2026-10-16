@@ -36,6 +36,38 @@ func main() {
 			log.Fatalf("ALLOWED_DNS must be an IP address, got %q", rules.AllowedDNS)
 		}
 	}
+	// Disk quota on every new home volume (needs XFS project quotas under
+	// Docker's volume directory; see docs). Empty: unlimited, as before.
+	if v := config.Get("HOME_VOLUME_SIZE", ""); v != "" {
+		size, err := sockproxy.ParseVolumeSize(v)
+		if err != nil {
+			log.Fatalf("HOME_VOLUME_SIZE: %v", err)
+		}
+		rules.HomeVolumeSize = size
+	}
+	// Further images for policies with their own "image"; TERMINAL_IMAGE is
+	// always allowed.
+	for _, ref := range strings.Split(config.Get("EXTRA_IMAGES", ""), ",") {
+		if strings.TrimSpace(ref) == "" {
+			continue
+		}
+		img, err := sockproxy.ParseImageRef(ref)
+		if err != nil {
+			log.Fatalf("EXTRA_IMAGES: %v", err)
+		}
+		rules.ExtraImages = append(rules.ExtraImages, img)
+	}
+	// Cap on every terminal's writable container layer (StorageOpt size).
+	if v := config.Get("CONTAINER_ROOTFS_SIZE", ""); v != "" {
+		size, err := sockproxy.ParseVolumeSize(v)
+		if err != nil {
+			log.Fatalf("CONTAINER_ROOTFS_SIZE: %v", err)
+		}
+		rules.RootfsSize = size
+	}
+	// Lets the gateway delete home volumes (archiving departed users). Off by
+	// default, so homes are never deleted through the proxy.
+	rules.AllowHomeRemove = os.Getenv("ALLOW_HOME_REMOVE") == "1"
 	for _, rt := range strings.Split(config.Get("ALLOWED_RUNTIMES", "runsc,sysbox-runc"), ",") {
 		if rt = strings.TrimSpace(rt); rt != "" {
 			if rt == "runc" && os.Getenv("ALLOW_RUNC_INSECURE") != "1" {
@@ -51,7 +83,7 @@ func main() {
 	// closed and rejects tokens shorter than 32 characters.
 	p := sockproxy.New(rules, config.Get("DOCKER_SOCKET", "/var/run/docker.sock"), config.Secret("PROXY_TOKEN", true))
 	addr := config.Get("LISTEN_ADDR", ":2375")
-	log.Printf("termiplus sockproxy %s listening on %s, image=%s runtimes=%v network=%s", version, addr, rules.Image, keys(rules.Runtimes), rules.Network)
+	log.Printf("termiplus sockproxy %s listening on %s, images=%v runtimes=%v network=%s home-volume-size=%s rootfs-size=%s home-remove=%v", version, addr, append([]string{rules.Image}, rules.ExtraImages...), keys(rules.Runtimes), rules.Network, orNone(rules.HomeVolumeSize), orNone(rules.RootfsSize), rules.AllowHomeRemove)
 	srv := &http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
 }
@@ -62,4 +94,11 @@ func keys(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "unlimited"
+	}
+	return s
 }

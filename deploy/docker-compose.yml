@@ -36,6 +36,14 @@ services:
       MAX_MEMORY_MB: "8192"
       MAX_CPUS: "4"
       MAX_PIDS: "2048"
+      # Disk quota per home volume, e.g. 20G (needs XFS project quotas, see README).
+      HOME_VOLUME_SIZE: ${HOME_VOLUME_SIZE:-}
+      # Cap on each terminal's writable container layer, e.g. 10G (see README).
+      CONTAINER_ROOTFS_SIZE: ${CONTAINER_ROOTFS_SIZE:-}
+      # Further images that policies may name with "image" (comma-separated).
+      EXTRA_IMAGES: ${EXTRA_IMAGES:-}
+      # "1" lets the gateway delete home volumes (admin API, departed users).
+      ALLOW_HOME_REMOVE: ${ALLOW_HOME_REMOVE:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     secrets: [proxy_token]
