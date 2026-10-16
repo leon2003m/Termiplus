@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"termiplus/internal/naming"
@@ -25,6 +26,28 @@ type Rules struct {
 	// before. Any other value, more than one entry, DnsSearch or DnsOptions
 	// are always refused.
 	AllowedDNS string
+	// HomeVolumeSize, when set (e.g. "20G", see ParseVolumeSize), is the disk
+	// quota the proxy puts on every home volume it creates. Docker enforces it
+	// with project quotas, which needs the volume directory on XFS mounted
+	// with prjquota; without that support Docker refuses to create the
+	// volume, so the limit can never be silently skipped. Empty: no limit.
+	HomeVolumeSize string
+}
+
+var volumeSizePattern = regexp.MustCompile(`^([1-9][0-9]{0,5})([MGT])$`)
+
+// ParseVolumeSize checks a home volume quota such as "20G" (binary units M,
+// G or T; at least 64M) and returns it in the form handed to Docker.
+func ParseVolumeSize(v string) (string, error) {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	m := volumeSizePattern.FindStringSubmatch(v)
+	if m == nil {
+		return "", fmt.Errorf("volume size %q must look like 512M, 20G or 1T", v)
+	}
+	if n, _ := strconv.Atoi(m[1]); m[2] == "M" && n < 64 {
+		return "", fmt.Errorf("volume size %q is below 64M", v)
+	}
+	return v, nil
 }
 
 const maxBody = 64 << 10
@@ -184,7 +207,8 @@ type volumeRequest struct {
 }
 
 // ValidateVolume rejects driver options (a local volume with o=bind is a
-// host mount in disguise) and anything not named like a terminal volume.
+// host mount in disguise) and anything not named like a terminal volume. The
+// only driver option ever forwarded is the proxy's own size quota.
 func (r *Rules) ValidateVolume(body io.Reader) ([]byte, error) {
 	var req volumeRequest
 	if err := strictDecode(body, &req); err != nil {
@@ -200,11 +224,15 @@ func (r *Rules) ValidateVolume(body io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(map[string]any{
+	out := map[string]any{
 		"Name":   req.Name,
 		"Driver": "local",
 		"Labels": labels,
-	})
+	}
+	if r.HomeVolumeSize != "" {
+		out["DriverOpts"] = map[string]string{"size": r.HomeVolumeSize}
+	}
+	return json.Marshal(out)
 }
 
 // --- helpers ----------------------------------------------------------------

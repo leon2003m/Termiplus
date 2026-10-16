@@ -187,6 +187,50 @@ func TestVolume(t *testing.T) {
 	}
 }
 
+func TestVolumeQuota(t *testing.T) {
+	forwarded := func(r Rules, req map[string]any) map[string]any {
+		t.Helper()
+		out, err := r.ValidateVolume(body(t, req))
+		if err != nil {
+			t.Fatalf("expected ok: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(out, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	name := naming.Volume("u1", "default")
+	if m := forwarded(testRules, map[string]any{"Name": name}); m["DriverOpts"] != nil {
+		t.Fatalf("no quota configured, but driver options forwarded: %v", m)
+	}
+	r := testRules
+	r.HomeVolumeSize = "20G"
+	m := forwarded(r, map[string]any{"Name": name})
+	if opts, _ := m["DriverOpts"].(map[string]any); len(opts) != 1 || opts["size"] != "20G" {
+		t.Fatalf("quota must be exactly size=20G: %v", m)
+	}
+	// The caller still cannot pass driver options, not even its own size.
+	for _, opts := range []map[string]string{{"size": "1T"}, {"size": "20G"}, {"type": "none", "o": "bind", "device": "/"}} {
+		if _, err := r.ValidateVolume(body(t, map[string]any{"Name": name, "DriverOpts": opts})); err == nil {
+			t.Fatalf("caller driver options %v accepted", opts)
+		}
+	}
+}
+
+func TestParseVolumeSize(t *testing.T) {
+	for in, want := range map[string]string{"20G": "20G", " 512m ": "512M", "64M": "64M", "1t": "1T", "999999G": "999999G"} {
+		if got, err := ParseVolumeSize(in); err != nil || got != want {
+			t.Errorf("%q: got %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0G", "063M", "63M", "8M", "20", "20GB", "20K", "-1G", "1.5G", "1000000G", "20G,o=bind", "20 G"} {
+		if got, err := ParseVolumeSize(in); err == nil {
+			t.Errorf("%q accepted as %q", in, got)
+		}
+	}
+}
+
 func TestNormalizePath(t *testing.T) {
 	good := map[string]string{
 		"/v1.47/containers/create": "/containers/create",
