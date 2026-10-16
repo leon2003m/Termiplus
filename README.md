@@ -55,6 +55,9 @@ sudo systemctl restart docker
 docker info | grep -i runtimes                       # must list runsc and/or sysbox-runc
 #    deploy/daemon.json starts runsc with --allow-suid, without it sudo inside gVisor fails
 #    (gVisor ignores setuid bits by default). If you merge by hand, keep that runtimeArgs entry.
+#    gVisor terminals have no DNS without the netpolicy overlay (internal DNS forwarder, see
+#    "Custom DNS and internal egress" below): deploy it whenever a policy uses runsc. Sysbox
+#    terminals resolve with or without it.
 
 # 2. Terminal image (push to your registry and pin by digest in production)
 docker build -t ot-terminal:0.14.0 image/
@@ -303,10 +306,11 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 ### Known issues found
 
 - **No job control in the interactive terminal.** Open Terminal starts `$SHELL` (falling back to `/bin/sh`, the image does not set `SHELL`) with `start_new_session=True` but does not make the PTY the controlling terminal, so the shell prints `can't access tty; job control turned off`. This is Open Terminal behaviour and happens under every runtime. Setting `ENV SHELL=/bin/bash` in `image/Dockerfile` would at least give users bash.
-- **gVisor DNS and sudo**, see above. Until decided, Sysbox is the runtime that passes the full integration test.
+- **gVisor DNS and sudo**, see above. Both are solved by configuration: `deploy/daemon.json` (`--allow-suid`) and the netpolicy overlay (DNS). With both, gVisor passes the full acceptance set; the base stack alone has no DNS under gVisor.
 
 ## Known limits
 
+- gVisor policies need the netpolicy overlay for DNS (#3). Without it, terminals under runsc connect by IP only.
 - Instance state lives in gateway memory: run one gateway replica. After a restart it adopts running containers.
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
 - Disk usage is not capped: neither home volumes nor ephemeral container layers. Use a filesystem with project quotas or monitor.
