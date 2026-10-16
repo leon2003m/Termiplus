@@ -41,7 +41,8 @@ Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
                             docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
-                            docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP)
+                            docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP),
+                            docker-compose.mcp-users.yml (opt-in: group membership via MCP)
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
 

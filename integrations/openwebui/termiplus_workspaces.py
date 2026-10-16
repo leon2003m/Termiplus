@@ -2,7 +2,7 @@
 title: termiplus workspaces
 author: termiplus
 description: Provision and manage your termiplus sandbox sessions. Destructive or security-sensitive actions always ask you for confirmation first.
-version: 0.2.0
+version: 0.3.0
 required_open_webui_version: 0.8.6
 license: see the termiplus repository
 """
@@ -185,6 +185,44 @@ class Tools:
         return await self._run(
             "set_network_policy", {"policy": policy}, __oauth_token__, __event_call__, __event_emitter__, __user__
         )
+
+    async def manage_group(
+        self,
+        action: str,
+        group: str = "",
+        __oauth_token__: Optional[dict] = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Admins only: list the termiplus groups (action "list"), or the members of one group (action "members" with group). Groups decide who may use persistent workspaces (termiplus-persist), administer termiplus (termiplus-admin), and which workspaces someone sees.
+        :param action: "list" or "members".
+        :param group: The group name for "members", e.g. termiplus-persist.
+        """
+        args: dict = {"action": action}
+        if group:
+            args["group"] = group
+        return await self._run("manage_group", args, __oauth_token__, None, None, __user__)
+
+    async def manage_user(
+        self,
+        action: str,
+        username: str,
+        group: str = "",
+        __oauth_token__: Optional[dict] = None,
+        __event_call__: EventCall = None,
+        __event_emitter__: EventEmitter = None,
+        __user__: Optional[dict] = None,
+    ) -> Any:
+        """
+        Admins only: show a user's termiplus groups (action "show"), or add/remove them to/from a termiplus group (actions "add_to_group" / "remove_from_group" with group). Changes always ask the user for confirmation and apply at the affected user's next sign-in. Users themselves are created in the identity provider, not here.
+        :param action: "show", "add_to_group" or "remove_from_group".
+        :param username: The user's login name in the identity provider.
+        :param group: The termiplus group for add/remove, e.g. termiplus-persist.
+        """
+        args: dict = {"action": action, "username": username}
+        if group:
+            args["group"] = group
+        return await self._run("manage_user", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
 
     # --- helpers (underscore: not exposed to the model) ---
 

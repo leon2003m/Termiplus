@@ -125,7 +125,8 @@ one's entitlement are autonomous.
 | `destroy_session(session_id)` | Tear a session down | destructive | **confirm** |
 | `get_network_policy()` *(admin)* | Show custom DNS entries + internal egress whitelist | readOnly | **admin entitlement** |
 | `set_network_policy(policy)` *(admin)* | Replace custom DNS + egress whitelist (wraps the core admin API; the deny-list still wins) | destructive | **admin entitlement + confirm** |
-| `manage_user` / `manage_group` *(admin)* | User/group/entitlement administration | destructive | **admin entitlement + confirm** |
+| `manage_group(action, group?)` *(admin)* | List the `termiplus-*` groups or one group's members | readOnly | **admin entitlement** |
+| `manage_user(action, username, group?)` *(admin)* | Show a user's `termiplus-*` groups, add or remove them (see *User management*) | destructive | **admin entitlement + confirm** for changes |
 
 Deliberately **absent**: `read_file`, `write_file`, `list_dir`, `exec` — done
 natively inside the session.
@@ -250,6 +251,7 @@ the session's KasmVNC/Guacamole stream, updated in place via `replace`.
 | OWUI plugin gives desktop, port and console links as Markdown links (no secrets in them) | **done** |
 | Management UI, user part (`/ui/`: workspaces, own sessions, start/remove, desktop links) behind the desk-auth browser sign-in | **done (experimental)** — Go tests; `test/integration/oidc/desktop.sh` against a real Keycloak |
 | Management UI, admin part: edit workspace entitlements and the network policy (`termiplus-admin`); MCP tools `get_network_policy`, `get_entitlements`, `set_entitlements` | **done (experimental)** |
+| User management from chat: `manage_user` / `manage_group` (MCP and plugin) over Keycloak's admin API, `deploy/docker-compose.mcp-users.yml` | **done (experimental)** — Go tests with a fake Keycloak; `test/integration/oidc/run.sh` against a real one |
 | Network policy from chat: plugin tools `get_network_policy` / `set_network_policy` (admin role, set asks for confirmation); the MCP server gets the gateway's admin key only with `deploy/docker-compose.mcp-netpolicy.yml` | **done (experimental)** |
 | OWUI plugin `open_console` tool (link to the management UI, `ui_url` valve) | **done** |
 | Port forwarding (`/<session>/<port>/` on its own origin behind `fwd-auth`, owner only; console "Open port", plugin `open_port`) | **done (experimental)** |
@@ -414,6 +416,39 @@ confirmation is asked for. The file is parsed strictly: an unknown field, a
 missing `default` or an empty group list stops the server (or is refused by
 `set_entitlements`) instead of opening a workspace by accident. While the file
 does not exist, every workspace is open to every signed-in user.
+
+### User management
+
+`manage_user` and `manage_group` let `termiplus-admin` users decide who is in
+which termiplus group (`termiplus-users`, `-persist`, `-admin`, and any other
+top-level `termiplus-*` group that workspace entitlements use), from chat
+(plugin tools of the same names) without the Keycloak console. Opt-in with
+`deploy/docker-compose.mcp-users.yml`.
+
+- **How.** The MCP server calls Keycloak's admin API as the service account of
+  the confidential client `termiplus-mcp-admin` (client credentials grant;
+  roles `view-users`, `query-groups`, `manage-users` of `realm-management`).
+  `setup-alpha.sh` adds the client to new realms; existing ones need
+  `deploy/keycloak/add-mcp-admin-client.sh` once. The overlay puts the MCP
+  server and Keycloak on their own internal network `ot-mcp-kc`.
+- **Limits enforced by the server.** Only membership of top-level groups named
+  `MCP_KC_GROUP_PREFIX*` (default `termiplus-`) changes; other groups are
+  refused even by name. Users are never created, deleted or edited and
+  credentials are never read; the last enabled member of `termiplus-admin`
+  cannot be removed. Every change needs the admin role and a human
+  confirmation and is logged with the caller.
+- **Effect.** Group claims live in the users' tokens, so a change applies when
+  the affected user's token is next refreshed (at the latest on their next
+  sign-in).
+- **Security impact.** `manage-users` is broader than these tools: a leaked
+  `mcp_kc_admin_client_secret` lets its holder edit users of the termiplus
+  realm (not other realms). It exists only in `deploy/secrets/` and the MCP
+  container, and Keycloak is the only other member of `ot-mcp-kc`. Keycloak
+  26's fine-grained admin permissions can narrow the service account to
+  group membership; not set up by default.
+- Tested against a real Keycloak in `test/integration/oidc/run.sh`, including
+  that the new group reaches the user's next token and that an issuer
+  hostname different from the internal admin URL works.
 
 ### Authentication (oauth2-proxy)
 

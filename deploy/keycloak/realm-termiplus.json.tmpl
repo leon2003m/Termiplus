@@ -41,6 +41,16 @@
       "directAccessGrantsEnabled": false
     },
     {
+      "clientId": "termiplus-mcp-admin",
+      "name": "termiplus MCP user management (service account)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__MCP_ADMIN_CLIENT_SECRET__",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
       "clientId": "termiplus-desktop",
       "name": "termiplus desktops and console",
       "enabled": true,
@@ -69,6 +79,14 @@
         {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
          "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
       ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-termiplus-mcp-admin",
+      "enabled": true,
+      "serviceAccountClientId": "termiplus-mcp-admin",
+      "clientRoles": {"realm-management": ["view-users", "query-groups", "manage-users"]}
     }
   ]
 }

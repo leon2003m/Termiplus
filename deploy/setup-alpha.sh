@@ -46,6 +46,7 @@ secret control_api_key 32
 secret mcp_owui_plugin_key 32
 secret mcp_oidc_client_secret 32
 secret mcp_oidc_cookie_secret 16
+secret mcp_kc_admin_client_secret 32
 secret desk_oidc_client_secret 32
 secret desk_oidc_cookie_secret 16
 secret fwd_oidc_client_secret 32
@@ -81,6 +82,7 @@ values = {
     "__FWD_CLIENT_SECRET__": open("$SECRETS/fwd_oidc_client_secret").read(),
     "__OWUI_CLIENT_SECRET__": open("$SECRETS/owui_oidc_client_secret").read(),
     "__MCP_CLIENT_SECRET__": open("$SECRETS/mcp_oidc_client_secret").read(),
+    "__MCP_ADMIN_CLIENT_SECRET__": open("$SECRETS/mcp_kc_admin_client_secret").read(),
     "__DESK_CLIENT_SECRET__": open("$SECRETS/desk_oidc_client_secret").read(),
 }
 text = open(src).read()
@@ -121,9 +123,11 @@ Next steps
    $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth),
    $FORWARD_PUBLIC_URL -> 127.0.0.1:4182 (fwd-auth). Open WebUI and the
    oauth2-proxies must reach $ISSUER under that same URL.
-2. Start (TERMINAL_IMAGE = the desktop image if you want desktops):
+2. Start (TERMINAL_IMAGE = the desktop image if you want desktops; the
+   mcp-users overlay lets admins manage group membership from chat):
      docker compose -f docker-compose.yml -f docker-compose.mcp.yml \\
-       -f docker-compose.desktop.yml -f docker-compose.keycloak.yml up -d
+       -f docker-compose.desktop.yml -f docker-compose.keycloak.yml \\
+       -f docker-compose.mcp-users.yml up -d
 3. Keycloak admin console ($KEYCLOAK_PUBLIC_URL/admin, user admin, password in
    deploy/secrets/keycloak_admin_password): realm "termiplus", create users,
    put them into termiplus-persist / termiplus-admin as needed.

@@ -273,6 +273,38 @@ class NetworkPolicyTools(unittest.TestCase):
         self.assertIn("not allowed", out)
         self.assertEqual(rec.calls, [])
 
+    def test_user_management_is_admin_only(self):
+        rec = Recorder(True)
+        t = self.tools(self.user_url)
+        self.assertIn("not allowed", asyncio.run(t.manage_group("list", __oauth_token__=TOKEN)))
+        out = asyncio.run(
+            t.manage_user("add_to_group", "bob", "termiplus-persist", __oauth_token__=TOKEN, __event_call__=rec)
+        )
+        self.assertIn("not allowed", out)
+        self.assertEqual(rec.calls, [])
+
+    def test_membership_change_asks_first(self):
+        # The test server has no directory, so after the yes it reports that.
+        rec = Recorder(True)
+        out = asyncio.run(
+            self.tools(self.admin_url).manage_user(
+                "add_to_group", "bob", "termiplus-persist", __oauth_token__=TOKEN, __event_call__=rec
+            )
+        )
+        self.assertEqual(len(rec.calls), 1)
+        self.assertIn("termiplus-persist", rec.calls[0]["data"]["message"])
+        self.assertIn("not configured", out)
+        out = asyncio.run(
+            self.tools(self.admin_url).manage_user(
+                "remove_from_group", "bob", "termiplus-persist", __oauth_token__=TOKEN, __event_call__=Recorder(False)
+            )
+        )
+        self.assertIn("cancelled", out)
+        # show needs no dialog
+        rec = Recorder(True)
+        asyncio.run(self.tools(self.admin_url).manage_user("show", "bob", __oauth_token__=TOKEN, __event_call__=rec))
+        self.assertEqual(rec.calls, [])
+
     def test_lists_are_required(self):
         out = asyncio.run(
             self.tools("http://127.0.0.1:1/").set_network_policy("db.internal", [], __oauth_token__=TOKEN)
