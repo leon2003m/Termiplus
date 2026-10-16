@@ -88,7 +88,7 @@ func Dial(o Options) (*Client, error) {
 		return nil, fmt.Errorf("mqtt url scheme must be mqtt or mqtts, got %q", u.Scheme)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("mqtt: %w", err)
 	}
 
 	_ = conn.SetDeadline(time.Now().Add(o.DialTimeout))

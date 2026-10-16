@@ -141,8 +141,8 @@ func TestMetricsMQTT(t *testing.T) {
 	// Shutdown says offline.
 	cancel()
 	<-done
-	pubs = b.Pubs()
-	if last := pubs[len(pubs)-1]; last.Topic != "termiplus/status" || last.Payload != "offline" {
-		t.Fatalf("last message: %+v", last)
-	}
+	// The fake broker records asynchronously; wait for the last message.
+	waitFor("offline as the last message", func(p []mqtttest.Pub) bool {
+		return len(p) > 0 && p[len(p)-1].Topic == "termiplus/status" && p[len(p)-1].Payload == "offline"
+	})
 }

@@ -167,7 +167,7 @@ func (g *Gateway) RunMQTT(ctx context.Context, cfg MQTTConfig) {
 	for ctx.Err() == nil {
 		c, err := mqtt.Dial(cfg.Options)
 		if err != nil {
-			log.Printf("mqtt: %v (retry in %s)", err, backoff)
+			log.Printf("%v (retry in %s)", err, backoff)
 			select {
 			case <-ctx.Done():
 				return
