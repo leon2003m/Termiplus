@@ -21,6 +21,7 @@ All notable changes to this project are documented here. The format is based on 
 - Internal DNS forwarder image (`deploy/dns-forwarder/`, dnsmasq) that forwards to the operator's resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the admin-set records from a watched `hostsdir` (auto-reload, no signal).
 - Opt-in Compose overlay `deploy/docker-compose.netpolicy.yml` that adds the forwarder and wires the admin API, the rendered-policy volume and the DNS pin. Without it the base deployment is unchanged (no forwarder, admin API returns 404).
 - `deploy/termiplus-firewall.path`: reapplies the sandbox firewall when the rendered egress rules change.
+- Stopped persistent workspaces are recreated on their next start when the image tag now points to a newer image (home volume kept, running workspaces untouched). The socket proxy allows `GET /images/<configured image>/json` for this and returns only the image ID.
 - Docker inside Sysbox workspaces: installing `docker.io` starts the daemon (apt hook), the entrypoint restarts it with the container, `start-docker` starts it by hand, and the tool description tells the model so under Sysbox only.
 
 ### Changed

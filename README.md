@@ -143,7 +143,7 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
 
-**Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays.
+**Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image reference, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays. A new image under the same tag (after a pull or rebuild) is picked up when a stopped workspace starts again: it is recreated on the new image with the same volume. A running workspace is never recreated for that. Anything installed outside `/home/user` is lost on recreation.
 
 **Ephemeral.** One container per user, chat and policy (`ot-e-<user>-<chat>-<policy>`), no volume. Files live in the container and disappear with it. Docker deletes it as soon as it stops (`AutoRemove`, forced by the proxy). The same chat keeps its sandbox until it goes idle, then gets a fresh one. At `max_per_user`, the user's least recently used sandbox without an open terminal is deleted; if all are in use, the request gets 429. Requests without a chat id share one `nochat` sandbox per user. Open WebUI's file browser sends the chat id only once the chat is saved (after the first message): in a new chat it shows the `nochat` sandbox, while the model's first tool call already gets the chat's own sandbox.
 
@@ -158,9 +158,10 @@ Everything not listed is 403.
 | `POST /containers/create` | Name must be `ot-u-...` or `ot-e-...`. Body decoded strictly (unknown fields rejected) and rebuilt from checked values. Only the configured image, a runtime from the allowlist (runc refused), the sandbox network, capped memory/CPU/PIDs. Persistent: exactly one volume at `/home/user` belonging to the same user. Ephemeral: no mounts, `AutoRemove` forced. Env only `OPEN_TERMINAL_*`. `Privileged:false` forced. No ports, binds, capabilities, devices, security options, namespaces |
 | `POST /volumes/create` | Name `ot-home-...`, local driver, no driver options (blocks `o=bind,device=/`) |
 | `GET /volumes/<name>` | termiplus volumes only |
+| `GET /images/<configured image>/json` | exactly the configured terminal image, no query. The proxy answers with the image ID only; labels, environment and history are not passed on |
 | `GET .../json`, `POST .../start`, `POST .../stop`, `DELETE` | Target resolved by the daemon first, must carry the termiplus label and name, then addressed by full ID. `DELETE` without `v` |
 
-Also rejected: `exec`, `attach`, image pulls, builds, connection upgrades, encoded paths, `..`, `//`, missing or duplicate `X-Proxy-Token`.
+Also rejected: `exec`, `attach`, any other image call, image pulls, builds, connection upgrades, encoded paths, `..`, `//`, missing or duplicate `X-Proxy-Token`.
 
 ## Network isolation
 

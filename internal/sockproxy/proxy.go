@@ -1,6 +1,7 @@
 // Package sockproxy is a deny-by-default filter in front of the Docker
 // socket. It only allows what the gateway needs to run terminal containers:
-// create/start/stop/remove/inspect labelled containers and create volumes.
+// create/start/stop/remove/inspect labelled containers, create volumes and
+// read the ID of the one allowed terminal image.
 package sockproxy
 
 import (
@@ -43,6 +44,7 @@ func New(rules Rules, socketPath, token string) *Proxy {
 var (
 	versionPrefix = regexp.MustCompile(`^/v[0-9]{1,2}\.[0-9]{1,3}(/.*)$`)
 	fullID        = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	imageID       = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	digits        = regexp.MustCompile(`^[0-9]{1,3}$`)
 )
 
@@ -141,6 +143,15 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
 		}
 		return p.forward(w, r, http.MethodGet, p2, nil, nil)
 
+	// image ID of the allowed terminal image, and nothing else about it: the
+	// gateway compares it with a stopped container's image to recreate
+	// workspaces after an image update.
+	case r.Method == http.MethodGet && p.Rules.Image != "" && p2 == "/images/"+p.Rules.Image+"/json":
+		if len(q) != 0 {
+			return deny("no query allowed")
+		}
+		return p.imageID(w, r, p2)
+
 	case len(parts) >= 2 && parts[0] == "containers":
 		return p.containerOp(w, r, parts, q)
 	}
@@ -203,6 +214,36 @@ func (p *Proxy) containerOp(w http.ResponseWriter, r *http.Request, parts []stri
 		target += "/" + action
 	}
 	return p.forward(w, r, method, target, out, nil)
+}
+
+// imageID inspects the allowed image and answers with its ID only, so labels,
+// environment and history of the image never pass the proxy.
+func (p *Proxy) imageID(w http.ResponseWriter, r *http.Request, p2 string) error {
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://docker"+p2, nil)
+	resp, err := p.daemon.Do(req)
+	if err != nil {
+		return fmt.Errorf("daemon: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "No such image: " + p.Rules.Image})
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("daemon image inspect returned %d", resp.StatusCode)
+	}
+	var info struct {
+		ID string `json:"Id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&info); err != nil {
+		return fmt.Errorf("decode image inspect: %w", err)
+	}
+	if !imageID.MatchString(info.ID) {
+		return fmt.Errorf("unexpected image id from daemon")
+	}
+	log.Printf("ALLOW GET %s -> 200 (id only)", p2)
+	writeJSON(w, http.StatusOK, map[string]string{"Id": info.ID})
+	return nil
 }
 
 func (p *Proxy) healthz(w http.ResponseWriter, r *http.Request) error {
