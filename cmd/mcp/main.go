@@ -88,6 +88,10 @@ func main() {
 			log.Fatal(err)
 		}
 		srv.WithIdentities(ids)
+	} else if config.Get("MCP_AUTH", "") == "proxy" && config.Secret("MCP_OWUI_PLUGIN_KEY", false) != "" {
+		// Without the store the plugin could name any Open WebUI user on every
+		// call; the immutable subject binding is what stops that.
+		log.Fatal("MCP_OWUI_PLUGIN_KEY needs MCP_IDENTITY_FILE")
 	}
 
 	// The management UI trusts the sign-in proxy's identity headers, so it

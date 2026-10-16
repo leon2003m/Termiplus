@@ -69,10 +69,17 @@ func (s *IdentityStore) Lookup(sub string) (string, bool) {
 	return owui, ok
 }
 
+// ErrIdentityConflict means a Record call would change an existing binding:
+// the subject is already bound to another Open WebUI user, or the Open WebUI
+// user is already bound to another subject.
+var ErrIdentityConflict = errors.New("identity already bound to a different account")
+
 // Record creates a mapping if neither identity is already bound elsewhere.
-// Repeating the same mapping is idempotent. Rebinding requires an explicit
-// administrative edit of the identity file; normal plugin requests cannot
-// transfer ownership of an existing user's home.
+// Repeating the same mapping is idempotent. A conflicting pair returns an
+// error wrapping ErrIdentityConflict and changes nothing; any other error means
+// the binding could not be stored. Rebinding requires stopping the MCP server
+// and editing the identity file: the store is read only at startup and
+// rewritten from memory, so a live edit would be overwritten.
 func (s *IdentityStore) Record(sub, owui string) error {
 	if !naming.UserID.MatchString(sub) || !naming.UserID.MatchString(owui) {
 		return fmt.Errorf("invalid identity %q -> %q", sub, owui)
@@ -84,10 +91,10 @@ func (s *IdentityStore) Record(sub, owui string) error {
 		if old == owui {
 			return nil
 		}
-		return fmt.Errorf("OIDC subject is already linked to a different Open WebUI user; administrator intervention required")
+		return fmt.Errorf("subject is bound to Open WebUI user %s: %w", old, ErrIdentityConflict)
 	}
-	if oldSub, exists := s.owners[owui]; exists && oldSub != sub {
-		return fmt.Errorf("Open WebUI user is already linked to a different OIDC subject; administrator intervention required")
+	if oldSub, exists := s.owners[owui]; exists {
+		return fmt.Errorf("user id is bound to subject %s: %w", oldSub, ErrIdentityConflict)
 	}
 
 	s.subjects[sub] = owui
@@ -95,7 +102,7 @@ func (s *IdentityStore) Record(sub, owui string) error {
 	if err := s.save(); err != nil {
 		delete(s.subjects, sub)
 		delete(s.owners, owui)
-		return err
+		return fmt.Errorf("persist identity binding: %w", err)
 	}
 	return nil
 }
@@ -125,8 +132,22 @@ func writeFileAtomic(path string, data []byte) error {
 		tmp.Close()
 		return err
 	}
+	// Flush before the rename: a binding lost in a crash would reopen that
+	// user for first enrollment.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// Persist the rename itself.
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		dir.Close()
+	}
+	return nil
 }

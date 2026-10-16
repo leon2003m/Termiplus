@@ -241,12 +241,17 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 		return nil, &rpcError{Code: codeUnauthenticated, Message: "unauthenticated"}
 	}
 	if s.ids != nil && p.Subject != "" {
+		// Fail closed in both cases: never run a tool with a caller-supplied
+		// Open WebUI id that conflicts with, or could not be stored as, a
+		// binding. A valid token plus a replayed plugin key must not move a
+		// home to another identity.
 		if err := s.ids.Record(p.Subject, p.UserID); err != nil {
-			// Do not continue with the caller-supplied Open WebUI id when it
-			// conflicts with an established mapping. In particular, never let
-			// a valid OIDC token plus a replayed plugin key transfer a home.
-			log.Printf("identity binding rejected for subject %s: %v", p.Subject, err)
-			return nil, &rpcError{Code: codeForbidden, Message: "identity is already linked to a different Open WebUI user; contact an administrator"}
+			if errors.Is(err, ErrIdentityConflict) {
+				log.Printf("identity: rejected subject %s as Open WebUI user %s: %v", p.Subject, p.UserID, err)
+				return nil, &rpcError{Code: codeForbidden, Message: "identity is linked to a different account; contact an administrator"}
+			}
+			log.Printf("identity: cannot record subject %s: %v", p.Subject, err)
+			return nil, &rpcError{Code: codeInternal, Message: "identity store unavailable"}
 		}
 	}
 	var params struct {
