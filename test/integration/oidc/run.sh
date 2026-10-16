@@ -36,8 +36,9 @@ if [ "${BUILD:-1}" = 1 ]; then
   docker build -q --target mcp -t "$MCP_IMAGE" "$ROOT" >/dev/null
 fi
 
-# The proxy image and command come from the deployment overlay itself.
-cfg="$(cd "$ROOT/deploy" && MCP_OIDC_ISSUER_URL="$ISSUER" TERMINAL_IMAGE=unused \
+# The proxy image and command come from the deployment overlay itself. Only
+# mcp-auth is read, so the base file's required variables get placeholders.
+cfg="$(cd "$ROOT/deploy" && MCP_OIDC_ISSUER_URL="$ISSUER" TERMINAL_IMAGE=unused DOCKER_GID=0 \
   docker compose -p "$P" -f docker-compose.yml -f docker-compose.mcp.yml config --format json)"
 PROXY_IMAGE="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["mcp-auth"]["image"])' <<<"$cfg")"
 mapfile -t PROXY_ARGS < <(python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["services"]["mcp-auth"]["command"]))' <<<"$cfg")
