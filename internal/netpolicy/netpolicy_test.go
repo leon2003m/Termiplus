@@ -2,6 +2,7 @@ package netpolicy
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -123,5 +124,23 @@ func TestValidateRejectsMalformed(t *testing.T) {
 func TestEmptyPolicyOK(t *testing.T) {
 	if _, err := Validate(Policy{}); err != nil {
 		t.Fatalf("empty policy rejected: %v", err)
+	}
+}
+
+// Zoned addresses skipped the deny-list (Prefix.Contains is false for them)
+// and their raw text, newlines included, reached the hosts file (security
+// audit run-1).
+func TestValidateRejectsZonesAndRendersCanonical(t *testing.T) {
+	for _, ip := range []string{"::1%x", "fe80::1%eth0", "::1%x\n169.254.169.254 metadata.example", "10.0.0.5%z"} {
+		if _, err := Validate(Policy{DNS: []DNSEntry{{Name: "probe.example", IP: ip}}}); err == nil {
+			t.Errorf("%q accepted", ip)
+		}
+	}
+	v, err := Validate(Policy{DNS: []DNSEntry{{Name: " db.internal ", IP: "::ffff:10.0.0.5"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hosts := v.DnsmasqHosts(); !strings.Contains(hosts, "\n10.0.0.5 db.internal\n") || strings.Count(hosts, "\n") != 2 {
+		t.Fatalf("hosts file: %q", hosts)
 	}
 }

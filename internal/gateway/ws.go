@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -151,23 +152,31 @@ func dialUpstream(addr, path, rawQuery string, in http.Header) (net.Conn, *bufio
 		conn.Close()
 		return nil, nil, err
 	}
-	br := bufio.NewReader(conn)
+	// The container controls this response: read the handshake through a
+	// small byte budget so an endless status line or header cannot fill the
+	// shared gateway's memory. The limit is lifted for the frames afterwards.
+	lr := &io.LimitedReader{R: conn, N: maxUpgradeResponse}
+	br := bufio.NewReader(lr)
 	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet})
 	if err != nil {
 		conn.Close()
-		return nil, nil, err
+		return nil, nil, errors.New("invalid upgrade response from terminal")
 	}
 	if resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get("Sec-WebSocket-Accept") != acceptKey(key) {
 		conn.Close()
-		return nil, nil, fmt.Errorf("upstream refused upgrade: %s", resp.Status)
+		return nil, nil, fmt.Errorf("upstream refused upgrade: %d", resp.StatusCode)
 	}
 	if resp.Header.Get("Sec-WebSocket-Extensions") != "" {
 		conn.Close()
 		return nil, nil, errors.New("upstream negotiated an extension")
 	}
 	_ = conn.SetDeadline(time.Time{})
+	lr.N = math.MaxInt64
 	return conn, br, nil
 }
+
+// maxUpgradeResponse bounds the terminal's WebSocket handshake response.
+const maxUpgradeResponse = 64 << 10
 
 // readClientTextFrame reads one complete, masked, unfragmented text frame.
 func readClientTextFrame(r io.Reader, max int) ([]byte, error) {

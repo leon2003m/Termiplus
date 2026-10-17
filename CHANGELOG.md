@@ -29,6 +29,13 @@ All notable changes to this project are documented here. The format is based on 
 - Admin API `GET`/`PUT /admin/homes/<home>/archive` (back up and restore a user's home as a tar) and `DELETE /admin/homes/<home>` (with `ALLOW_HOME_REMOVE=1` on the proxy). File access goes through never-started archive helper containers (`ot-a-...`); the proxy allows archive calls only on them, only for `/home/user`, and rewrites uploaded tars entry by entry.
 - Gateway metrics: Prometheus endpoint (`METRICS_LISTEN_ADDR`) and an MQTT publisher with Home Assistant discovery (`MQTT_URL`, `deploy/docker-compose.mqtt.yml`). Minimal MQTT 3.1.1 client in the standard library. The socket proxy counts allowed, denied and failed calls (`GET /termiplus/stats`).
 
+### Security
+
+- Gateway: a terminal's WebSocket upgrade response is read through a 64 KiB budget, so a container can no longer make the shared gateway buffer an endless status line or header (OOM of the gateway for all users).
+- Gateway: the terminal HTTP proxy uses a dedicated transport with a 256 KiB response-header limit (was Go's 10 MiB default) and never an environment HTTP proxy.
+- Gateway: container starts reserve their slot atomically, so concurrent requests can no longer exceed `MAX_RUNNING` or an ephemeral policy's `max_per_user`.
+- Network policy: DNS entry IPs with an IPv6 zone are refused (they skipped the never-allowed check), and the hosts file is rendered only from the canonical, checked address.
+
 ### Changed
 
 - `firewall.sh --if-needed` and `termiplus-firewall-watch.{service,timer}` reapply the sandbox firewall within 20 s when it is missing or a pinned MAC is stale (reboot, Docker restart, recreated gateway). The boot-time unit alone could run before the gateway existed and then, by design, install nothing.

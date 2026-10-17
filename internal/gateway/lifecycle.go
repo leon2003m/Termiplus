@@ -84,6 +84,12 @@ type manager struct {
 	mu        sync.Mutex
 	instances map[string]*instance
 	locks     map[string]*sync.Mutex
+
+	// admitMu makes "count, then reserve" atomic for container starts, so
+	// concurrent requests cannot all pass the MaxRunning and MaxPerUser checks
+	// against the same snapshot. pending holds the names being started.
+	admitMu sync.Mutex
+	pending map[string]bool
 }
 
 func (m *manager) lockFor(name string) *sync.Mutex {
@@ -183,14 +189,11 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	}
 
 	if ct == nil || !ct.State.Running {
-		if pol.ephemeral() {
-			if err := m.makeRoomForEphemeral(ctx, naming.UserHash(name), pol, name); err != nil {
-				return nil, err
-			}
-		}
-		if err := m.checkCapacity(ctx); err != nil {
+		release, err := m.admit(ctx, name, pol)
+		if err != nil {
 			return nil, err
 		}
+		defer release()
 	}
 
 	if ct == nil {
@@ -244,17 +247,54 @@ func (m *manager) imageOutdated(ctx context.Context, ct *dockerapi.Container, re
 	return id != ct.Image
 }
 
-func (m *manager) checkCapacity(ctx context.Context) error {
+// admit checks the capacity limits for starting name and reserves its slot
+// until the returned release is called (when ensure returns). Starts that
+// are still in progress count as running, so concurrent requests see each
+// other.
+func (m *manager) admit(ctx context.Context, name string, pol Policy) (func(), error) {
+	m.admitMu.Lock()
+	defer m.admitMu.Unlock()
+	list, err := m.docker.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if pol.ephemeral() {
+		if err := m.makeRoomForEphemeral(ctx, list, naming.UserHash(name), pol, name); err != nil {
+			return nil, err
+		}
+	}
+	if err := m.checkCapacity(list, name); err != nil {
+		return nil, err
+	}
+	if m.pending == nil {
+		m.pending = map[string]bool{}
+	}
+	m.pending[name] = true
+	return func() {
+		m.admitMu.Lock()
+		delete(m.pending, name)
+		m.admitMu.Unlock()
+	}, nil
+}
+
+// checkCapacity counts running containers plus starts in progress (pending,
+// not yet running). Call with admitMu held.
+func (m *manager) checkCapacity(list []dockerapi.ListItem, self string) error {
 	if m.maxRunning <= 0 {
 		return nil
 	}
-	list, err := m.docker.List(ctx)
-	if err != nil {
-		return err
-	}
 	running := 0
+	isRunning := map[string]bool{}
 	for _, c := range list {
 		if c.State == "running" {
+			running++
+			if len(c.Names) > 0 {
+				isRunning[strings.TrimPrefix(c.Names[0], "/")] = true
+			}
+		}
+	}
+	for n := range m.pending {
+		if n != self && !isRunning[n] {
 			running++
 		}
 	}
@@ -279,14 +319,10 @@ func (m *manager) idleFor(pol Policy) time.Duration {
 // makeRoomForEphemeral enforces the per-user cap on ephemeral sandboxes. If
 // the cap is reached, the user's least recently used sandbox without an open
 // terminal session is deleted; if every sandbox is in use, it refuses.
-func (m *manager) makeRoomForEphemeral(ctx context.Context, userHash string, pol Policy, self string) error {
+func (m *manager) makeRoomForEphemeral(ctx context.Context, list []dockerapi.ListItem, userHash string, pol Policy, self string) error {
 	max := pol.MaxPerUser
 	if max <= 0 {
 		max = 3
-	}
-	list, err := m.docker.List(ctx)
-	if err != nil {
-		return err
 	}
 	var mine []string
 	for _, c := range list {
@@ -294,11 +330,22 @@ func (m *manager) makeRoomForEphemeral(ctx context.Context, userHash string, pol
 			continue
 		}
 		n := strings.TrimPrefix(c.Names[0], "/")
-		if n != self && naming.EphemeralName.MatchString(n) && naming.UserHash(n) == userHash {
+		if n != self && naming.EphemeralName.MatchString(n) && naming.UserHash(n) == userHash && !m.pending[n] {
 			mine = append(mine, n)
 		}
 	}
-	for len(mine) >= max {
+	// Sandboxes of this user still being started count too; they are never
+	// evicted (they are in use by the request starting them).
+	starting := 0
+	for n := range m.pending {
+		if n != self && naming.EphemeralName.MatchString(n) && naming.UserHash(n) == userHash {
+			starting++
+		}
+	}
+	for len(mine)+starting >= max {
+		if len(mine) == 0 {
+			return errUserLimit
+		}
 		victim := ""
 		var oldest time.Time
 		m.mu.Lock()

@@ -73,6 +73,7 @@ func Validate(p Policy, extraDeny ...netip.Prefix) (*Validated, error) {
 	deny := append(append([]netip.Prefix{}, denyList...), extraDeny...)
 
 	seenName := map[string]bool{}
+	dns := make([]DNSEntry, len(p.DNS))
 	for i, e := range p.DNS {
 		name := strings.TrimSpace(e.Name)
 		if !validHostname(name) {
@@ -83,7 +84,10 @@ func Validate(p Policy, extraDeny ...netip.Prefix) (*Validated, error) {
 		}
 		seenName[strings.ToLower(name)] = true
 		ip, err := netip.ParseAddr(e.IP)
-		if err != nil {
+		// A zone ("%eth0", any bytes) is meaningless in a DNS record, and
+		// Prefix.Contains is false for every zoned address, so it would skip
+		// the deny-list below. Refuse it.
+		if err != nil || ip.Zone() != "" {
 			return nil, fmt.Errorf("dns_entries[%d]: invalid ip %q", i, e.IP)
 		}
 		// Unmap so an IPv4-mapped IPv6 form (::ffff:a.b.c.d) is compared as the
@@ -94,6 +98,9 @@ func Validate(p Policy, extraDeny ...netip.Prefix) (*Validated, error) {
 				return nil, fmt.Errorf("dns_entries[%d]: ip %s is in the never-allowed range %s", i, ip, d)
 			}
 		}
+		// Keep only the canonical forms that were checked: these are what the
+		// hosts file gets, never the raw input.
+		dns[i] = DNSEntry{Name: name, IP: ip.String()}
 	}
 
 	for i, r := range p.Egress {
@@ -122,7 +129,7 @@ func Validate(p Policy, extraDeny ...netip.Prefix) (*Validated, error) {
 			return nil, fmt.Errorf("egress_allow[%d]: %s overlaps the never-allowed range %s", i, pfx, d)
 		}
 	}
-	return &Validated{DNS: append([]DNSEntry{}, p.DNS...), Egress: append([]EgressRule{}, p.Egress...)}, nil
+	return &Validated{DNS: dns, Egress: append([]EgressRule{}, p.Egress...)}, nil
 }
 
 // overlapsAny reports whether pfx intersects any prefix in list.

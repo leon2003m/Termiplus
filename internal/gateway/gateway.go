@@ -311,6 +311,7 @@ func (g *Gateway) tokenOK(tok string) bool {
 func (g *Gateway) proxyHTTP(w http.ResponseWriter, r *http.Request, inst *instance, rest string) {
 	target := &url.URL{Scheme: "http", Host: inst.addr}
 	rp := &httputil.ReverseProxy{
+		Transport: terminalTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.URL.Path = rest
