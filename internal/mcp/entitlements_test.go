@@ -93,7 +93,6 @@ func TestServerEnforcesEntitlements(t *testing.T) {
 	}
 }
 
-
 func TestEntitlementsFileFailsClosedAndRejectsUnknownWorkspace(t *testing.T) {
 	s := NewServer(NewStaticAuthenticator(nil), NewStubBackend("https://gw.example"), "test")
 	if _, err := s.WithEntitlementsFile(filepath.Join(t.TempDir(), "missing.json")); err == nil {
