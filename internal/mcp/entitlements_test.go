@@ -116,21 +116,25 @@ func TestEntitlementsFileFailsClosedAndRejectsUnknownWorkspace(t *testing.T) {
 
 func TestRevokedWorkspaceHidesExistingSessions(t *testing.T) {
 	b := NewStubBackend("https://gw.example")
-	s := NewServer(NewStaticAuthenticator(map[string]Principal{"user-tok": {UserID: "alice"}}), b, "test")
-	created := toolCall(t, s, "user-tok", "request_session", map[string]any{"workspace":"default"})
+	s := NewServer(NewStaticAuthenticator(map[string]Principal{
+		"user-tok": {UserID: "alice"},
+	}), b, "test")
+	created := toolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"})
 	var session Session
 	result(t, created, &session)
+
 	deny, err := ParseEntitlements([]byte(`{"default":"deny","workspaces":{}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.WithEntitlements(deny)
+
 	var sessions []Session
 	result(t, toolCall(t, s, "user-tok", "list_sessions", nil), &sessions)
 	if len(sessions) != 0 {
 		t.Fatalf("revoked session remains visible: %+v", sessions)
 	}
-	if err := s.entitledSession(t.Context(), Principal{UserID:"alice"}, session.ID); err == nil {
+	if err := s.entitledSession(t.Context(), Principal{UserID: "alice"}, session.ID); err == nil {
 		t.Fatal("revoked session remains usable")
 	}
 }

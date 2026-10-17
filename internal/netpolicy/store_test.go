@@ -110,30 +110,40 @@ func TestStoreRejectsTamperedPolicyFile(t *testing.T) {
 func TestStoreStagingFailureChangesNothing(t *testing.T) {
 	s, dir := newTestStore(t)
 	initial := Policy{
-		DNS: []DNSEntry{{Name:"before.internal", IP:"10.0.0.5"}},
-		Egress: []EgressRule{{CIDR:"10.0.0.5/32", Port:5432, Proto:TCP}},
+		DNS:    []DNSEntry{{Name: "before.internal", IP: "10.0.0.5"}},
+		Egress: []EgressRule{{CIDR: "10.0.0.5/32", Port: 5432, Proto: TCP}},
 	}
-	if err := s.Put(initial); err != nil { t.Fatal(err) }
+	if err := s.Put(initial); err != nil {
+		t.Fatal(err)
+	}
 	dnsPath := filepath.Join(dir, "dnsmasq.hosts")
 	egressPath := filepath.Join(dir, "egress.rules")
 	policyPath := filepath.Join(dir, "policy.json")
-	beforeDNS, beforeEgress, beforePolicy := read(t,dnsPath), read(t,egressPath), read(t,policyPath)
+	beforeDNS, beforeEgress, beforePolicy := read(t, dnsPath), read(t, egressPath), read(t, policyPath)
 	beforeCurrent := s.Get()
 
 	// Make the third target's parent unavailable after initialization. Staging
 	// must fail before any of the prepared temp files are published.
 	s.policyPath = filepath.Join(dir, "removed-parent", "policy.json")
 	next := Policy{
-		DNS: []DNSEntry{{Name:"after.internal", IP:"10.0.0.6"}},
-		Egress: []EgressRule{{CIDR:"10.0.0.6/32", Port:5432, Proto:TCP}},
+		DNS:    []DNSEntry{{Name: "after.internal", IP: "10.0.0.6"}},
+		Egress: []EgressRule{{CIDR: "10.0.0.6/32", Port: 5432, Proto: TCP}},
 	}
 	if err := s.Put(next); err == nil {
 		t.Fatal("Put succeeded despite an unavailable policy path")
 	}
-	if got := read(t,dnsPath); got != beforeDNS { t.Fatalf("DNS file changed on failed write: %q",got) }
-	if got := read(t,egressPath); got != beforeEgress { t.Fatalf("egress file changed on failed write: %q",got) }
-	if got := read(t,policyPath); got != beforePolicy { t.Fatalf("policy file changed on failed write: %q",got) }
-	if got := s.Get(); len(got.DNS)!=len(beforeCurrent.DNS) || got.DNS[0].Name!=beforeCurrent.DNS[0].Name || got.Egress[0].CIDR!=beforeCurrent.Egress[0].CIDR {
-		t.Fatalf("in-memory policy changed on failed write: %+v",got)
+	if got := read(t, dnsPath); got != beforeDNS {
+		t.Fatalf("DNS file changed on failed write: %q", got)
+	}
+	if got := read(t, egressPath); got != beforeEgress {
+		t.Fatalf("egress file changed on failed write: %q", got)
+	}
+	if got := read(t, policyPath); got != beforePolicy {
+		t.Fatalf("policy file changed on failed write: %q", got)
+	}
+	if got := s.Get(); len(got.DNS) != len(beforeCurrent.DNS) ||
+		got.DNS[0].Name != beforeCurrent.DNS[0].Name ||
+		got.Egress[0].CIDR != beforeCurrent.Egress[0].CIDR {
+		t.Fatalf("in-memory policy changed on failed write: %+v", got)
 	}
 }
