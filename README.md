@@ -307,6 +307,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `EXTRA_IMAGES` | sockproxy | empty; further images policies may name with `image`, comma-separated |
 | `CONTAINER_ROOTFS_SIZE` | sockproxy | empty (no limit); cap on each terminal's container layer, e.g. `10G` |
 | `ALLOW_HOME_REMOVE` | sockproxy | empty; `1` lets the gateway delete home volumes |
+| `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, backup) |
 | `METRICS_LISTEN_ADDR` | gateway | empty (off); Prometheus `/metrics` listener, e.g. `:9100` |
 | `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` / `_FILE`, `MQTT_CLIENT_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, `MQTT_INTERVAL`, `MQTT_CA_FILE` | gateway | MQTT off unless `MQTT_URL` is set; defaults `termiplus-gateway`, `termiplus`, `homeassistant`, `30s` |
 | `HOME_VOLUME_SIZE` | sockproxy | empty (no limit); quota for new home volumes, e.g. `20G` (needs XFS project quotas, see *Disk quota for home volumes*) |

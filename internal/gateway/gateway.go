@@ -51,6 +51,9 @@ type Config struct {
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
 	ForwarderDNS string
 
+	// ExportTimeout bounds one home export (download, backup). Default 2h.
+	ExportTimeout time.Duration
+
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
 	AddrFor func(name string, port int) string
@@ -124,6 +127,9 @@ func New(cfg Config) (*Gateway, error) {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
 		}
 		cfg.Policies[name] = p
+	}
+	if cfg.ExportTimeout <= 0 {
+		cfg.ExportTimeout = 2 * time.Hour
 	}
 	if cfg.AddrFor == nil {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }

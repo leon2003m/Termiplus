@@ -35,6 +35,7 @@ All notable changes to this project are documented here. The format is based on 
 - Gateway: the terminal HTTP proxy uses a dedicated transport with a 256 KiB response-header limit (was Go's 10 MiB default) and never an environment HTTP proxy.
 - Gateway: container starts reserve their slot atomically, so concurrent requests can no longer exceed `MAX_RUNNING` or an ephemeral policy's `max_per_user`.
 - Network policy: DNS entry IPs with an IPv6 zone are refused (they skipped the never-allowed check), and the hosts file is rendered only from the canonical, checked address.
+- Home exports (admin API downloads, backups) have an absolute deadline (`EXPORT_TIMEOUT`, default 2h), and work that waits for a home's archive helper (removing or archiving the home) gives up with its context instead of waiting behind a slowly read download.
 
 ### Changed
 

@@ -90,6 +90,8 @@ type manager struct {
 	// against the same snapshot. pending holds the names being started.
 	admitMu sync.Mutex
 	pending map[string]bool
+
+	helperSem map[string]chan struct{} // per-home archive helper locks (homes.go)
 }
 
 func (m *manager) lockFor(name string) *sync.Mutex {

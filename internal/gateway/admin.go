@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -152,7 +153,11 @@ func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, hom
 		w.Header().Set("Content-Type", "application/x-tar")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="home-%s.tar"`, home))
 	}}
-	err := g.mgr.exportHome(r.Context(), userID, home, sw)
+	// The reader paces the export and the helper lock is held meanwhile, so
+	// every export has an absolute deadline.
+	ctx, cancel := context.WithTimeout(r.Context(), g.cfg.ExportTimeout)
+	defer cancel()
+	err := g.mgr.exportHome(ctx, userID, home, sw)
 	switch {
 	case err == nil && !sw.started:
 		sw.header()

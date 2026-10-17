@@ -71,6 +71,8 @@ func main() {
 		AdminKey:     adminKey,
 		NetPolicy:    store,
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
+		// Upper bound for one home export (download or backup).
+		ExportTimeout: config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
 	})
 	if err != nil {
 		log.Fatal(err)
