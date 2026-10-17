@@ -25,6 +25,7 @@ type streamProxy struct {
 	ids        *IdentityStore
 	gateway    *url.URL
 	controlKey string
+	srv        *Server
 }
 
 // WithStream makes the UI listener serve desktops through the gateway at
@@ -34,7 +35,7 @@ func (u *UI) WithStream(gatewayBase, controlKey string) (*UI, error) {
 	if err != nil {
 		return nil, err
 	}
-	u.stream = &streamProxy{ids: u.ids, gateway: g, controlKey: controlKey}
+	u.stream = &streamProxy{ids: u.ids, gateway: g, controlKey: controlKey, srv: u.srv}
 	return u, nil
 }
 
@@ -52,6 +53,10 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	session, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, streamPathPrefix), "/")
 	if session == "" {
 		forwardError(w, http.StatusNotFound, "Open a desktop from the console or from Open WebUI.")
+		return
+	}
+	if err := s.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil {
+		forwardError(w, http.StatusForbidden, "You are not entitled to this session.")
 		return
 	}
 	s.proxy(w, r, streamPathPrefix+session, session, owui, false)
