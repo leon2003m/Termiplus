@@ -77,9 +77,11 @@ func (m *manager) withHelper(ctx context.Context, userID, home string, fn func(h
 	helper := naming.Archive(userID, home)
 	// One helper per home at a time: a second export or import of the same
 	// home waits instead of replacing the helper under the first.
-	l := m.lockFor(helper)
-	l.Lock()
-	defer l.Unlock()
+	release, err := m.lockHelper(ctx, helper)
+	if err != nil {
+		return err
+	}
+	defer release()
 	// A helper left over from an interrupted run is replaced.
 	if err := m.docker.Remove(ctx, helper); err != nil {
 		return fmt.Errorf("remove old helper: %w", err)
@@ -203,9 +205,11 @@ func (m *manager) removeHome(ctx context.Context, userID, home string) error {
 	// Wait for a running export of this home (same lock order as importHome:
 	// container locks, then the helper's).
 	helper := naming.Archive(userID, home)
-	hl := m.lockFor(helper)
-	hl.Lock()
-	defer hl.Unlock()
+	release, err := m.lockHelper(ctx, helper)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := m.docker.Remove(ctx, helper); err != nil {
 		return err
 	}
@@ -251,5 +255,28 @@ func rerootHomeTar(in io.Reader, out io.Writer) error {
 		if _, err := io.Copy(tw, tr); err != nil {
 			return err
 		}
+	}
+}
+
+// lockHelper takes the per-home helper lock, giving up when ctx ends: an
+// export is paced by its reader (a download), so whoever waits behind it
+// (archiving a departed user, deleting the home) must not wait forever
+// (security audit run 1).
+func (m *manager) lockHelper(ctx context.Context, helper string) (func(), error) {
+	m.mu.Lock()
+	if m.helperSem == nil {
+		m.helperSem = map[string]chan struct{}{}
+	}
+	sem, ok := m.helperSem[helper]
+	if !ok {
+		sem = make(chan struct{}, 1)
+		m.helperSem[helper] = sem
+	}
+	m.mu.Unlock()
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("home is busy (an export is running): %w", ctx.Err())
 	}
 }

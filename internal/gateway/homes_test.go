@@ -3,11 +3,13 @@ package gateway
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"termiplus/internal/naming"
 	"termiplus/internal/sockproxy"
@@ -269,4 +271,28 @@ func TestHomeExportsOfOneHomeDoNotCollide(t *testing.T) {
 		}
 	}
 	h.noHelpersLeft(t)
+}
+
+// An export paced by a slow reader holds the helper lock; whoever waits
+// behind it (removing or archiving the home) must give up with its context
+// instead of waiting forever (security audit run 1).
+func TestHelperLockHonoursContext(t *testing.T) {
+	h := homesHarness(t, true)
+	h.get(t, "/files/cwd", "alice", testAPIKey)
+	helper := naming.Archive("alice", "default")
+	release, err := h.g.mgr.lockHelper(context.Background(), helper) // the "running export"
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err = h.g.mgr.removeHome(ctx, "alice", "default")
+	if err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("removeHome while an export runs: err=%v after %s", err, time.Since(start))
+	}
+	release()
+	if err := h.g.mgr.removeHome(context.Background(), "alice", "default"); err != nil {
+		t.Fatalf("after the export: %v", err)
+	}
 }

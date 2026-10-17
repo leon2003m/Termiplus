@@ -75,6 +75,8 @@ func main() {
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
 		BackupDir:    config.Get("BACKUP_DIR", ""),
 		SnapshotKeep: int(config.Int("SNAPSHOT_KEEP", 5)),
+		// Upper bound for one home export (download or backup).
+		ExportTimeout: config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
 	})
 	if err != nil {
 		log.Fatal(err)
