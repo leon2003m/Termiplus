@@ -194,7 +194,6 @@ func TestUIAuditLog(t *testing.T) {
 	}
 }
 
-
 func TestUIOriginRequiresConfiguredSchemeAndHost(t *testing.T) {
 	f := newUIFixture(t)
 	f.ui.srv.WithUIBase("https://desk.example")
