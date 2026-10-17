@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -55,10 +56,13 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		forwardError(w, http.StatusNotFound, "Open a desktop from the console or from Open WebUI.")
 		return
 	}
-	if err := s.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil {
+	if err := s.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil &&
+		!errors.Is(err, errSessionNotFound) {
 		forwardError(w, http.StatusNotFound, "No such session or access is not permitted.")
 		return
 	}
+	// Let the gateway handle unknown/unowned IDs so it can return its normal
+	// non-disclosing start page (including restartable persistent sessions).
 	s.proxy(w, r, streamPathPrefix+session, session, owui, false)
 }
 
