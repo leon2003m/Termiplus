@@ -35,6 +35,13 @@ All notable changes to this project are documented here. The format is based on 
 - View-only shared desktops (alpha): `share_desktop` creates expiring links (`/share/<token>/`, optionally for one user) that sign in to KasmVNC as the new read-only user `viewer`. The desktop image creates it from `OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD`.
 - Departed users (alpha): with `MCP_DEPARTED_AFTER`, homes of users disabled or deleted in Keycloak are archived and their workspaces deleted after that time, and restored when a disabled user returns; `manage_departed` for admins.
 
+### Security
+
+- Gateway: a terminal's WebSocket upgrade response is read through a 64 KiB budget, so a container can no longer make the shared gateway buffer an endless status line or header (OOM of the gateway for all users).
+- Gateway: the terminal HTTP proxy uses a dedicated transport with a 256 KiB response-header limit (was Go's 10 MiB default) and never an environment HTTP proxy.
+- Gateway: container starts reserve their slot atomically, so concurrent requests can no longer exceed `MAX_RUNNING` or an ephemeral policy's `max_per_user`.
+- Network policy: DNS entry IPs with an IPv6 zone are refused (they skipped the never-allowed check), and the hosts file is rendered only from the canonical, checked address.
+
 ### Changed
 
 - `firewall.sh --if-needed` and `termiplus-firewall-watch.{service,timer}` reapply the sandbox firewall within 20 s when it is missing or a pinned MAC is stale (reboot, Docker restart, recreated gateway). The boot-time unit alone could run before the gateway existed and then, by design, install nothing.

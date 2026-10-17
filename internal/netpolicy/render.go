@@ -23,6 +23,11 @@ func (v *Validated) DnsmasqHosts() string {
 	var b strings.Builder
 	b.WriteString("# Managed by termiplus gateway. Do not edit; rewritten on every policy change.\n")
 	for _, e := range entries {
+		// Validate already canonicalized both fields; refuse anything that
+		// could still start a second record.
+		if strings.ContainsAny(e.IP+e.Name, " \t\r\n") {
+			continue
+		}
 		fmt.Fprintf(&b, "%s %s\n", e.IP, strings.ToLower(strings.TrimSpace(e.Name)))
 	}
 	return b.String()
