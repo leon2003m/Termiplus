@@ -52,6 +52,10 @@ chmod 644 "$WORK/client_secret" "$WORK/cookie_secret" "$WORK/owui_key"
 # image's user (65534) can write, not on a tmpfs.
 mkdir "$WORK/mcp-data"
 chmod 777 "$WORK/mcp-data"
+# Explicitly permissive only in this isolated integration fixture; production
+# deployments must provide their own least-privilege entitlement policy.
+printf '{"default":"allow","workspaces":{}}\n' >"$WORK/entitlements.json"
+chmod 644 "$WORK/entitlements.json"
 
 # $P-net reaches Keycloak; $P-auth is internal and shared only by proxy and
 # mcp, as ot-mcp-auth is in the overlay.
@@ -75,6 +79,8 @@ docker run -d --name "$P-mcp" --network "$P-auth" --network-alias mcp \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   -v "$WORK/owui_key:/run/secrets/mcp_owui_plugin_key:ro" \
   -v "$WORK/mcp-data:/data" \
+  -v "$WORK/entitlements.json:/run/secrets/entitlements.json:ro" \
+  -e MCP_ENTITLEMENTS_FILE=/run/secrets/entitlements.json \
   -e MCP_OWUI_PLUGIN_KEY_FILE=/run/secrets/mcp_owui_plugin_key \
   -e MCP_IDENTITY_FILE=/data/identities.json \
   -v "$WORK/kc_admin_secret:/run/secrets/mcp_kc_admin_client_secret:ro" \

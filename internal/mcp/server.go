@@ -52,28 +52,74 @@ func (s *Server) WithEntitlements(e *Entitlements) *Server {
 	return s
 }
 
-// WithEntitlementsFile loads the entitlements from path and lets admins change
-// them with set_entitlements, which rewrites the file. A missing file means
-// every workspace is open until an admin sets entitlements.
+// WithEntitlementsFile loads a required, explicit policy. Missing or invalid
+// policy must never silently turn a proxy-auth deployment into allow-all.
 func (s *Server) WithEntitlementsFile(path string) (*Server, error) {
 	data, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		s.ent.Store(nil)
-	case err != nil:
-		return nil, err
-	default:
-		e, err := ParseEntitlements(data)
-		if err != nil {
-			return nil, err
-		}
-		s.ent.Store(e)
+	if err != nil {
+		return nil, fmt.Errorf("read entitlements %s: %w", path, err)
 	}
+	e, err := ParseEntitlements(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateEntitlements(context.Background(), e); err != nil {
+		return nil, err
+	}
+	s.ent.Store(e)
 	s.entPath = path
 	return s, nil
 }
 
 func (s *Server) entitlements() *Entitlements { return s.ent.Load() }
+
+// validateEntitlements rejects stale or misspelled workspace names before a
+// policy is persisted. Failure to query the backend also fails closed.
+func (s *Server) validateEntitlements(ctx context.Context, e *Entitlements) error {
+	all, err := s.backend.ListWorkspaces(ctx, Principal{})
+	if err != nil {
+		return fmt.Errorf("validate entitlements against configured workspaces: %w", err)
+	}
+	known := make(map[string]bool, len(all))
+	for _, w := range all {
+		known[w.Name] = true
+	}
+	for name := range e.Workspaces {
+		if !known[name] {
+			return fmt.Errorf("entitlements: unknown workspace %q", name)
+		}
+	}
+	return nil
+}
+
+// entitledSession checks the current entitlement for a user's active session.
+// The backend scopes the list to p.UserID; unknown sessions are denied.
+func (s *Server) entitledSession(ctx context.Context, p Principal, id string) error {
+	sessions, err := s.backend.ListSessions(ctx, p)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+	for _, session := range sessions {
+		if session.ID == id {
+			if !s.entitlements().Allowed(p, session.Workspace) {
+				return fmt.Errorf("you are no longer entitled to workspace %q", session.Workspace)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no such session %q", id)
+}
+
+// filterSessions hides sessions whose workspace is no longer entitled.
+func (s *Server) filterSessions(p Principal, sessions []Session) []Session {
+	out := make([]Session, 0, len(sessions))
+	for _, session := range sessions {
+		if s.entitlements().Allowed(p, session.Workspace) {
+			out = append(out, session)
+		}
+	}
+	return out
+}
 
 // setEntitlements validates raw like the file, persists it atomically and
 // only then applies it.
@@ -83,6 +129,9 @@ func (s *Server) setEntitlements(raw []byte) (*Entitlements, error) {
 	}
 	e, err := ParseEntitlements(raw)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.validateEntitlements(context.Background(), e); err != nil {
 		return nil, err
 	}
 	if err := writeFileAtomic(s.entPath, append(e.marshal(), '\n')); err != nil {
@@ -399,7 +448,11 @@ func (s *Server) buildTools() []tool {
 			readOnly:    true,
 			gate:        func(Principal, map[string]any) (bool, error) { return false, nil },
 			handle: func(ctx context.Context, p Principal, _ map[string]any) (any, error) {
-				return s.backend.ListSessions(ctx, p)
+				sessions, err := s.backend.ListSessions(ctx, p)
+				if err != nil {
+					return nil, err
+				}
+				return s.filterSessions(p, sessions), nil
 			},
 		},
 		{

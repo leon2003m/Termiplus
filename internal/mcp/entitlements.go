@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -30,8 +31,12 @@ func ParseEntitlements(data []byte) (*Entitlements, error) {
 	if err := dec.Decode(&e); err != nil {
 		return nil, fmt.Errorf("entitlements: %w", err)
 	}
-	if dec.More() {
-		return nil, fmt.Errorf("entitlements: trailing data after the JSON object")
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("entitlements: trailing data after the JSON object")
+		}
+		return nil, fmt.Errorf("entitlements: trailing data: %w", err)
 	}
 	if e.Default != "allow" && e.Default != "deny" {
 		return nil, fmt.Errorf("entitlements: default must be \"allow\" or \"deny\", got %q", e.Default)
