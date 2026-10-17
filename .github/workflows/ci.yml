@@ -167,4 +167,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Run real-Keycloak and oauth2-proxy integration tests
-        run: test/integration/oidc/run.sh
+        run: bash test/integration/oidc/run.sh
