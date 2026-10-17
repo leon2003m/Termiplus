@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -25,6 +26,7 @@ type streamProxy struct {
 	ids        *IdentityStore
 	gateway    *url.URL
 	controlKey string
+	srv        *Server
 }
 
 // WithStream makes the UI listener serve desktops through the gateway at
@@ -34,7 +36,7 @@ func (u *UI) WithStream(gatewayBase, controlKey string) (*UI, error) {
 	if err != nil {
 		return nil, err
 	}
-	u.stream = &streamProxy{ids: u.ids, gateway: g, controlKey: controlKey}
+	u.stream = &streamProxy{ids: u.ids, gateway: g, controlKey: controlKey, srv: u.srv}
 	return u, nil
 }
 
@@ -54,6 +56,13 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		forwardError(w, http.StatusNotFound, "Open a desktop from the console or from Open WebUI.")
 		return
 	}
+	if err := s.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil &&
+		!errors.Is(err, errSessionNotFound) {
+		forwardError(w, http.StatusNotFound, "No such session or access is not permitted.")
+		return
+	}
+	// Let the gateway handle unknown/unowned IDs so it can return its normal
+	// non-disclosing start page (including restartable persistent sessions).
 	s.proxy(w, r, streamPathPrefix+session, session, owui, false)
 }
 
@@ -103,7 +112,7 @@ func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, sessio
 		http.Redirect(w, r, r.URL.Path+"?"+q.Encode(), http.StatusFound)
 		return
 	}
-	if isUpgrade(r) && !sameOrigin(r) {
+	if isUpgrade(r) && !sameOrigin(r, s.srv.uiBase) {
 		forwardError(w, http.StatusForbidden, "Cross-origin WebSocket refused.")
 		return
 	}

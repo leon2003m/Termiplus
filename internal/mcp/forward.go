@@ -21,15 +21,20 @@ type Forwarder struct {
 	ids        *IdentityStore
 	gateway    *url.URL
 	controlKey string
+	srv        *Server
 }
 
 // NewForwarder returns the forward handler for the gateway at gatewayBase.
-func NewForwarder(ids *IdentityStore, gatewayBase, controlKey string) (*Forwarder, error) {
+func NewForwarder(ids *IdentityStore, gatewayBase, controlKey string, servers ...*Server) (*Forwarder, error) {
 	u, err := url.Parse(strings.TrimSuffix(gatewayBase, "/"))
 	if err != nil {
 		return nil, err
 	}
-	return &Forwarder{ids: ids, gateway: u, controlKey: controlKey}, nil
+	f := &Forwarder{ids: ids, gateway: u, controlKey: controlKey}
+	if len(servers) > 0 {
+		f.srv = servers[0]
+	}
+	return f, nil
 }
 
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +61,12 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || port != strconv.Itoa(n) {
 		forwardError(w, http.StatusBadRequest, "Invalid port.")
 		return
+	}
+	if f.srv != nil {
+		if err := f.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil {
+			forwardError(w, http.StatusNotFound, "No such session or access is not permitted.")
+			return
+		}
 	}
 	prefix := "/" + session + "/" + port
 	if !hasSlash {

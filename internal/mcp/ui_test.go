@@ -193,3 +193,17 @@ func TestUIAuditLog(t *testing.T) {
 		t.Fatalf("the audit log must not be writable: %d", code)
 	}
 }
+
+func TestUIOriginRequiresConfiguredSchemeAndHost(t *testing.T) {
+	f := newUIFixture(t)
+	f.ui.srv.WithUIBase("https://desk.example")
+	body := `{"workspace":"default"}`
+	for _, origin := range []string{"http://desk.example", "https://desk.example.evil", "https://evil.example"} {
+		if code, _, _ := f.do(t, http.MethodPost, "/ui/api/sessions", "kc-alice", "", body, map[string]string{"Origin": origin}); code != http.StatusForbidden {
+			t.Errorf("origin %q: want 403, got %d", origin, code)
+		}
+	}
+	if code, _, _ := f.do(t, http.MethodPost, "/ui/api/sessions", "kc-alice", "", body, map[string]string{"Origin": "https://desk.example"}); code != http.StatusOK {
+		t.Fatalf("configured public origin should pass: %d", code)
+	}
+}
