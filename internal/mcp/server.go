@@ -91,8 +91,11 @@ func (s *Server) validateEntitlements(ctx context.Context, e *Entitlements) erro
 	return nil
 }
 
+var errSessionNotFound = errors.New("session not found")
+
 // entitledSession checks the current entitlement for a user's active session.
-// The backend scopes the list to p.UserID; unknown sessions are denied.
+// The backend scopes the list to p.UserID; unknown sessions are reported
+// separately so the gateway can preserve its non-disclosing start-page behavior.
 func (s *Server) entitledSession(ctx context.Context, p Principal, id string) error {
 	sessions, err := s.backend.ListSessions(ctx, p)
 	if err != nil {
@@ -106,7 +109,7 @@ func (s *Server) entitledSession(ctx context.Context, p Principal, id string) er
 			return nil
 		}
 	}
-	return fmt.Errorf("no such session %q", id)
+	return fmt.Errorf("%w: %q", errSessionNotFound, id)
 }
 
 // filterSessions hides sessions whose workspace is no longer entitled.
