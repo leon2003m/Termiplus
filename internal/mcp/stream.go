@@ -108,7 +108,7 @@ func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, sessio
 		http.Redirect(w, r, r.URL.Path+"?"+q.Encode(), http.StatusFound)
 		return
 	}
-	if isUpgrade(r) && !sameOrigin(r) {
+	if isUpgrade(r) && !sameOrigin(r, s.srv.uiBase) {
 		forwardError(w, http.StatusForbidden, "Cross-origin WebSocket refused.")
 		return
 	}
