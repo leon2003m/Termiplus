@@ -104,7 +104,6 @@ func TestStoreRejectsTamperedPolicyFile(t *testing.T) {
 	}
 }
 
-
 // A staging failure must leave all live policy files and the in-memory policy
 // untouched, even when an earlier file's temporary replacement was prepared.
 func TestStoreStagingFailureChangesNothing(t *testing.T) {
