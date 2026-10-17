@@ -68,11 +68,13 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      `X-Forwarded-Groups`, stripping any client-supplied copies. **termiplus
      contains no token-verification code of its own**: authentication is
      delegated to that established, independently maintained proxy, and the MCP
-     server only reads its headers. It is reachable solely through the proxy
-     (internal network `ot-mcp-auth`).
+     server only reads its headers. The listener also shares an internal network
+     with the gateway so it can call the control API; therefore a plugin key is
+     mandatory in proxy mode, preventing a gateway-network peer from authenticating
+     merely by forging proxy identity headers.
   4. **Sessions belong to the Open WebUI user**, so they share homes with that
-     user's Open WebUI terminals. With `MCP_OWUI_PLUGIN_KEY` set (the overlay
-     does), the plugin also sends `X-Termiplus-Owui-Key` (a shared secret, the
+     user's Open WebUI terminals. `MCP_OWUI_PLUGIN_KEY` is mandatory in proxy
+     mode; the plugin sends `X-Termiplus-Owui-Key` (a shared secret, the
      plugin's `plugin_key` valve) and `X-Termiplus-Owui-User` (`__user__["id"]`).
      The MCP server then uses that id as `user_id` and still takes the roles
      from the verified token; without both a verified token and the key the call
@@ -82,7 +84,9 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      side is rejected before any tool runs (JSON-RPC error `-32003`). If the
      binding cannot be stored, the call fails with `-32603` and no tool runs.
      `MCP_OWUI_PLUGIN_KEY` without `MCP_IDENTITY_FILE` refuses to start, since
-     there would be nothing to bind against. Re-linking requires stopping the
+     there would be nothing to bind against. Proxy mode also requires an explicit
+     `MCP_ENTITLEMENTS_FILE`; a missing file now stops startup rather than opening
+     every workspace. Re-linking requires stopping the
      MCP server, editing `MCP_IDENTITY_FILE` and starting it again: the file is
      read only at startup and rewritten from memory on the next enrollment, so
      an edit made while it runs is lost. This prevents a stolen/reused plugin
@@ -432,9 +436,12 @@ claim, like the roles). An unlisted one follows `default` (`allow` or `deny`).
 `termiplus-admin` is not an implicit entitlement. `list_workspaces` only shows
 permitted workspaces and `request_session` refuses others before any
 confirmation is asked for. The file is parsed strictly: an unknown field, a
-missing `default` or an empty group list stops the server (or is refused by
-`set_entitlements`) instead of opening a workspace by accident. While the file
-does not exist, every workspace is open to every signed-in user.
+missing `default`, an unknown workspace name, or an empty group list stops the
+server (or is refused by `set_entitlements`) instead of opening a workspace by
+accident. The example defaults to deny. With `MCP_AUTH=proxy`, a missing file is
+a startup error; allow-all behavior without a file is reserved for explicit
+development-mode configurations. Entitlement changes also hide existing sessions
+and deny their reset, desktop-stream and port-forward access.
 
 ### User management
 
