@@ -39,9 +39,11 @@ jobs:
         run: .github/scripts/install-tools.sh actionlint hadolint
       - name: gofmt
         run: |
-          gofmt -d . > gofmt.diff
-          if [ -s gofmt.diff ]; then
+          gofmt -d . > gofmt.diff || true
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
             echo "::error::not gofmt-formatted:"
+            echo "$out"
             cat gofmt.diff
             exit 1
           fi
