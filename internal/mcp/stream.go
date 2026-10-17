@@ -56,7 +56,7 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil {
-		forwardError(w, http.StatusForbidden, "You are not entitled to this session.")
+		forwardError(w, http.StatusNotFound, "No such session or access is not permitted.")
 		return
 	}
 	s.proxy(w, r, streamPathPrefix+session, session, owui, false)
