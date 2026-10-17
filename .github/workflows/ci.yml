@@ -39,8 +39,12 @@ jobs:
         run: .github/scripts/install-tools.sh actionlint hadolint
       - name: gofmt
         run: |
-          out="$(gofmt -l .)"
-          if [ -n "$out" ]; then echo "::error::not gofmt-formatted:"; echo "$out"; exit 1; fi
+          gofmt -d . > gofmt.diff
+          if [ -s gofmt.diff ]; then
+            echo "::error::not gofmt-formatted:"
+            cat gofmt.diff
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: staticcheck
