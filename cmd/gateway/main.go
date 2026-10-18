@@ -57,6 +57,7 @@ func main() {
 		}
 	}
 
+	// The MCP control API (/control/v1) is on only when CONTROL_API_KEY is set.
 	g, err := gateway.New(gateway.Config{
 		APIKey:       config.Secret("GATEWAY_API_KEY", true),
 		KeySecret:    config.Secret("KEY_SECRET", true),
@@ -70,7 +71,10 @@ func main() {
 		Docker:       dockerapi.New(config.Get("DOCKER_API", "http://sockproxy:2375"), config.Secret("PROXY_TOKEN", false)),
 		AdminKey:     adminKey,
 		NetPolicy:    store,
+		ControlKey:   config.Secret("CONTROL_API_KEY", false),
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
+		BackupDir:    config.Get("BACKUP_DIR", ""),
+		SnapshotKeep: int(config.Int("SNAPSHOT_KEEP", 5)),
 		// Upper bound for one home export (download or backup).
 		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
 		ExportMaxBytes:    exportMaxBytes(),

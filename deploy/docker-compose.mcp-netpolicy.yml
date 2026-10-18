@@ -1,0 +1,18 @@
+# Opt-in overlay: lets termiplus-admin users manage the network policy (#12)
+# through the MCP tools get_network_policy / set_network_policy and the admin
+# page of the management UI. Use it together with both overlays it joins:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.netpolicy.yml \
+#     -f docker-compose.mcp.yml -f docker-compose.mcp-netpolicy.yml up -d
+#
+# The MCP server then holds the gateway's admin key. It only uses it for callers
+# with the termiplus-admin role, and set_network_policy additionally needs an
+# explicit human confirmation. Without this overlay those tools answer "not
+# configured" and the key stays with the gateway alone.
+name: termiplus
+
+services:
+  mcp:
+    environment:
+      ADMIN_API_KEY_FILE: /run/secrets/admin_api_key
+    secrets: [control_api_key, mcp_owui_plugin_key, admin_api_key]

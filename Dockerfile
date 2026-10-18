@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
-# Builds the gateway and the socket proxy. Pick one with --target:
+# Builds the gateway, the socket proxy and the MCP server. Pick one with --target:
 #   docker build --target gateway   -t termiplus-gateway .
 #   docker build --target sockproxy -t termiplus-sockproxy .
+#   docker build --target mcp       -t termiplus-mcp .
 ARG GO_VERSION=1.27
 
 FROM golang:${GO_VERSION}-bookworm AS build
@@ -11,10 +12,11 @@ COPY cmd ./cmd
 COPY internal ./internal
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/gateway ./cmd/gateway \
- && CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/sockproxy ./cmd/sockproxy
+ && CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/sockproxy ./cmd/sockproxy \
+ && CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/mcp ./cmd/mcp
 
 # ---------------------------------------------------------------------------
-# Both final images are empty except for one static binary: no shell, no
+# All final images are empty except for one static binary: no shell, no
 # package manager, no libc. They run as nobody (65534).
 FROM scratch AS base
 ARG VERSION=dev
@@ -43,3 +45,13 @@ COPY --from=build /out/sockproxy /sockproxy
 EXPOSE 2375
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/sockproxy", "-healthcheck"]
 ENTRYPOINT ["/sockproxy"]
+
+# Control-plane MCP server (docs/mcp.md). Talks only to the gateway's
+# /control/v1 API; it never sees the Docker socket or the proxy token.
+FROM base AS mcp
+LABEL org.opencontainers.image.title="termiplus-mcp" \
+      org.opencontainers.image.description="MCP control plane for provisioning termiplus sessions"
+COPY --from=build /out/mcp /mcp
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD ["/mcp", "-healthcheck"]
+ENTRYPOINT ["/mcp"]

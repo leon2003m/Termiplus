@@ -9,6 +9,8 @@ description = "Obviously fake values used in tests and docs"
 regexTarget = "line"
 paths = [
   '''internal/.*_test\.go''',
+  '''integrations/openwebui/test_.*\.py''',
+  '''test/integration/oidc/(realm\.json|run\.sh|desktop\.sh)''',
 ]
 regexes = [
   '''owui-to-gateway-key-0123456789abcdef''',

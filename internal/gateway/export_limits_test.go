@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,15 +17,14 @@ import (
 // A home quota charges allocated blocks, an export streams apparent size: a
 // sparse file must not let one user push an unbounded stream through the
 // shared gateway and socket proxy (security audit run 1). Exports stop at
-// ExportMaxBytes and leave no helper behind.
+// ExportMaxBytes, wherever they come from, and leave nothing behind.
 func TestExportByteCap(t *testing.T) {
-	adminOpt, _ := withAdmin(t)
-	h := newHarness(t, adminOpt, func(o *harnessOpts) {
+	backups := withBackups(t, 5, false)
+	h := newHarness(t, func(o *harnessOpts) {
+		backups(o)
 		inner := o.gateway
 		o.gateway = func(c *Config) {
-			if inner != nil {
-				inner(c)
-			}
+			inner(c)
 			c.ExportMaxBytes = 256 << 10
 		}
 	})
@@ -45,9 +46,16 @@ func TestExportByteCap(t *testing.T) {
 	if !errors.Is(err, errExportTooLarge) {
 		t.Fatalf("export over the cap: %v", err)
 	}
-	if code, body := h.homes(t, http.MethodGet, "default/archive", "alice", nil); code == http.StatusOK && len(body) > 256<<10+512 {
-		t.Fatalf("admin download over the cap: %d, %d bytes", code, len(body))
+	code, body := h.control(t, http.MethodPost, "workspaces/default/home/snapshots", testControlKey, "alice", "")
+	if code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("snapshot over the cap: %d %s", code, body)
 	}
+	_ = filepath.Walk(h.g.cfg.BackupDir, func(p string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			t.Errorf("left behind: %s", p)
+		}
+		return nil
+	})
 	h.noHelpersLeft(t)
 }
 

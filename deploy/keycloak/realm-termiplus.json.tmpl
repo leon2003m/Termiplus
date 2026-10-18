@@ -1,0 +1,92 @@
+{
+  "realm": "termiplus",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "groups": [
+    {"name": "termiplus-users"},
+    {"name": "termiplus-persist"},
+    {"name": "termiplus-admin"}
+  ],
+  "clients": [
+    {
+      "clientId": "owui",
+      "name": "Open WebUI",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__OWUI_CLIENT_SECRET__",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["__WEBUI_URL__/oauth/oidc/callback"],
+      "webOrigins": ["__WEBUI_URL__"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "__WEBUI_URL__/*"},
+      "protocolMappers": [
+        {"name": "audience termiplus-mcp", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+         "config": {"included.client.audience": "termiplus-mcp", "access.token.claim": "true", "id.token.claim": "false"}},
+        {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+         "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+      ]
+    },
+    {
+      "clientId": "termiplus-mcp",
+      "name": "termiplus MCP (audience only)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__MCP_CLIENT_SECRET__",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "termiplus-mcp-admin",
+      "name": "termiplus MCP user management (service account)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__MCP_ADMIN_CLIENT_SECRET__",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "termiplus-desktop",
+      "name": "termiplus desktops and console",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__DESK_CLIENT_SECRET__",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["__DESKTOP_PUBLIC_URL__/oauth2/callback", "__DESKTOP_STREAM_URL__/oauth2/callback"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocolMappers": [
+        {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+         "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+      ]
+    },
+    {
+      "clientId": "termiplus-forward",
+      "name": "termiplus port forwards",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__FWD_CLIENT_SECRET__",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["__FORWARD_PUBLIC_URL__/oauth2/callback"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocolMappers": [
+        {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+         "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-termiplus-mcp-admin",
+      "enabled": true,
+      "serviceAccountClientId": "termiplus-mcp-admin",
+      "clientRoles": {"realm-management": ["view-users", "query-groups", "manage-users"]}
+    }
+  ]
+}

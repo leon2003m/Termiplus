@@ -3,7 +3,7 @@ REVISION  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 REGISTRY  ?= ghcr.io/leon2003m
 BUILD_ARGS = --build-arg VERSION=$(VERSION) --build-arg REVISION=$(REVISION)
 
-.PHONY: help fmt fmt-check vet staticcheck test cover lint check build scan clean
+.PHONY: help fmt fmt-check vet staticcheck test test-plugin cover lint check build scan clean
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -23,20 +23,26 @@ staticcheck: ## staticcheck (install: go install honnef.co/go/tools/cmd/staticch
 test: ## Unit and in-process integration tests with the race detector
 	go test -race -count=1 ./...
 
+test-plugin: ## Open WebUI plugin tests against the real mcp binary (needs python3)
+	@bin="$$(mktemp -d)/mcp" && go build -o "$$bin" ./cmd/mcp && \
+	  TERMIPLUS_MCP_BIN="$$bin" python3 -I -B integrations/openwebui/test_termiplus_workspaces.py; \
+	  rc=$$?; rm -rf "$$(dirname "$$bin")"; exit $$rc
+
 cover: ## Tests with coverage report
 	go test -race -count=1 -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
 lint: fmt-check vet staticcheck ## Go linters
-	shellcheck deploy/firewall.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh image/start image/start-docker
-	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile
+	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/desktop/start-desktop.sh image/start image/start-docker
+	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
 	actionlint
 
-check: lint test ## Everything CI checks on code and config
+check: lint test test-plugin ## Everything CI checks on code and config
 
 build: ## Build all images locally
 	docker build $(BUILD_ARGS) --target gateway   -t $(REGISTRY)/termiplus-gateway:$(VERSION) .
 	docker build $(BUILD_ARGS) --target sockproxy -t $(REGISTRY)/termiplus-sockproxy:$(VERSION) .
+	docker build $(BUILD_ARGS) --target mcp       -t $(REGISTRY)/termiplus-mcp:$(VERSION) .
 	docker build $(BUILD_ARGS) -t $(REGISTRY)/termiplus-terminal:$(VERSION) image/
 
 scan: ## Secret and vulnerability scans (needs gitleaks, govulncheck, trivy)

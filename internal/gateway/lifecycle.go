@@ -38,6 +38,12 @@ type Policy struct {
 	// MaxPerUser caps concurrent ephemeral sandboxes per user (default 3).
 	// When reached, the user's least recently used idle sandbox is deleted.
 	MaxPerUser int `json:"max_per_user,omitempty"`
+	// Desktop starts the image's XFCE desktop (KasmVNC on desktopPort) next to
+	// Open Terminal, protected by a per-container password derived from
+	// KEY_SECRET, and makes it reachable under /stream/<container>/. Needs the
+	// policy's image (TERMINAL_IMAGE or Image) to be the desktop image
+	// (image/desktop). Experimental.
+	Desktop bool `json:"desktop,omitempty"`
 	// Image runs this policy on another image than TERMINAL_IMAGE (e.g. a
 	// data-science or Node image). The socket proxy must list it in
 	// EXTRA_IMAGES. It must be built on the termiplus terminal image (Open
@@ -57,13 +63,19 @@ const (
 type instance struct {
 	name      string
 	userHash  string
+	userID    string // owner, from the request that created it or its label
 	ephemeral bool
 	idle      time.Duration
 	addr      string // host:port reachable from the gateway
 	key       string // per-container Open Terminal API key
 	ready     bool
 	lastUsed  time.Time
-	conns     int // open WebSocket sessions
+	conns     int // open WebSocket sessions (terminal and desktop stream)
+	desktop   bool
+	// controlSession is the session id of an ephemeral sandbox created through
+	// the control API, so it can be listed with a usable handle. In memory only
+	// (ephemerals are throwaway); never set for Open WebUI chat sandboxes.
+	controlSession string
 }
 
 type manager struct {
@@ -105,6 +117,22 @@ func (m *manager) lockFor(name string) *sync.Mutex {
 		m.locks[name] = l
 	}
 	return l
+}
+
+// desktopPassword derives the per-container KasmVNC password the same way, in
+// a separate domain (container names never contain a NUL byte).
+func (m *manager) desktopPassword(name string) string {
+	mac := hmac.New(sha256.New, m.keySecret)
+	mac.Write([]byte("desktop\x00" + name))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// desktopViewPassword is the password of KasmVNC's view-only user "viewer"
+// (shared desktops), in its own domain.
+func (m *manager) desktopViewPassword(name string) string {
+	mac := hmac.New(sha256.New, m.keySecret)
+	mac.Write([]byte("desktop-view\x00" + name))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // containerKey derives the per-container API key. Nothing to store, and
@@ -216,10 +244,15 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	inst = &instance{
 		name:      name,
 		userHash:  naming.UserHash(name),
+		userID:    userID,
 		ephemeral: pol.ephemeral(),
 		idle:      m.idleFor(pol),
 		addr:      m.addrFor(name, m.port),
 		key:       m.containerKey(name),
+		desktop:   pol.Desktop,
+	}
+	if pol.ephemeral() && strings.HasPrefix(sessionID, controlSessionPrefix) {
+		inst.controlSession = sessionID
 	}
 	if err := m.waitReady(ctx, inst); err != nil {
 		return nil, err
@@ -435,6 +468,10 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 		// gVisor cannot reach (#3); the image's start script uses this instead.
 		env = append(env, "OPEN_TERMINAL_RESOLVER="+m.forwarderDNS)
 	}
+	if pol.Desktop {
+		env = append(env, "OPEN_TERMINAL_DESKTOP_PASSWORD="+m.desktopPassword(name),
+			"OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD="+m.desktopViewPassword(name))
+	}
 	spec := map[string]any{
 		"Image":      m.imageFor(pol),
 		"Env":        env,
@@ -523,9 +560,11 @@ func (m *manager) adopt(ctx context.Context) {
 			m.instances[name] = &instance{
 				name:      name,
 				userHash:  naming.UserHash(name),
+				userID:    c.Labels[naming.LabelUser],
 				ephemeral: naming.EphemeralName.MatchString(name),
 				idle:      m.idleFor(pol),
 				lastUsed:  time.Now(),
+				desktop:   pol.Desktop,
 			}
 		}
 	}

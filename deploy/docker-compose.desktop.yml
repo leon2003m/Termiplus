@@ -1,0 +1,230 @@
+# Opt-in overlay: browser access - desktop workspaces, the management UI and
+# port forwarding (EXPERIMENTAL, alpha).
+# Use together with the MCP overlay:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
+#     -f docker-compose.desktop.yml up -d
+#
+# Browsers sign in through oauth2-proxy (OIDC authorization code flow with a
+# session cookie) before they reach the management UI
+# (${DESKTOP_PUBLIC_URL}/ui/, desk-auth) or the desktops and share links
+# (${DESKTOP_STREAM_URL}/stream/ and /share/, desk-stream-auth). Both are
+# served by the MCP server on listeners of their own; nothing else of the
+# gateway or the MCP server is exposed here.
+#
+# Desktops MUST be on another origin than the console: their content is
+# controlled by whoever runs code in the desktop, and script on the console's
+# origin could use the console API as the signed-in user. Each origin has its
+# own cookie; the MCP server refuses to start if the two URLs share an origin.
+# The UI maps the signed-in subject to the Open WebUI user the plugin reported
+# for it, so a user has to use the Open WebUI tool once before the UI shows
+# their sessions.
+#
+# The sign-in is the only login: the MCP server lets a browser into a desktop
+# only if it belongs to the Open WebUI user linked to the signed-in subject,
+# and the gateway fills in KasmVNC's per-container password itself. The MCP
+# server refuses cross-origin WebSockets to the stream.
+#
+# Prerequisites (in addition to the MCP overlay's):
+#   - TERMINAL_IMAGE set to the desktop image (image/desktop), and a policy
+#     with "desktop": true in deploy/policies.json, e.g.
+#       "desk": { "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 2,
+#                 "pids": 1024, "home": "default", "desktop": true }
+#   - DESKTOP_PUBLIC_URL: the console's HTTPS URL, e.g.
+#     https://desk.example.com, terminated by your TLS reverse proxy in front
+#     of desk-auth (127.0.0.1:${DESKTOP_PORT:-4181}).
+#   - DESKTOP_STREAM_URL: the desktops' HTTPS URL, another origin, e.g.
+#     https://desktops.example.com, in front of desk-stream-auth
+#     (127.0.0.1:${DESKTOP_STREAM_PORT:-4183}).
+#   - An OIDC client (default id "termiplus-desktop", standard flow on,
+#     redirect URIs ${DESKTOP_PUBLIC_URL}/oauth2/callback and
+#     ${DESKTOP_STREAM_URL}/oauth2/callback) with the same Group Membership
+#     mapper as the MCP client (claim "groups", full path off).
+#   - deploy/secrets/desk_oidc_client_secret: that client's secret (no newline).
+#   - deploy/secrets/desk_oidc_cookie_secret and dstream_oidc_cookie_secret:
+#     openssl rand -hex 16 each (no newline).
+#   - Port forwards: FORWARD_PUBLIC_URL (another HTTPS origin, e.g.
+#     https://fwd.example.com, in front of fwd-auth at
+#     127.0.0.1:${FORWARD_PORT:-4182}), an OIDC client "termiplus-forward"
+#     (redirect URI ${FORWARD_PUBLIC_URL}/oauth2/callback, groups mapper) and
+#     deploy/secrets/fwd_oidc_client_secret + fwd_oidc_cookie_secret.
+#     Forwarded apps get their own origin so they can never act on the console
+#     or the desktops; only a session's owner can open its ports.
+name: termiplus
+
+services:
+  desk-auth:
+    # oauth2-proxy v7.15.5 (same image as mcp-auth)
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on:
+      gateway: { condition: service_healthy }
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${DESKTOP_OIDC_CLIENT_ID:-termiplus-desktop}
+      - --client-secret-file=/run/secrets/desk_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/desk_oidc_cookie_secret
+      - --redirect-url=${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL}/oauth2/callback
+      - --code-challenge-method=S256
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-name=_termiplus_desk
+      - --email-domain=*
+      - --skip-provider-button=true
+      # Behind the TLS reverse proxy; trust its X-Forwarded-* headers.
+      - --reverse-proxy=true
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      # Only the console; desktops are on their own origin (desk-stream-auth).
+      - --upstream=http://mcp:8091/ui/
+      # No token or credential of ours is handed on.
+      - --pass-basic-auth=false
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --set-xauthrequest=false
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [desk_oidc_client_secret, desk_oidc_cookie_secret]
+    ports:
+      - "127.0.0.1:${DESKTOP_PORT:-4181}:4180"
+    networks: [ot-mcp-ui, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  desk-stream-auth:
+    # oauth2-proxy v7.15.5, as desk-auth but for the desktops and share links
+    # on their own origin with their own cookie.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on:
+      gateway: { condition: service_healthy }
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${DESKTOP_OIDC_CLIENT_ID:-termiplus-desktop}
+      - --client-secret-file=/run/secrets/desk_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/dstream_oidc_cookie_secret
+      - --redirect-url=${DESKTOP_STREAM_URL:?set DESKTOP_STREAM_URL (desktops, an origin of their own)}/oauth2/callback
+      - --code-challenge-method=S256
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-name=_termiplus_dstream
+      - --email-domain=*
+      - --skip-provider-button=true
+      # Behind the TLS reverse proxy; trust its X-Forwarded-* headers.
+      - --reverse-proxy=true
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      # Only the desktops and share links; never the console.
+      - --upstream=http://mcp:8093/stream/
+      - --upstream=http://mcp:8093/share/
+      # No token or credential of ours is handed on.
+      - --pass-basic-auth=false
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --set-xauthrequest=false
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [desk_oidc_client_secret, dstream_oidc_cookie_secret]
+    ports:
+      - "127.0.0.1:${DESKTOP_STREAM_PORT:-4183}:4180"
+    networks: [ot-mcp-stream, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  fwd-auth:
+    # oauth2-proxy v7.15.5, as desk-auth but for port forwards on their own
+    # origin with their own cookie; the only upstream is the MCP forwarder.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on: [mcp]
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${FORWARD_OIDC_CLIENT_ID:-termiplus-forward}
+      - --client-secret-file=/run/secrets/fwd_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/fwd_oidc_cookie_secret
+      - --redirect-url=${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL}/oauth2/callback
+      - --code-challenge-method=S256
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-name=_termiplus_fwd
+      - --email-domain=*
+      - --skip-provider-button=true
+      - --reverse-proxy=true
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      - --upstream=http://mcp:8092/
+      - --pass-basic-auth=false
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --set-xauthrequest=false
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [fwd_oidc_client_secret, fwd_oidc_cookie_secret]
+    ports:
+      - "127.0.0.1:${FORWARD_PORT:-4182}:4180"
+    networks: [ot-mcp-fwd, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  mcp:
+    environment:
+      # Console (downloads, "start this desktop") and desktops: two origins.
+      CONSOLE_PUBLIC_URL: ${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL}
+      STREAM_PUBLIC_URL: ${DESKTOP_STREAM_URL:?set DESKTOP_STREAM_URL}
+      # Desktops and share links; trusts desk-stream-auth's identity headers.
+      STREAM_LISTEN_ADDR: ":8093"
+      FORWARD_PUBLIC_URL: ${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL}
+      # Port forwards; trusts fwd-auth's identity headers like the UI does.
+      FWD_LISTEN_ADDR: ":8092"
+      # Console; trusts desk-auth's identity headers. Besides
+      # desk-auth (ot-mcp-ui) only mcp-auth and the gateway share a network
+      # with the MCP server, and neither forwards browser requests to this
+      # port.
+      UI_LISTEN_ADDR: ":8091"
+    networks:
+      ot-mcp-ui: {}
+      ot-mcp-stream: {}
+      ot-mcp-fwd: {}
+
+networks:
+  # desk-auth <-> mcp console only. desk-auth also joins owui to reach the
+  # issuer.
+  ot-mcp-ui:
+    internal: true
+  # desk-stream-auth <-> mcp desktops and share links only.
+  ot-mcp-stream:
+    internal: true
+  # fwd-auth <-> mcp port forwarder only.
+  ot-mcp-fwd:
+    internal: true
+
+secrets:
+  desk_oidc_client_secret: { file: ./secrets/desk_oidc_client_secret }
+  desk_oidc_cookie_secret: { file: ./secrets/desk_oidc_cookie_secret }
+  dstream_oidc_cookie_secret: { file: ./secrets/dstream_oidc_cookie_secret }
+  fwd_oidc_client_secret: { file: ./secrets/fwd_oidc_client_secret }
+  fwd_oidc_cookie_secret: { file: ./secrets/fwd_oidc_cookie_secret }
