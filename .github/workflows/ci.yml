@@ -4,7 +4,7 @@ on:
   push:
     branches: [dev, alpha]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, alpha]
   workflow_dispatch:
 
 permissions:
@@ -39,8 +39,14 @@ jobs:
         run: .github/scripts/install-tools.sh actionlint hadolint
       - name: gofmt
         run: |
+          gofmt -d . > gofmt.diff || true
           out="$(gofmt -l .)"
-          if [ -n "$out" ]; then echo "::error::not gofmt-formatted:"; echo "$out"; exit 1; fi
+          if [ -n "$out" ]; then
+            echo "::error::not gofmt-formatted:"
+            echo "$out"
+            cat gofmt.diff
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: staticcheck
@@ -157,3 +163,14 @@ jobs:
           docker build -q --build-arg BASE=termiplus-terminal:ci -t termiplus-desktop:ci image/desktop
       - name: Smoke test (Open Terminal, KasmVNC, gateway stream route)
         run: .github/scripts/desktop-smoke.sh termiplus-desktop:ci
+
+  oidc-integration:
+    name: OIDC proxy integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run real-Keycloak and oauth2-proxy integration tests
+        run: bash test/integration/oidc/run.sh

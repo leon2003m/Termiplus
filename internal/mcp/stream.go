@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"html"
 	"io"
 	"log"
@@ -10,8 +11,8 @@ import (
 	"strings"
 )
 
-// Desktops are served under /stream/<session>/ on the UI listener, behind the
-// same sign-in proxy as the console (desk-auth). The browser's OIDC subject is
+// Desktops are served under /stream/<session>/ on their own listener and
+// origin, behind their own sign-in proxy (desk-stream-auth). The browser's OIDC subject is
 // mapped to its Open WebUI user, and the gateway passes the request on only to
 // a running desktop of exactly that user (/control/v1/stream, control key),
 // filling in KasmVNC's password itself. The sign-in is the only login.
@@ -27,6 +28,8 @@ type streamProxy struct {
 	gateway    *url.URL
 	controlKey string
 	console    string // console base URL for the "not running" page, or ""
+	origin     string // the desktops' own public base URL; WebSocket upgrades must come from it
+	srv        *Server
 }
 
 // DesktopHandler serves desktops (/stream/<session>/) and share links
@@ -50,7 +53,10 @@ func NewDesktopHandler(srv *Server, ids *IdentityStore, gatewayBase, controlKey 
 		return nil, err
 	}
 	return &DesktopHandler{
-		proxy:  &streamProxy{ids: ids, gateway: g, controlKey: controlKey, console: srv.uiBase},
+		proxy: &streamProxy{
+			ids: ids, gateway: g, controlKey: controlKey,
+			console: srv.uiBase, origin: srv.desktopBase, srv: srv,
+		},
 		shares: srv.shares,
 	}, nil
 }
@@ -93,6 +99,13 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		forwardError(w, http.StatusNotFound, "Open a desktop from the console or from Open WebUI.")
 		return
 	}
+	if err := s.srv.entitledSession(r.Context(), Principal{UserID: owui, Roles: p.Roles}, session); err != nil &&
+		!errors.Is(err, errSessionNotFound) {
+		forwardError(w, http.StatusNotFound, "No such session or access is not permitted.")
+		return
+	}
+	// Let the gateway handle unknown/unowned IDs so it can return its normal
+	// non-disclosing start page (including restartable persistent sessions).
 	s.proxy(w, r, streamPathPrefix+session, session, owui, false)
 }
 
@@ -146,7 +159,7 @@ func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, sessio
 		http.Redirect(w, r, r.URL.Path+"?"+q.Encode(), http.StatusFound)
 		return
 	}
-	if isUpgrade(r) && !sameOrigin(r) {
+	if isUpgrade(r) && !sameOrigin(r, s.origin) {
 		forwardError(w, http.StatusForbidden, "Cross-origin WebSocket refused.")
 		return
 	}

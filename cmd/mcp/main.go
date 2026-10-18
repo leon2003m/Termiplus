@@ -54,7 +54,10 @@ func main() {
 		// With MCP_OWUI_PLUGIN_KEY, sessions belong to the Open WebUI user the
 		// plugin names (same homes as that user's Open WebUI terminals).
 		owuiKey := config.Secret("MCP_OWUI_PLUGIN_KEY", false)
-		if owuiKey != "" && len(owuiKey) < 32 {
+		if owuiKey == "" {
+			log.Fatal("MCP_OWUI_PLUGIN_KEY is required with MCP_AUTH=proxy; the MCP listener is reachable from the gateway network and must authenticate Open WebUI identity claims")
+		}
+		if len(owuiKey) < 32 {
 			log.Fatal("MCP_OWUI_PLUGIN_KEY must be at least 32 characters")
 		}
 		auth, authDesc = mcp.ProxyHeaderAuthenticator{OWUIKey: owuiKey}, "identity from the OIDC proxy, sessions keyed by the OIDC subject"
@@ -79,6 +82,8 @@ func main() {
 			log.Fatalf("MCP_ENTITLEMENTS_FILE: %v", err)
 		}
 		entDesc = "entitlements from " + f + " (admins can change them)"
+	} else if config.Get("MCP_AUTH", "") == "proxy" {
+		log.Fatal("MCP_ENTITLEMENTS_FILE is required with MCP_AUTH=proxy; use an explicit least-privilege workspace policy")
 	}
 
 	// manage_user / manage_group: group membership in Keycloak, through the
@@ -124,6 +129,10 @@ func main() {
 			log.Fatal(err)
 		}
 		srv.WithIdentities(ids)
+	} else if config.Get("MCP_AUTH", "") == "proxy" && config.Secret("MCP_OWUI_PLUGIN_KEY", false) != "" {
+		// Without the store the plugin could name any Open WebUI user on every
+		// call; the immutable subject binding is what stops that.
+		log.Fatal("MCP_OWUI_PLUGIN_KEY needs MCP_IDENTITY_FILE")
 	}
 
 	// Departed users: archive the homes of users disabled or deleted in
@@ -183,7 +192,7 @@ func main() {
 		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil || controlKey == "" {
 			log.Fatal("FWD_LISTEN_ADDR needs MCP_AUTH=proxy, MCP_IDENTITY_FILE and CONTROL_API_KEY")
 		}
-		fwd, err := mcp.NewForwarder(ids, gatewayURL, controlKey)
+		fwd, err := mcp.NewForwarder(ids, gatewayURL, controlKey, srv)
 		if err != nil {
 			log.Fatal(err)
 		}

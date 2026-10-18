@@ -68,18 +68,32 @@ manager ≈ Kasm Manager + Agent, sockproxy ≈ the agent's confined Docker acce
      `X-Forwarded-Groups`, stripping any client-supplied copies. **termiplus
      contains no token-verification code of its own**: authentication is
      delegated to that established, independently maintained proxy, and the MCP
-     server only reads its headers. It is reachable solely through the proxy
-     (internal network `ot-mcp-auth`).
+     server only reads its headers. The listener also shares an internal network
+     with the gateway so it can call the control API; therefore a plugin key is
+     mandatory in proxy mode, preventing a gateway-network peer from authenticating
+     merely by forging proxy identity headers.
   4. **Sessions belong to the Open WebUI user**, so they share homes with that
-     user's Open WebUI terminals. With `MCP_OWUI_PLUGIN_KEY` set (the overlay
-     does), the plugin also sends `X-Termiplus-Owui-Key` (a shared secret, the
+     user's Open WebUI terminals. `MCP_OWUI_PLUGIN_KEY` is mandatory in proxy
+     mode; the plugin sends `X-Termiplus-Owui-Key` (a shared secret, the
      plugin's `plugin_key` valve) and `X-Termiplus-Owui-User` (`__user__["id"]`).
      The MCP server then uses that id as `user_id` and still takes the roles
      from the verified token; without both a verified token and the key the call
-     is unauthenticated. Open WebUI fetched the token for that same user, and
-     the trust is the same as towards the gateway, where Open WebUI names the
-     user in `X-User-Id` with its API key. Keycloak stays the login and the
-     source of the groups.
+     is unauthenticated. The first valid plugin call creates a persistent
+     subject-to-Open-WebUI-user binding. That binding is one-to-one and
+     immutable through normal requests: a later request trying to rebind either
+     side is rejected before any tool runs (JSON-RPC error `-32003`). If the
+     binding cannot be stored, the call fails with `-32603` and no tool runs.
+     `MCP_OWUI_PLUGIN_KEY` without `MCP_IDENTITY_FILE` refuses to start, since
+     there would be nothing to bind against. Proxy mode also requires an explicit
+     `MCP_ENTITLEMENTS_FILE`; a missing file now stops startup rather than opening
+     every workspace. Re-linking requires stopping the
+     MCP server, editing `MCP_IDENTITY_FILE` and starting it again: the file is
+     read only at startup and rewritten from memory on the next enrollment, so
+     an edit made while it runs is lost. This prevents a stolen/reused plugin
+     key from silently transferring an already-linked user's home.
+     The plugin key remains a bootstrap trust anchor: keep it only in the
+     Open WebUI admin-controlled valve and Docker secret. Keycloak remains the
+     source of authentication and groups.
   5. The MCP server is the **only** component that sets the gateway's
      `X-User-Id`, over the existing API-key-authenticated, private MCP↔gateway
      link. The gateway therefore receives a trustworthy identity.
@@ -438,9 +452,12 @@ claim, like the roles). An unlisted one follows `default` (`allow` or `deny`).
 `termiplus-admin` is not an implicit entitlement. `list_workspaces` only shows
 permitted workspaces and `request_session` refuses others before any
 confirmation is asked for. The file is parsed strictly: an unknown field, a
-missing `default` or an empty group list stops the server (or is refused by
-`set_entitlements`) instead of opening a workspace by accident. While the file
-does not exist, every workspace is open to every signed-in user.
+missing `default`, an unknown workspace name, or an empty group list stops the
+server (or is refused by `set_entitlements`) instead of opening a workspace by
+accident. The example defaults to deny. With `MCP_AUTH=proxy`, a missing file is
+a startup error; allow-all behavior without a file is reserved for explicit
+development-mode configurations. Entitlement changes also hide existing sessions
+and deny their reset, desktop-stream and port-forward access.
 
 ### User management
 
@@ -591,10 +608,21 @@ server sits only on the internal auth network.
 Known limits: the `terminal_session` handle of an ephemeral session created via
 the control API is kept in gateway memory only (lost on a gateway restart, which
 is acceptable for throwaway sandboxes). Open WebUI chat ids are never returned.
-Whoever holds the plugin key can name any Open WebUI user (with any valid
-token), exactly like the holder of the gateway API key; keep it in Open WebUI's
-valve and the Docker secret only. A caller outside Open WebUI (another MCP
-client with a Keycloak token) cannot use the MCP server while the key is set.
+The plugin key is a bootstrap trust anchor: whoever holds it and has a valid
+token can attempt to claim an as-yet-unlinked Open WebUI user id on that
+subject's first call. After a mapping exists, the server enforces an immutable
+one-to-one binding and rejects reassignments before running tools. Keep the key
+only in Open WebUI's admin-controlled valve and the Docker secret; do not expose
+it to ordinary users or model-visible tool arguments. A caller outside Open
+WebUI (another MCP client with a Keycloak token) cannot use the MCP server while
+the key is set. If you need stronger first-enrollment assurance than this shared
+bootstrap secret, pre-provision the subject-to-user mapping through a trusted
+admin workflow before enabling user access.
+
+Upgrading from a version where the newest pair won: an existing
+`MCP_IDENTITY_FILE` that maps two subjects to the same Open WebUI user id now
+makes the MCP server refuse to start. Decide which subject owns that user,
+remove the other entry, then start it.
 
 Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
 isolated throwaway stack: ephemeral and persistent creation, the mismatch and

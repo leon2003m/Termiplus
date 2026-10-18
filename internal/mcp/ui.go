@@ -66,7 +66,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
-	if r.Method != http.MethodGet && (r.Header.Get(uiCSRFHeader) != "1" || !sameOrigin(r)) {
+	if r.Method != http.MethodGet && (r.Header.Get(uiCSRFHeader) != "1" || !sameOrigin(r, u.srv.uiBase)) {
 		uiError(w, http.StatusForbidden, "cross-site request refused")
 		return
 	}
@@ -267,16 +267,32 @@ func (u *UI) run(w http.ResponseWriter, r *http.Request, p Principal, tool strin
 
 // sameOrigin reports whether the request has exactly one Origin header whose
 // host matches the Host the browser addressed.
-func sameOrigin(r *http.Request) bool {
+func sameOrigin(r *http.Request, expected string) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) != 1 {
 		return false
 	}
 	o, err := url.Parse(origins[0])
-	if err != nil || (o.Scheme != "http" && o.Scheme != "https") || o.Host == "" {
+	if err != nil || (o.Scheme != "http" && o.Scheme != "https") || o.Host == "" ||
+		o.User != nil || (o.Path != "" && o.Path != "/") || o.RawQuery != "" || o.Fragment != "" {
 		return false
 	}
-	return strings.EqualFold(o.Host, r.Host)
+	if expected != "" {
+		want, err := url.Parse(expected)
+		if err != nil || want.Host == "" || (want.Scheme != "http" && want.Scheme != "https") {
+			return false
+		}
+		return strings.EqualFold(o.Scheme, want.Scheme) && strings.EqualFold(o.Host, want.Host)
+	}
+	// Development/tests without a configured public URL use the request's
+	// actual transport scheme and Host as a conservative fallback.
+	if !strings.EqualFold(o.Host, r.Host) {
+		return false
+	}
+	if r.TLS != nil {
+		return strings.EqualFold(o.Scheme, "https")
+	}
+	return strings.EqualFold(o.Scheme, "http")
 }
 
 func nonNil(s []string) []string {

@@ -267,7 +267,11 @@ func (s *Server) homeTools() []tool {
 				if err != nil {
 					return nil, err
 				}
-				raw, err := hb.ResetSession(ctx, p, argString(args, "session_id"))
+				id := argString(args, "session_id")
+				if err := s.entitledSession(ctx, p, id); err != nil {
+					return nil, err
+				}
+				raw, err := hb.ResetSession(ctx, p, id)
 				if err != nil {
 					return nil, err
 				}
