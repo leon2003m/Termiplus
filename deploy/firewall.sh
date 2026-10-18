@@ -184,11 +184,19 @@ iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
 # egress restrictions for long-lived connections. Docker handles reply traffic;
 # outbound packets must continue through the current egress policy below.
 iptables -A TERMIPLUS -s "$GATEWAY" -d "$SANDBOX" -j ACCEPT
+# Replies on those connections. They are sandbox -> sandbox too, so without this
+# the terminal <-> terminal drop below would cut every gateway request. Scoped to
+# the gateway as destination and to connections conntrack has already seen
+# (opened by the gateway; a terminal's own new packets to it are never accepted),
+# unlike a global ESTABLISHED,RELATED rule.
+iptables -A TERMIPLUS -s "$SANDBOX" -d "$GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 # terminal -> forwarder DNS (only with the forwarder present). ACCEPT, as for the
 # gateway, to beat Docker's icc:false drop; the forwarder's address is MAC-pinned.
 if [ -n "${forwarder_mac:-}" ]; then
   for p in udp tcp; do
     iptables -A TERMIPLUS -s "$SANDBOX" -d "$FORWARDER" -p "$p" --dport 53 -j ACCEPT
+    # and its answers back to the terminal, only on those DNS connections
+    iptables -A TERMIPLUS -s "$FORWARDER" -d "$SANDBOX" -p "$p" --sport 53 -m conntrack --ctstate ESTABLISHED -j ACCEPT
   done
   for up in $(upstreams); do
     if upstream_ok "$up"; then

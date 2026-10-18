@@ -15,6 +15,7 @@ From an alpha deployment:
 - **Entitlements file required.** With `MCP_AUTH=proxy` the MCP server refuses to start without `MCP_ENTITLEMENTS_FILE` (`deploy/mcp-data/entitlements.json`). `setup-alpha.sh` creates one that denies everything; for an existing deployment create it from `deploy/entitlements.example.json` (or `{"default":"allow","workspaces":{}}` to keep the old open behaviour) and owned by uid 65534.
 - **Desktops on their own origin.** Set `DESKTOP_STREAM_URL`, route it with TLS to `127.0.0.1:4183` (`desk-stream-auth`), run `setup-alpha.sh` once for the secret `dstream_oidc_cookie_secret`, and add `${DESKTOP_STREAM_URL}/oauth2/callback` as a redirect URI of the `termiplus-desktop` client in existing realms.
 - an identity file that maps two subjects to one Open WebUI user id makes the MCP server refuse to start; remove the stale entry first (docs/mcp.md).
+- **Run `deploy/firewall.sh` once by hand** after upgrading (as root): the watch timer only reapplies missing rules, so a host keeps the previous rule set, including the old global `ESTABLISHED,RELATED ACCEPT`, until a full run.
 - **Numeric settings are range-checked** at startup (see Security); a deployment with an out-of-range value stops with a message naming the setting.
 
 ### Added
@@ -102,5 +103,5 @@ From an alpha deployment:
 - `setup-alpha.sh` and `add-mcp-admin-client.sh` make `deploy/secrets/` mode 0700.
 - MCP (PR #18): a missing `MCP_ENTITLEMENTS_FILE` with `MCP_AUTH=proxy` stops startup instead of opening every workspace; the file is parsed strictly (unknown fields, unknown workspace names or empty group lists are refused), and entitlements are checked again when sessions are listed, reset, opened as desktops and port-forwarded, so a revoked entitlement also hides existing sessions.
 - MCP (PR #18): console writes and desktop WebSocket upgrades compare the browser's full origin (scheme and host) against the configured public URL, the console's for console writes and the desktops' (`STREAM_PUBLIC_URL`) for desktop WebSockets.
-- Firewall (PR #18): no global `ESTABLISHED,RELATED ACCEPT` in Docker's forward chain, which applied to every Docker network and let long-lived connections outlive the current egress policy; Docker handles reply traffic.
+- Firewall (PR #18): no global `ESTABLISHED,RELATED ACCEPT` in Docker's forward chain, which applied to every Docker network and let long-lived connections outlive the current egress policy. Only replies to the gateway's own connections and the DNS forwarder's answers are accepted inside the sandbox network (live validation V1: without them the gateway could not reach any terminal once the firewall was applied); Docker handles all other reply traffic.
 - Network policy (PR #18): rendered files are staged and published together; if a later step fails, files already published are rolled back.
