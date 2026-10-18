@@ -1,0 +1,6 @@
+{
+  "default": { "runtime": "runsc",       "memory_mb": 2048, "cpus": 2, "pids": 512 },
+  "scratch": { "runtime": "runsc",       "memory_mb": 2048, "cpus": 2, "pids": 512,
+               "storage": "ephemeral", "idle_timeout": "15m", "max_per_user": 3 },
+  "sysbox":  { "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 4, "pids": 1024, "home": "default" }
+}

@@ -1,0 +1,109 @@
+# termiplus with Open WebUI in the same Docker network ("owui").
+# For the recommended setup on a dedicated VM see docker-compose.separate-vm.yml.
+#
+# Required environment (e.g. in deploy/.env, which is gitignored):
+#   TERMINAL_IMAGE  terminal image, ideally pinned: ghcr.io/leon2003m/termiplus-terminal@sha256:...
+#   DOCKER_GID      group id owning /var/run/docker.sock:  stat -c %g /var/run/docker.sock
+# Optional:
+#   TERMIPLUS_VERSION  gateway/sockproxy image tag (default: latest release you pulled)
+name: termiplus
+
+x-shared-env: &shared-env
+  TERMINAL_IMAGE: ${TERMINAL_IMAGE:?set TERMINAL_IMAGE, ideally name@sha256:digest}
+  SANDBOX_NETWORK: ot-sandbox
+  PROXY_TOKEN_FILE: /run/secrets/proxy_token
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+services:
+  sockproxy:
+    <<: *hardening
+    image: ghcr.io/leon2003m/termiplus-sockproxy:${TERMIPLUS_VERSION:-latest}
+    build: { context: .., target: sockproxy }
+    # Not root: nobody plus the socket's group is enough to use the socket.
+    user: "65534:65534"
+    group_add: ["${DOCKER_GID:?set DOCKER_GID to the group id of /var/run/docker.sock}"]
+    environment:
+      <<: *shared-env
+      ALLOWED_RUNTIMES: runsc,sysbox-runc
+      MAX_MEMORY_MB: "8192"
+      MAX_CPUS: "4"
+      MAX_PIDS: "2048"
+      # Disk quota per home volume, e.g. 20G (needs XFS project quotas, see README).
+      HOME_VOLUME_SIZE: ${HOME_VOLUME_SIZE:-}
+      # Cap on each terminal's writable container layer, e.g. 10G (see README).
+      CONTAINER_ROOTFS_SIZE: ${CONTAINER_ROOTFS_SIZE:-}
+      # Further images that policies may name with "image" (comma-separated).
+      EXTRA_IMAGES: ${EXTRA_IMAGES:-}
+      # "1" lets the gateway delete home volumes (admin API, departed users).
+      ALLOW_HOME_REMOVE: ${ALLOW_HOME_REMOVE:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets: [proxy_token]
+    networks: [ot-control]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  gateway:
+    <<: *hardening
+    image: ghcr.io/leon2003m/termiplus-gateway:${TERMIPLUS_VERSION:-latest}
+    build: { context: .., target: gateway }
+    user: "65534:65534"
+    depends_on:
+      sockproxy: { condition: service_healthy }
+    environment:
+      <<: *shared-env
+      DOCKER_API: http://sockproxy:2375
+      GATEWAY_API_KEY_FILE: /run/secrets/gateway_api_key
+      KEY_SECRET_FILE: /run/secrets/key_secret
+      POLICIES_FILE: /etc/termiplus/policies.json
+      IDLE_TIMEOUT: 30m
+      MAX_RUNNING: "50"
+      # Exports (downloads, snapshots, archives) stop at EXPORT_MAX_BYTES, by
+      # default HOME_VOLUME_SIZE plus an eighth plus 64M: sparse files count
+      # at their full size in a tar but barely against the quota.
+      HOME_VOLUME_SIZE: ${HOME_VOLUME_SIZE:-}
+      EXPORT_MAX_BYTES: ${EXPORT_MAX_BYTES:-}
+    volumes:
+      - ./policies.json:/etc/termiplus/policies.json:ro
+    secrets: [proxy_token, gateway_api_key, key_secret]
+    networks:
+      ot-control: {}
+      ot-sandbox:
+        ipv4_address: 172.30.0.2   # referenced by firewall.sh
+      owui: {}
+    mem_limit: 256m
+    cpus: 1
+    pids_limit: 256
+
+networks:
+  ot-control:
+    internal: true
+  ot-sandbox:
+    name: ot-sandbox
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: ot-sandbox
+      # Fail-closed isolation: Docker drops inter-container traffic on this
+      # bridge even if firewall.sh is not applied. firewall.sh re-permits only
+      # gateway->terminal (pinned to the gateway MAC via ebtables). See #14/#13.
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  owui:
+    external: true
+    name: ${OWUI_NETWORK:-owui}
+
+secrets:
+  proxy_token: { file: ./secrets/proxy_token }
+  gateway_api_key: { file: ./secrets/gateway_api_key }
+  key_secret: { file: ./secrets/key_secret }

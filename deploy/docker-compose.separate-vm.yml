@@ -1,0 +1,25 @@
+# Recommended: termiplus on its own VM, Open WebUI elsewhere.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.separate-vm.yml up -d
+#
+# Differences to docker-compose.yml:
+#   - no shared "owui" Docker network
+#   - the gateway port is published on GATEWAY_BIND (default 127.0.0.1:8080)
+#
+# The gateway speaks plain HTTP. Do not expose it directly. Either:
+#   a) bind it to a private interface (VLAN / WireGuard) that only the Open WebUI
+#      host can reach:   GATEWAY_BIND=10.20.30.40:8080
+#   b) keep 127.0.0.1 and put a TLS reverse proxy (Traefik, Caddy, nginx) on the
+#      VM in front of it, allowing only the Open WebUI host's IP.
+# In both cases also restrict the port in the VM firewall and the Proxmox firewall.
+services:
+  gateway:
+    networks: !override
+      ot-control: {}
+      ot-sandbox:
+        ipv4_address: 172.30.0.2
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1:8080}:8080"
+
+networks:
+  owui: !reset {}

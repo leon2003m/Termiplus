@@ -1,0 +1,27 @@
+# Secrets: never commit
+deploy/secrets/
+*.key
+*.pem
+.env
+.env.*
+
+# Build output
+/bin/
+/dist/
+*.zip
+*.out
+coverage.*
+
+# Reports from local scans
+/reports/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Python bytecode from the Open WebUI plugin tests
+__pycache__/
+deploy/mcp-data/
+deploy/backups/

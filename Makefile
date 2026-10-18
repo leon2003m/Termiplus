@@ -1,0 +1,58 @@
+VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+REVISION  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+REGISTRY  ?= ghcr.io/leon2003m
+BUILD_ARGS = --build-arg VERSION=$(VERSION) --build-arg REVISION=$(REVISION)
+
+.PHONY: help fmt fmt-check vet staticcheck test test-plugin cover lint check build scan clean
+
+help: ## Show targets
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
+
+fmt: ## Format Go code
+	gofmt -w .
+
+fmt-check: ## Fail if Go code is not formatted
+	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "not formatted:"; echo "$$out"; exit 1; fi
+
+vet: ## go vet
+	go vet ./...
+
+staticcheck: ## staticcheck (install: go install honnef.co/go/tools/cmd/staticcheck@latest)
+	staticcheck ./...
+
+test: ## Unit and in-process integration tests with the race detector
+	go test -race -count=1 ./...
+
+test-plugin: ## Open WebUI plugin tests against the real mcp binary (needs python3)
+	@bin="$$(mktemp -d)/mcp" && go build -o "$$bin" ./cmd/mcp && \
+	  TERMIPLUS_MCP_BIN="$$bin" python3 -I -B integrations/openwebui/test_termiplus_workspaces.py; \
+	  rc=$$?; rm -rf "$$(dirname "$$bin")"; exit $$rc
+
+cover: ## Tests with coverage report
+	go test -race -count=1 -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+
+lint: fmt-check vet staticcheck ## Go linters
+	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/desktop/start-desktop.sh image/start image/start-docker
+	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
+	actionlint
+	@# Scripts that hosts and tests run directly must stay executable in git.
+	@for f in deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh test/integration/*.sh test/integration/oidc/*.sh .github/scripts/*.sh; do \
+	  git ls-files -s "$$f" | grep -q '^100755' || { echo "$$f is not executable in git (git update-index --chmod=+x $$f)"; exit 1; }; \
+	done
+
+check: lint test test-plugin ## Everything CI checks on code and config
+
+build: ## Build all images locally
+	docker build $(BUILD_ARGS) --target gateway   -t $(REGISTRY)/termiplus-gateway:$(VERSION) .
+	docker build $(BUILD_ARGS) --target sockproxy -t $(REGISTRY)/termiplus-sockproxy:$(VERSION) .
+	docker build $(BUILD_ARGS) --target mcp       -t $(REGISTRY)/termiplus-mcp:$(VERSION) .
+	docker build $(BUILD_ARGS) -t $(REGISTRY)/termiplus-terminal:$(VERSION) image/
+
+scan: ## Secret and vulnerability scans (needs gitleaks, govulncheck, trivy)
+	gitleaks detect --redact --config .gitleaks.toml
+	govulncheck ./...
+	trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL .
+
+clean: ## Remove local build output
+	rm -rf bin dist reports coverage.out

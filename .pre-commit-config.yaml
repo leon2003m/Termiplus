@@ -1,0 +1,22 @@
+# Optional local hooks: pip install pre-commit && pre-commit install
+# CI runs the same checks with pinned versions; these are a convenience.
+repos:
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: sh -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: gitleaks
+        name: gitleaks
+        entry: gitleaks protect --staged --redact --config .gitleaks.toml
+        language: system
+        pass_filenames: false

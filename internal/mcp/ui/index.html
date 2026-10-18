@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>termiplus workspaces</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header><h1>termiplus</h1><span id="roles"></span></header>
+<main>
+  <p id="status" role="status"></p>
+  <section id="workspaces-section" hidden>
+    <h2>Start a workspace</h2>
+    <ul id="workspaces"></ul>
+  </section>
+  <section id="sessions-section" hidden>
+    <h2>Your sessions</h2>
+    <ul id="sessions"></ul>
+    <p id="share-link" class="hint" hidden></p>
+  </section>
+  <section id="shares-section" hidden>
+    <h2>Shared desktops</h2>
+    <p class="hint">Links that let others watch one of your desktops (view only) until they expire.</p>
+    <ul id="shares"></ul>
+  </section>
+  <section id="backups-section" hidden>
+    <h2>Backups</h2>
+    <p class="hint">Snapshots of your homes (/home/user), stored by termiplus. Downloads are tar archives.</p>
+    <div id="backups"></div>
+  </section>
+  <section id="admin-section" hidden>
+    <h2>Administration</h2>
+    <h3>Workspace entitlements</h3>
+    <p class="hint">Which groups may see and start which workspace. A listed workspace needs one of its groups; unlisted ones follow <code>default</code> (<code>allow</code> or <code>deny</code>).</p>
+    <textarea id="entitlements" spellcheck="false" rows="10" aria-label="Workspace entitlements (JSON)"></textarea>
+    <button id="save-entitlements" class="primary" type="button">Save entitlements</button>
+    <h3>Network policy</h3>
+    <p class="hint">Custom DNS entries and internal egress allowances for all terminals.</p>
+    <textarea id="netpolicy" spellcheck="false" rows="10" aria-label="Network policy (JSON)"></textarea>
+    <button id="save-netpolicy" class="primary" type="button">Save network policy</button>
+    <h3>Audit log</h3>
+    <p class="hint">The newest changes made through chat or this console: sessions, entitlements, network policy and group membership.</p>
+    <div class="audit-wrap"><table id="audit"><thead><tr><th>Time (UTC)</th><th>Who</th><th>Action</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+  </section>
+</main>
+</body>
+</html>

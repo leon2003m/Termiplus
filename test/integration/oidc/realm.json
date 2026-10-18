@@ -1,0 +1,37 @@
+{
+  "realm": "termiplus", "enabled": true,
+  "groups": [{"name": "termiplus-persist"}, {"name": "termiplus-admin"}, {"name": "ops-admins"}],
+  "clients": [
+    {"clientId": "owui", "enabled": true, "publicClient": false, "secret": "owui-secret-it",
+     "directAccessGrantsEnabled": true, "standardFlowEnabled": false,
+     "protocolMappers": [
+       {"name": "aud-mcp", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+        "config": {"included.client.audience": "termiplus-mcp", "access.token.claim": "true", "id.token.claim": "false"}},
+       {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+        "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+     ]},
+    {"clientId": "termiplus-mcp", "enabled": true, "publicClient": false, "secret": "mcp-secret-it",
+     "directAccessGrantsEnabled": false, "standardFlowEnabled": false},
+    {"clientId": "termiplus-mcp-admin", "enabled": true, "publicClient": false, "secret": "mcp-admin-secret-it-0123456789abcdef",
+     "serviceAccountsEnabled": true, "directAccessGrantsEnabled": false, "standardFlowEnabled": false},
+    {"clientId": "other", "enabled": true, "publicClient": false, "secret": "other-secret-it",
+     "directAccessGrantsEnabled": true, "standardFlowEnabled": false},
+    {"clientId": "termiplus-desktop", "enabled": true, "publicClient": false, "secret": "desk-secret-it",
+     "directAccessGrantsEnabled": true, "standardFlowEnabled": true, "redirectUris": ["http://127.0.0.1:*"],
+     "attributes": {"pkce.code.challenge.method": "S256"},
+     "protocolMappers": [
+       {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+        "config": {"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
+     ]}
+  ],
+  "users": [
+    {"username": "alice", "enabled": true, "email": "alice@example.test", "emailVerified": true, "firstName": "Alice", "lastName": "Test",
+     "credentials": [{"type": "password", "value": "alice-pw", "temporary": false}], "groups": ["termiplus-persist"]},
+    {"username": "bob", "enabled": true, "email": "bob@example.test", "emailVerified": true, "firstName": "Bob", "lastName": "Test",
+     "credentials": [{"type": "password", "value": "bob-pw", "temporary": false}]},
+    {"username": "carol", "enabled": true, "email": "carol@example.test", "emailVerified": true, "firstName": "Carol", "lastName": "Test",
+     "credentials": [{"type": "password", "value": "carol-pw", "temporary": false}], "groups": ["termiplus-admin"]},
+    {"username": "service-account-termiplus-mcp-admin", "enabled": true, "serviceAccountClientId": "termiplus-mcp-admin",
+     "clientRoles": {"realm-management": ["view-users", "query-groups", "manage-users"]}}
+  ]
+}

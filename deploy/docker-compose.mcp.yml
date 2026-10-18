@@ -1,0 +1,136 @@
+# Opt-in overlay: the termiplus MCP control plane (docs/mcp.md, alpha).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+#
+# Without this overlay the gateway's /control/v1 API stays off (404).
+#
+# Authentication is done by oauth2-proxy, not by termiplus: it validates the
+# caller's bearer JWT against the OIDC issuer (JWKS signature, iss, aud, exp)
+# and forwards X-Forwarded-User (the "sub" claim) and X-Forwarded-Groups, after
+# stripping any client-supplied copies. The MCP server trusts those headers, so
+# it must only be reachable through the proxy: it sits on ot-mcp-auth (shared
+# only with the proxy) and ot-mcp (shared only with the gateway), never on owui.
+# Verified against a real Keycloak by test/integration/oidc/run.sh.
+#
+# Prerequisites:
+#   - MCP_OIDC_ISSUER_URL, e.g. https://sso.example.com/realms/termiplus. The
+#     proxy must reach it (through the owui network's egress).
+#   - An OIDC client (default id "termiplus-mcp", standard flow disabled) and an
+#     audience mapper on the client Open WebUI signs in with, so the user's
+#     access token carries aud=termiplus-mcp. Group membership in a "groups"
+#     claim (Keycloak: Group Membership mapper, full path off); the groups
+#     termiplus-persist / termiplus-admin grant the MCP roles.
+#   - deploy/secrets/control_api_key: >=32 chars, distinct from gateway_api_key
+#     and admin_api_key:   openssl rand -hex 32 > deploy/secrets/control_api_key
+#   - deploy/secrets/mcp_oidc_client_secret: that client's secret (no newline).
+#   - deploy/secrets/mcp_oidc_cookie_secret: openssl rand -hex 16 (unused for
+#     bearer calls, but oauth2-proxy requires it).
+#   - deploy/secrets/mcp_owui_plugin_key: openssl rand -hex 32 (no newline),
+#     also entered as the Open WebUI plugin's "plugin_key" valve. Sessions then
+#     belong to the Open WebUI user id, so they share homes with that user's
+#     Open WebUI terminals; the token still proves the sign-in and the groups.
+#   - deploy/mcp-data writable by uid 65534 (the MCP server remembers which
+#     Open WebUI user each Keycloak subject belongs to, for the management UI):
+#       mkdir -p deploy/mcp-data && sudo chown 65534:65534 deploy/mcp-data
+#   - deploy/backups writable by uid 65534 (the gateway keeps snapshots of
+#     homes and archived homes there; size it for your users' homes):
+#       mkdir -p deploy/backups && sudo chown 65534:65534 deploy/backups && sudo chmod 700 deploy/backups
+#   - Workspace entitlements (which groups may see and launch which workspace,
+#     docs/mcp.md) live in deploy/mcp-data/entitlements.json and are edited by
+#     admins in the management UI or with set_entitlements. Without the file
+#     every workspace is open to every signed-in user; to start from a file:
+#       sudo install -o 65534 -g 65534 -m 600 deploy/entitlements.example.json \
+#         deploy/mcp-data/entitlements.json
+name: termiplus
+
+services:
+  mcp-auth:
+    # oauth2-proxy v7.15.5
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65532:65532"
+    depends_on: [mcp]
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${MCP_OIDC_ISSUER_URL:?set MCP_OIDC_ISSUER_URL}
+      - --client-id=${MCP_OIDC_CLIENT_ID:-termiplus-mcp}
+      - --client-secret-file=/run/secrets/mcp_oidc_client_secret
+      - --cookie-secret-file=/run/secrets/mcp_oidc_cookie_secret
+      # Bearer JWTs only: verified tokens pass, anything else gets 401 (no
+      # login redirect, no cookie sessions).
+      - --skip-jwt-bearer-tokens=true
+      - --api-route=^/
+      - --email-domain=*
+      # X-Forwarded-User = the token subject (deprecated alias, still honoured
+      # in v7.15; the integration test pins this behaviour).
+      - --user-id-claim=sub
+      - --oidc-groups-claim=${MCP_OIDC_GROUPS_CLAIM:-groups}
+      - --upstream=http://mcp:8090
+      - --http-address=0.0.0.0:4180
+      - --silence-ping-logging
+    secrets: [mcp_oidc_client_secret, mcp_oidc_cookie_secret]
+    networks: [ot-mcp-auth, owui]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  mcp:
+    image: ghcr.io/leon2003m/termiplus-mcp:${TERMIPLUS_VERSION:-latest}
+    build: { context: .., target: mcp }
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    user: "65534:65534"
+    depends_on:
+      gateway: { condition: service_healthy }
+    environment:
+      MCP_AUTH: proxy
+      GATEWAY_URL: http://gateway:8080
+      GATEWAY_PUBLIC_URL: ${MCP_GATEWAY_PUBLIC_URL:-http://gateway:8080}
+      CONTROL_API_KEY_FILE: /run/secrets/control_api_key
+      MCP_ENTITLEMENTS_FILE: /data/entitlements.json
+      MCP_OWUI_PLUGIN_KEY_FILE: /run/secrets/mcp_owui_plugin_key
+      MCP_IDENTITY_FILE: /data/identities.json
+      MCP_AUDIT_FILE: /data/audit.log
+      MCP_SHARES_FILE: /data/shares.json
+    volumes:
+      - ./mcp-data:/data
+    secrets: [control_api_key, mcp_owui_plugin_key]
+    networks: [ot-mcp, ot-mcp-auth]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+
+  gateway:
+    environment:
+      CONTROL_API_KEY_FILE: /run/secrets/control_api_key
+      # Snapshots of homes and archived homes of departed users.
+      BACKUP_DIR: /data/backups
+      SNAPSHOT_KEEP: ${SNAPSHOT_KEEP:-5}
+    volumes:
+      - ./backups:/data/backups
+    secrets: [control_api_key]
+    networks:
+      ot-mcp: {}
+
+networks:
+  ot-mcp:
+    internal: true
+  ot-mcp-auth:
+    internal: true
+
+secrets:
+  control_api_key: { file: ./secrets/control_api_key }
+  mcp_oidc_client_secret: { file: ./secrets/mcp_oidc_client_secret }
+  mcp_oidc_cookie_secret: { file: ./secrets/mcp_oidc_cookie_secret }
+  mcp_owui_plugin_key: { file: ./secrets/mcp_owui_plugin_key }

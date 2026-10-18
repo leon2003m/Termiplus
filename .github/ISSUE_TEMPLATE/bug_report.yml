@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems: do not open an issue. See SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: termiplus version
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Container runtime
+      options: [gVisor (runsc), Sysbox, other]
+    validations:
+      required: true
+  - type: input
+    id: owui
+    attributes:
+      label: Open WebUI version
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Gateway and sockproxy logs. Remove secrets and hostnames.
+      render: text

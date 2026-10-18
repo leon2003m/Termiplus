@@ -1,0 +1,6 @@
+# Only what the image builds need goes into the build context.
+*
+!go.mod
+!cmd/
+!internal/
+**/*_test.go

@@ -1,0 +1,25 @@
+#!/bin/sh
+# Starts a Docker daemon inside the workspace. Works only under Sysbox (the
+# entrypoint starts it by itself when Docker is installed); Debian's init
+# script does not work there. The socket belongs to group 1000, so the user
+# runs docker without sudo.
+set -eu
+[ "$(id -u)" = 0 ] || exec sudo -n "$0" "$@"
+if ! command -v dockerd >/dev/null 2>&1; then
+  echo "start-docker: Docker is not installed: sudo apt-get update && sudo apt-get install -y docker.io" >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  # setsid: survive the end of the command that started it.
+  setsid dockerd -G 1000 >/var/log/dockerd.log 2>&1 </dev/null &
+  i=0
+  until docker info >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+      echo "start-docker: dockerd did not start, see /var/log/dockerd.log" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+fi
+echo "Docker is running."
