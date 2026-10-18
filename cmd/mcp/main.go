@@ -156,6 +156,11 @@ func main() {
 		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil {
 			log.Fatal("UI_LISTEN_ADDR needs MCP_AUTH=proxy and MCP_IDENTITY_FILE")
 		}
+		if consoleURL == "" {
+			// Console writes are only accepted from this origin; behind a TLS
+			// proxy the request itself cannot tell it.
+			log.Fatal("UI_LISTEN_ADDR needs CONSOLE_PUBLIC_URL (the console's https:// origin)")
+		}
 		// View-only desktop share links (share_desktop).
 		shares, err := mcp.OpenShareStore(config.Get("MCP_SHARES_FILE", ""))
 		if err != nil {
