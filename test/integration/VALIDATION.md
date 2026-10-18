@@ -190,3 +190,29 @@ Found and fixed during this run:
   `127.0.0.11`, which gVisor cannot reach). The gateway now also passes the
   forwarder as `OPEN_TERMINAL_RESOLVER`, and the image's entrypoint writes it
   into `resolv.conf`.
+
+### 2026-10-18, v1.0.0-rc.1 (branch `release/v1.0.0`), same VM
+
+Same VM and versions as 2026-10-13. Tree: alpha + PR #18 + the release fixes.
+
+| | Sysbox | gVisor |
+|---|---|---|
+| V1–V10, V12–V15 (`validate.sh`) | PASS (66 checks) | PASS (67 checks) |
+| V11 and the base checks (`run.sh`) | PASS (28 checks) | PASS in CI (`integration (gvisor)`) |
+| Full stack (`alpha-e2e.sh`: Keycloak, TLS, plugin path, console, desktops on their own origin, port forwards, admin console) | PASS (36 checks) | PASS (36 checks) |
+
+Found and fixed during this run:
+
+- PR #18 removed the global `ESTABLISHED,RELATED ACCEPT`; replies from a
+  terminal to the gateway and DNS answers from the forwarder are sandbox ->
+  sandbox and hit the terminal <-> terminal drop. With the firewall applied
+  V1, V2, V8, V9 and V15 failed (the gateway reached no terminal, DNS was
+  dead). `firewall.sh` now accepts only replies on connections the gateway
+  opened and the forwarder's answers on established DNS connections.
+- PR #18 dropped the executable bit of `firewall.sh` (and `oidc/run.sh`), so
+  the systemd units would fail with "Permission denied"; `make lint` now
+  checks it.
+- The gateway in the MCP overlay stayed unhealthy without a writable
+  `deploy/backups` (snapshots); `setup-alpha.sh` creates it.
+- `setup-alpha.sh` now creates the `entitlements.json` the MCP server needs
+  since PR #18 (deny all).
