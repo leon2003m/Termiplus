@@ -172,16 +172,19 @@ func TestForward(t *testing.T) {
 func TestRewriteLocation(t *testing.T) {
 	const p = "/ot-u-1/3000"
 	for in, want := range map[string]string{
-		"/":                          p + "/",
-		"/a/b?c=d":                   p + "/a/b?c=d",
-		p + "/already":               p + "/already",
-		"http://localhost:3000":      p + "/",
-		"https://localhost:3000/x":   p + "/x",
-		"http://localhost:30001/x":   "http://localhost:30001/x",
-		"//evil.example/x":           "//evil.example/x",
-		"/\\evil.example/x":          "/\\evil.example/x", // scheme-relative to a browser, like "//"
-		"relative/path":              "relative/path",
-		"https://other.example/path": "https://other.example/path",
+		"/":                        p + "/",
+		"/a/b?c=d":                 p + "/a/b?c=d",
+		p + "/already":             p + "/already",
+		"http://localhost:3000":    p + "/",
+		"https://localhost:3000/x": p + "/x",
+		"http://localhost:30001/x": "http://localhost:30001/x",
+		"//evil.example/x":         "//evil.example/x",
+		"/\\evil.example/x":        "/\\evil.example/x", // scheme-relative to a browser, like "//"
+		// The app's own URL is only shortened to a path that stays on this host.
+		"http://localhost:3000/\\evil.example": "http://localhost:3000/\\evil.example",
+		"http://localhost:3000//evil.example":  "http://localhost:3000//evil.example",
+		"relative/path":                        "relative/path",
+		"https://other.example/path":           "https://other.example/path",
 	} {
 		if got := rewriteLocation(in, "localhost:3000", p); got != want {
 			t.Errorf("rewriteLocation(%q) = %q, want %q", in, got, want)

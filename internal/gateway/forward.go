@@ -132,7 +132,7 @@ func dropAuthCookies(h http.Header) {
 // anything else (other sites, already prefixed paths) is left alone.
 func rewriteLocation(loc, local, prefix string) string {
 	for _, scheme := range []string{"http://", "https://"} {
-		if rest, ok := strings.CutPrefix(loc, scheme+local); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
+		if rest, ok := strings.CutPrefix(loc, scheme+local); ok && (rest == "" || isLocalPath(rest)) {
 			loc = rest
 			if loc == "" {
 				loc = "/"
