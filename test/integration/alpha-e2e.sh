@@ -272,14 +272,15 @@ code="$(browser -b "$JA" -o /dev/null -w '%{http_code}' https://desk.test/stream
 check "the console origin does not serve desktops" "$(lacks "$code" 200)" "$code"
 JAS="$WORK/jar-alice-stream"
 if login "$JAS" alice "$STREAM_URL"; then pass "alice signs in on the desktops' origin"; else fail "alice stream sign-in"; fi
-code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' "$STREAM_URL")"
-check "signed in, no desktop password: KasmVNC says 401" "$(is "$code" 401)" "$code"
+loc="$(browser -b "$JAS" -o /dev/null -w '%{redirect_url}' "$STREAM_URL")"
+check "the desktop page gets KasmVNC's WebSocket path" "$(has "$loc" "?path=stream%2F$SID%2Fwebsockify")" "$loc"
+# The gateway fills in KasmVNC's password: the sign-in is the only login.
 for _ in $(seq 1 60); do
-  code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' -u "user:$STREAM_PW" "$STREAM_URL")"
+  code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' "$loc")"
   [ "$code" = 200 ] && break
   sleep 2
 done
-check "signed in with the desktop password: the desktop page loads" "$(is "$code" 200)" "$code"
+check "signed in, no desktop password needed: the desktop page loads" "$(is "$code" 200)" "$code"
 ws() { # origin -> status line
   browser --http1.1 -b "$JAS" -u "user:$STREAM_PW" -i -o - -m 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: binary' \
@@ -295,10 +296,14 @@ code="$(browser -b "$JAS" -u "user:$STREAM_PW" -o /dev/null -w '%{http_code}' -H
 check "service-worker scripts are refused on the desktops' origin" "$(is "$code" 403)" "$code"
 JBS="$WORK/jar-bob-stream"
 login "$JBS" bob "$STREAM_URL" || fail "bob stream sign-in"
-code="$(browser -b "$JBS" -o /dev/null -w '%{http_code}' -u "user:wrong" "$STREAM_URL")"
+code="$(browser -b "$JBS" -o /dev/null -w '%{http_code}' "$loc")"
 check "bob cannot open alice's desktop" "$(lacks "$code" 200)" "$code"
-code="$(browser -b "$JBS" -o /dev/null -w '%{http_code}' -u "user:$STREAM_PW" "$STREAM_URL")"
+code="$(browser -b "$JBS" -o /dev/null -w '%{http_code}' -u "user:$STREAM_PW" "$loc")"
 check "bob cannot open alice's desktop even with its password" "$(lacks "$code" 200)" "$code"
+out="$(browser --http1.1 -b "$JBS" -i -o - -m 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: binary' \
+  -H 'Origin: https://stream.test' "${STREAM_URL}websockify" | head -1 | tr -d '\r' || true)"
+check "bob gets no WebSocket to alice's desktop" "$(lacks "$out" " 101 ")" "$out"
 
 log "port forwarding (own origin, owner only)"
 docker exec -u 1000 -d "$SID" sh -c 'mkdir -p /tmp/app && cd /tmp/app && echo hi-from-app > index.html && exec python3 -m http.server 3000'
