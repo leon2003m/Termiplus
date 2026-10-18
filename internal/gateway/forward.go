@@ -51,7 +51,7 @@ func (g *Gateway) serveForward(w http.ResponseWriter, r *http.Request, userID, r
 	addr := g.mgr.addrFor(name, port)
 	target := &url.URL{Scheme: "http", Host: addr}
 	prefix := r.Header.Get(forwardPrefixHeader)
-	if !strings.HasPrefix(prefix, "/") || strings.ContainsAny(prefix, "\r\n") {
+	if !isLocalPath(prefix) || strings.ContainsAny(prefix, "\r\n") {
 		prefix = ""
 	}
 	local := "localhost:" + portStr
@@ -140,8 +140,14 @@ func rewriteLocation(loc, local, prefix string) string {
 			break
 		}
 	}
-	if strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, "//") && !strings.HasPrefix(loc, prefix+"/") {
+	if isLocalPath(loc) && !strings.HasPrefix(loc, prefix+"/") {
 		return prefix + loc
 	}
 	return loc
+}
+
+// isLocalPath: p is a path on this host. "//x" and "/\x" are other hosts to a
+// browser (scheme-relative), so they are not.
+func isLocalPath(p string) bool {
+	return strings.HasPrefix(p, "/") && (len(p) == 1 || (p[1] != '/' && p[1] != '\\'))
 }
