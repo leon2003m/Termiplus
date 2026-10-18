@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"bytes"
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -153,17 +152,17 @@ func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, hom
 		w.Header().Set("Content-Type", "application/x-tar")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="home-%s.tar"`, home))
 	}}
-	// The reader paces the export and the helper lock is held meanwhile, so
-	// every export has an absolute deadline.
-	ctx, cancel := context.WithTimeout(r.Context(), g.cfg.ExportTimeout)
-	defer cancel()
-	err := g.mgr.exportHome(ctx, userID, home, sw)
+	// The reader paces the export and the helper lock is held meanwhile;
+	// manager.exportHome adds the deadline and the byte cap.
+	err := g.mgr.exportHome(r.Context(), userID, home, sw)
 	switch {
 	case err == nil && !sw.started:
 		sw.header()
 		w.WriteHeader(http.StatusOK)
 	case errors.Is(err, errNoHome) && !sw.started:
 		httpError(w, http.StatusNotFound, "no such home")
+	case errors.Is(err, errExportTooLarge) && !sw.started:
+		httpError(w, http.StatusRequestEntityTooLarge, "the home is larger than the export limit")
 	case err != nil && !sw.started:
 		log.Printf("export home %s of %s: %v", home, userID, err)
 		httpError(w, http.StatusBadGateway, "could not read the home")

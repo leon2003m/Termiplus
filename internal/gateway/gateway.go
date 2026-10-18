@@ -53,6 +53,14 @@ type Config struct {
 
 	// ExportTimeout bounds one home export (download, backup). Default 2h.
 	ExportTimeout time.Duration
+	// ExportMaxBytes caps the tar stream of one home export (download,
+	// snapshot, archive). A home quota counts allocated blocks, so a sparse
+	// file costs almost nothing there but its full apparent size here. 0 means
+	// no cap.
+	ExportMaxBytes int64
+	// ExportConcurrency is how many home exports run at once across all users
+	// (default 4); further ones wait, within their deadline.
+	ExportConcurrency int
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
@@ -131,6 +139,12 @@ func New(cfg Config) (*Gateway, error) {
 	if cfg.ExportTimeout <= 0 {
 		cfg.ExportTimeout = 2 * time.Hour
 	}
+	if cfg.ExportMaxBytes < 0 {
+		return nil, errors.New("export max bytes must not be negative")
+	}
+	if cfg.ExportConcurrency <= 0 {
+		cfg.ExportConcurrency = 4
+	}
 	if cfg.AddrFor == nil {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }
 	}
@@ -146,8 +160,13 @@ func New(cfg Config) (*Gateway, error) {
 		policies:     cfg.Policies,
 		addrFor:      cfg.AddrFor,
 		forwarderDNS: cfg.ForwarderDNS,
-		instances:    map[string]*instance{},
-		locks:        map[string]*sync.Mutex{},
+		exportLimits: exportLimits{
+			timeout:  cfg.ExportTimeout,
+			maxBytes: cfg.ExportMaxBytes,
+			slots:    make(chan struct{}, cfg.ExportConcurrency),
+		},
+		instances: map[string]*instance{},
+		locks:     map[string]*sync.Mutex{},
 	}
 	return &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}, nil
 }

@@ -55,3 +55,16 @@ func TestSecretRequiredTooShortExits(t *testing.T) {
 		t.Fatalf("missing expected message, got %q", out)
 	}
 }
+
+func TestParseSize(t *testing.T) {
+	for in, want := range map[string]int64{"0": 0, "1024": 1024, "512M": 512 << 20, "20g": 20 << 30, " 1T ": 1 << 40} {
+		if got, err := ParseSize(in); err != nil || got != want {
+			t.Errorf("ParseSize(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "-1", "1.5G", "20GB", "G", "99999999999T"} {
+		if _, err := ParseSize(bad); err == nil {
+			t.Errorf("ParseSize(%q) accepted", bad)
+		}
+	}
+}

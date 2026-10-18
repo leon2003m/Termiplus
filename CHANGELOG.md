@@ -36,6 +36,7 @@ All notable changes to this project are documented here. The format is based on 
 - Gateway: container starts reserve their slot atomically, so concurrent requests can no longer exceed `MAX_RUNNING` or an ephemeral policy's `max_per_user`.
 - Network policy: DNS entry IPs with an IPv6 zone are refused (they skipped the never-allowed check), and the hosts file is rendered only from the canonical, checked address.
 - Home exports (admin API downloads, backups) have an absolute deadline (`EXPORT_TIMEOUT`, default 2h), and work that waits for a home's archive helper (removing or archiving the home) gives up with its context instead of waiting behind a slowly read download.
+- Home exports stop at `EXPORT_MAX_BYTES` (default: `HOME_VOLUME_SIZE` + 1/8 + 64M), so a sparse file, which costs almost nothing against the home quota, can no longer stream an unbounded tar through the shared gateway and socket proxy. At most `EXPORT_CONCURRENCY` (4) exports run at once, and `EXPORT_TIMEOUT` is applied by the gateway's export itself.
 
 ### Changed
 
