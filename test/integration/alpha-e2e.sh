@@ -86,7 +86,7 @@ fi
 
 log "prepare deployment (runtime $RUNTIME)"
 cp -r "$ROOT/deploy" "$WORK/deploy"
-rm -rf "$WORK/deploy/secrets" "$WORK/deploy/.env" "$WORK/deploy/mcp-data"
+rm -rf "$WORK/deploy/secrets" "$WORK/deploy/.env" "$WORK/deploy/mcp-data" "$WORK/deploy/backups"
 mkdir -p "$WORK/deploy/secrets"
 for s in proxy_token gateway_api_key key_secret; do
   openssl rand -hex 32 | tr -d '\n' >"$WORK/deploy/secrets/$s"
@@ -99,7 +99,7 @@ check "setup-alpha.sh starts closed (entitlements deny all)" \
 # Test-only: every workspace open, so the scenarios below need no admin step
 # first; the admin console part narrows it again.
 printf '{"default":"allow","workspaces":{}}\n' >"$WORK/deploy/mcp-data/entitlements.json"
-chown -R 65534:65534 "$WORK/deploy/mcp-data"
+chown -R 65534:65534 "$WORK/deploy/mcp-data" "$WORK/deploy/backups"
 cat >"$WORK/deploy/policies.json" <<JSON
 {
   "default": { "runtime": "$RUNTIME", "memory_mb": 1024, "cpus": 1, "pids": 512 },

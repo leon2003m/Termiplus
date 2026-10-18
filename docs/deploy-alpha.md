@@ -20,14 +20,16 @@ DESKTOP_PUBLIC_URL=https://desk.example.com \
 DESKTOP_STREAM_URL=https://desktops.example.com \
 FORWARD_PUBLIC_URL=https://fwd.example.com \
 deploy/setup-alpha.sh
-sudo chown 65534:65534 deploy/mcp-data
+sudo chown -R 65534:65534 deploy/mcp-data deploy/backups
 ```
 
 `setup-alpha.sh` creates every missing secret under `deploy/secrets/` (it
 never overwrites one), renders the Keycloak realm (clients `owui`,
 `termiplus-mcp`, `termiplus-desktop`; groups `termiplus-users`,
 `termiplus-persist`, `termiplus-admin`), writes `deploy/.env` and prints the
-Open WebUI settings. It starts nothing.
+Open WebUI settings. It also creates `deploy/mcp-data/entitlements.json`, which
+denies every workspace until an admin grants them in the console, and
+`deploy/backups/` for home snapshots (mode 0700). It starts nothing.
 
 ## 2. TLS and names
 

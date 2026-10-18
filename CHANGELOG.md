@@ -15,6 +15,7 @@ From an alpha deployment:
 - **Entitlements file required.** With `MCP_AUTH=proxy` the MCP server refuses to start without `MCP_ENTITLEMENTS_FILE` (`deploy/mcp-data/entitlements.json`). `setup-alpha.sh` creates one that denies everything; for an existing deployment create it from `deploy/entitlements.example.json` (or `{"default":"allow","workspaces":{}}` to keep the old open behaviour) and owned by uid 65534.
 - **Desktops on their own origin.** Set `DESKTOP_STREAM_URL`, route it with TLS to `127.0.0.1:4183` (`desk-stream-auth`), run `setup-alpha.sh` once for the secret `dstream_oidc_cookie_secret`, and add `${DESKTOP_STREAM_URL}/oauth2/callback` as a redirect URI of the `termiplus-desktop` client in existing realms.
 - an identity file that maps two subjects to one Open WebUI user id makes the MCP server refuse to start; remove the stale entry first (docs/mcp.md).
+- **Snapshot directory.** The gateway in the MCP overlay needs `deploy/backups/` owned by uid 65534 (`setup-alpha.sh` creates it; then `sudo chown 65534:65534 deploy/backups`), or it stays unhealthy with `backup dir: ... permission denied`.
 - **Run `deploy/firewall.sh` once by hand** after upgrading (as root): the watch timer only reapplies missing rules, so a host keeps the previous rule set, including the old global `ESTABLISHED,RELATED ACCEPT`, until a full run.
 - **Numeric settings are range-checked** at startup (see Security); a deployment with an out-of-range value stops with a message naming the setting.
 

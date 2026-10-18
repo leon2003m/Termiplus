@@ -112,6 +112,14 @@ if [ ! -d "$DEPLOY/mcp-data" ]; then
   echo "created  mcp-data/ - make it writable for the MCP server:"
   echo "           sudo chown 65534:65534 $DEPLOY/mcp-data"
 fi
+# Home snapshots and departed-user archives (BACKUP_DIR of the gateway). Owner
+# only: the archives hold users' files.
+if [ ! -d "$DEPLOY/backups" ]; then
+  mkdir -p "$DEPLOY/backups"
+  chmod 0700 "$DEPLOY/backups"
+  echo "created  backups/ - make it writable for the gateway:"
+  echo "           sudo chown 65534:65534 $DEPLOY/backups"
+fi
 # The MCP server refuses to start without an entitlements file (MCP_AUTH=proxy).
 # Start closed: no workspace for anyone until an admin grants them in the
 # console (Admin -> Entitlements) or with set_entitlements.
