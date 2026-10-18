@@ -20,7 +20,8 @@ You will get an acknowledgement within 7 days. Fixes for confirmed issues are re
 
 | Version | Supported |
 |---|---|
-| latest release on `main` | yes |
+| latest 1.x release | yes |
+| release candidates (`-rc.N`) | until the final release of that version |
 | older releases | no, please update |
 | `dev` branch | best effort |
 
@@ -30,6 +31,8 @@ You will get an acknowledgement within 7 days. Fixes for confirmed issues are re
 - reaching another user's container, files or sessions
 - using the socket proxy to do anything outside its allowlist
 - bypassing gateway authentication or impersonating another user
+- bypassing the MCP server's sign-in, roles, entitlements or confirmations, or acting as another user through the console, desktops, share links or port forwards
+- script from a desktop, a share link or a forwarded app acting on the console's origin
 - reaching private networks or the host from a terminal despite `deploy/firewall.sh`
 
 ## Out of scope
@@ -45,4 +48,18 @@ You will get an acknowledgement within 7 days. Fixes for confirmed issues are re
 - gVisor or Sysbox runtimes; `runc` is refused
 - sandbox network without access to private ranges, other terminals or the host
 - non-root, read-only service containers with all capabilities dropped
-- CI: secret scanning (gitleaks), Go vulnerability scanning (govulncheck), image and configuration scanning (Trivy), all third-party actions pinned to commit SHAs
+- sign-in only through oauth2-proxy in front of every browser- and plugin-facing listener; the console, desktops and port forwards each on an origin of their own
+- CI: secret scanning (gitleaks), Go vulnerability scanning (govulncheck), image and configuration scanning (Trivy), CodeQL, all third-party actions pinned to commit SHAs
+- `main` changes only through pull requests with all checks green; releases are published only after the maintainer's approval
+
+## Verifying a release
+
+Every release image is signed keylessly with Sigstore cosign by this repository's release workflow and carries a build provenance attestation and an SBOM. Pin images by digest (the release notes list them) and verify before deploying:
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/leon2003m/Termiplus/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/leon2003m/termiplus-gateway@sha256:<digest>
+gh attestation verify oci://ghcr.io/leon2003m/termiplus-gateway@sha256:<digest> --repo leon2003m/Termiplus
+```

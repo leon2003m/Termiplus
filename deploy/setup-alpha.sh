@@ -112,6 +112,16 @@ if [ ! -d "$DEPLOY/mcp-data" ]; then
   echo "created  mcp-data/ - make it writable for the MCP server:"
   echo "           sudo chown 65534:65534 $DEPLOY/mcp-data"
 fi
+# The MCP server refuses to start without an entitlements file (MCP_AUTH=proxy).
+# Start closed: no workspace for anyone until an admin grants them in the
+# console (Admin -> Entitlements) or with set_entitlements.
+if [ ! -e "$DEPLOY/mcp-data/entitlements.json" ]; then
+  if printf '{\n  "default": "deny",\n  "workspaces": {}\n}\n' >"$DEPLOY/mcp-data/entitlements.json" 2>/dev/null; then
+    echo "created  mcp-data/entitlements.json (deny all; grant workspaces in the console)"
+  else
+    echo "cannot write mcp-data/entitlements.json; create it from deploy/entitlements.example.json"
+  fi
+fi
 
 ISSUER="$KEYCLOAK_PUBLIC_URL/realms/termiplus"
 ENVFILE="$DEPLOY/.env"
