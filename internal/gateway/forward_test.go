@@ -179,6 +179,7 @@ func TestRewriteLocation(t *testing.T) {
 		"https://localhost:3000/x":   p + "/x",
 		"http://localhost:30001/x":   "http://localhost:30001/x",
 		"//evil.example/x":           "//evil.example/x",
+		"/\\evil.example/x":          "/\\evil.example/x", // scheme-relative to a browser, like "//"
 		"relative/path":              "relative/path",
 		"https://other.example/path": "https://other.example/path",
 	} {
