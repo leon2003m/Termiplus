@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-10-18
+
+Same code as 1.0.0-rc.1, whose release run stopped before the GitHub release because the desktop image failed to build for arm64. The rc.1 images that were already pushed (gateway, sockproxy, mcp, terminal, dns-forwarder) are superseded by rc.2. Upgrade notes and changes: see 1.0.0-rc.1 below.
+
+### Fixed
+
+- Release: the desktop image is built for linux/amd64 only. KasmVNC is installed from its amd64 package; the other images stay multi-arch.
+
 ## [1.0.0-rc.1] - 2026-10-18
 
 First release candidate of termiplus 1.0: per-user sandboxed Open Terminal workspaces for Open WebUI, managed over MCP, with OIDC sign-in, desktops and a management console. Everything is new; the entries below list what it contains.
