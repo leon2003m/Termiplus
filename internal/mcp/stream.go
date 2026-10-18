@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -25,18 +26,56 @@ type streamProxy struct {
 	ids        *IdentityStore
 	gateway    *url.URL
 	controlKey string
+	console    string // console base URL for the "not running" page, or ""
 }
 
-// WithStream makes the UI listener serve desktops through the gateway at
-// gatewayBase.
-func (u *UI) WithStream(gatewayBase, controlKey string) (*UI, error) {
+// DesktopHandler serves desktops (/stream/<session>/) and share links
+// (/share/<token>/) on their own listener (STREAM_LISTEN_ADDR), which must be
+// published on an origin of its own (DESKTOP_STREAM_URL) behind its own
+// sign-in proxy and cookie. Desktop content is controlled by whoever runs code
+// in the desktop, so it must never share an origin with the console and its
+// API: same-origin script could otherwise act as the signed-in user there
+// (security audit run 1). For the same reason responses lose every header that
+// grants origin-wide browser state, and service workers are refused.
+type DesktopHandler struct {
+	proxy  *streamProxy
+	shares *ShareStore
+}
+
+// NewDesktopHandler proxies desktops through the gateway at gatewayBase.
+// srv provides the share store and the console URL.
+func NewDesktopHandler(srv *Server, ids *IdentityStore, gatewayBase, controlKey string) (*DesktopHandler, error) {
 	g, err := url.Parse(strings.TrimSuffix(gatewayBase, "/"))
 	if err != nil {
 		return nil, err
 	}
-	u.stream = &streamProxy{ids: u.ids, gateway: g, controlKey: controlKey}
-	return u, nil
+	return &DesktopHandler{
+		proxy:  &streamProxy{ids: ids, gateway: g, controlKey: controlKey, console: srv.uiBase},
+		shares: srv.shares,
+	}, nil
 }
+
+func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/healthz":
+		uiJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	case r.Header.Get("Service-Worker") != "":
+		// A worker registered here would outlive the desktop and control the
+		// whole origin for later sign-ins; KasmVNC needs none.
+		forwardError(w, http.StatusForbidden, "Service workers are not allowed on desktops.")
+	case strings.HasPrefix(r.URL.Path, streamPathPrefix):
+		d.proxy.ServeHTTP(w, r)
+	case strings.HasPrefix(r.URL.Path, sharePathPrefix) && d.shares != nil:
+		d.proxy.serveShare(w, r, d.shares)
+	default:
+		forwardError(w, http.StatusNotFound, "Not found.")
+	}
+}
+
+// untrustedResponseHeaders grant browser state beyond one desktop's path
+// (cookies on the origin, worker scope, wiping site data) and are dropped
+// from every desktop response.
+var untrustedResponseHeaders = []string{"Www-Authenticate", "Set-Cookie", "Service-Worker-Allowed", "Clear-Site-Data"}
 
 func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
@@ -78,7 +117,11 @@ func (s *streamProxy) serveShare(w http.ResponseWriter, r *http.Request, shares 
 	if r.URL.Path == sharePathPrefix+token+"/" && r.Method == http.MethodGet {
 		log.Printf("share %s (%s of %s) opened by %s", sh.ID, sh.Session, sh.Owner, p.UserID)
 	}
-	s.proxy(w, r, sharePathPrefix+token, sh.Session, sh.Owner, true)
+	// The relay (usually the desktop's WebSocket) ends when the share expires
+	// or is revoked, not only when one side closes it.
+	ctx, done := shares.relayContext(r.Context(), sh)
+	defer done()
+	s.proxy(w, r.WithContext(ctx), sharePathPrefix+token, sh.Session, sh.Owner, true)
 }
 
 // proxy passes a desktop request below base (e.g. /stream/<session>) to the
@@ -108,6 +151,7 @@ func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, sessio
 		return
 	}
 	rp := &httputil.ReverseProxy{
+		Transport: streamTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(s.gateway)
 			pr.Out.URL.Path = s.gateway.Path + "/control/v1/stream/" + session + "/" + rest
@@ -126,11 +170,13 @@ func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, sessio
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			resp.Header.Del("Www-Authenticate")
+			for _, h := range untrustedResponseHeaders {
+				resp.Header.Del(h)
+			}
 			if isPage && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadGateway) {
 				resp.Body.Close()
 				resp.Header = http.Header{}
-				page := stoppedPage
+				page := stoppedPage(s.console, session)
 				if view {
 					// A viewer cannot start someone else's desktop.
 					page = sharedStoppedPage
@@ -165,26 +211,30 @@ func isUpgrade(r *http.Request) bool {
 	return r.Header.Get("Upgrade") != ""
 }
 
-// stoppedPage replaces a desktop that does not answer; ui/desktop.js says
-// why and offers to start it.
-const stoppedPage = `<!doctype html>
+// stoppedPage replaces a desktop that does not answer. The desktop origin has
+// no console API, so it links to the console's desktop page (ui/desktop.html),
+// which says why and offers to start it.
+func stoppedPage(console, session string) string {
+	link := ""
+	if console != "" {
+		u := console + "/ui/desktop.html?session=" + url.QueryEscape(session)
+		link = `<p><a href="` + html.EscapeString(u) + `">Start it from the console</a></p>`
+	}
+	return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>termiplus desktop</title>
-<link rel="stylesheet" href="/ui/app.css">
-<script src="/ui/desktop.js" defer></script>
 </head>
-<body>
-<header><h1>termiplus</h1></header>
-<main>
-  <p id="status" role="status">Loading …</p>
-  <p><button id="start" class="primary" type="button" hidden>Start desktop</button> <a class="button" href="/ui/">Console</a></p>
-</main>
+<body style="font-family: system-ui, sans-serif; margin: 2em">
+<h1>termiplus</h1>
+<p role="status">This desktop is not running (stopped, still starting, or removed).</p>
+` + link + `
 </body>
 </html>
 `
+}
 
 const sharedStoppedPage = `<!doctype html>
 <html lang="en">
@@ -192,20 +242,17 @@ const sharedStoppedPage = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>termiplus desktop</title>
-<link rel="stylesheet" href="/ui/app.css">
 </head>
-<body>
-<header><h1>termiplus</h1></header>
-<main>
-  <p role="status">The shared desktop is not running right now. Ask its owner to start it, then reload this page.</p>
-</main>
+<body style="font-family: system-ui, sans-serif; margin: 2em">
+<h1>termiplus</h1>
+<p role="status">The shared desktop is not running right now. Ask its owner to start it, then reload this page.</p>
 </body>
 </html>
 `
 
 func setStoppedPage(h http.Header) {
 	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 }

@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"termiplus/internal/naming"
 )
 
 // Forwarder serves port forwards (FWD_LISTEN_ADDR) behind their own sign-in
@@ -49,7 +51,10 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	session, tail, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	port, _, hasSlash := strings.Cut(tail, "/")
-	if session == "" || port == "" {
+	// The session must be a container name: anything else (a backslash, an
+	// encoded slash) could turn the trailing-slash redirect below into a
+	// redirect to another site (security audit run 1).
+	if !naming.IsManagedContainer(session) || port == "" {
 		forwardError(w, http.StatusNotFound, "Open /<session>/<port>/ - the console lists your sessions.")
 		return
 	}
@@ -69,6 +74,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rp := &httputil.ReverseProxy{
+		Transport: forwardTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(f.gateway)
 			pr.Out.URL.Path = f.gateway.Path + "/control/v1/forward" + pr.In.URL.Path

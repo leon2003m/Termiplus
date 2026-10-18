@@ -34,6 +34,11 @@ func fakeKasm(t *testing.T, password string, viewPassword ...string) *httptest.S
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Headers a hostile desktop could send to plant browser state on
+		// the desktops' origin; the gateway and the MCP server drop them.
+		w.Header().Set("Set-Cookie", "planted=1; Path=/")
+		w.Header().Set("Service-Worker-Allowed", "/")
+		w.Header().Set("Clear-Site-Data", `"cookies"`)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"path": r.URL.Path, "cookie": r.Header.Get("Cookie"), "user": r.Header.Get("X-User-Id"), "as": u,
 			"view": r.Header.Get("X-Stream-View"),
@@ -161,11 +166,14 @@ func TestDesktopStream(t *testing.T) {
 	// The owner gets in without any password of their own: the gateway fills
 	// in KasmVNC's (fakeKasm rejects anything else), replacing whatever the
 	// client sent, and strips cookies and identity headers.
-	code, _, b = streamGet(t, h.gw.URL, desk.ID+"/websockify?x=1", "alice", map[string]string{
+	code, hdr, b := streamGet(t, h.gw.URL, desk.ID+"/websockify?x=1", "alice", map[string]string{
 		"Authorization": "Basic dXNlcjp3cm9uZw==", "Cookie": "_termiplus_desk=secret",
 		"X-Forwarded-User": "kc-alice"})
 	if code != http.StatusOK {
 		t.Fatalf("owner: want 200, got %d %s", code, b)
+	}
+	if hdr.Get("Set-Cookie") != "" || hdr.Get("Service-Worker-Allowed") != "" || hdr.Get("Clear-Site-Data") != "" {
+		t.Fatalf("gateway passed untrusted desktop headers: %v", hdr)
 	}
 	var seen map[string]string
 	_ = json.Unmarshal([]byte(b), &seen)
@@ -249,11 +257,15 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = ids.Record("kc-alice", "alice")
-	ui, err := mcp.NewUI(srv, ids).WithStream(h.gw.URL, testControlKey)
+	srv.WithUIBase("https://console.example")
+	dh, err := mcp.NewDesktopHandler(srv, ids, h.gw.URL, testControlKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	front := httptest.NewServer(ui)
+	front := httptest.NewServer(dh) // the desktops' own origin
+	t.Cleanup(front.Close)
+	console := httptest.NewServer(mcp.NewUI(srv, ids))
+	t.Cleanup(console.Close)
 	t.Cleanup(front.Close)
 	get := func(sub, path string, hdr map[string]string) (int, http.Header) {
 		req, _ := http.NewRequest(http.MethodGet, front.URL+path, nil)
@@ -280,6 +292,15 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	if code, hdr := get("kc-alice", wantLoc, map[string]string{"X-User-Id": "bob"}); code != http.StatusOK || hdr.Get("Www-Authenticate") != "" {
 		t.Fatalf("alice's desktop: %d %v", code, hdr)
 	}
+	// Desktop content cannot set cookies, widen a service worker's scope or
+	// clear the origin's data, and cannot register a service worker at all
+	// (security audit run 1).
+	if _, hdr := get("kc-alice", wantLoc, nil); hdr.Get("Set-Cookie") != "" || hdr.Get("Service-Worker-Allowed") != "" || hdr.Get("Clear-Site-Data") != "" {
+		t.Fatalf("untrusted headers passed: %v", hdr)
+	}
+	if code, _ := get("kc-alice", path+"sw.js", map[string]string{"Service-Worker": "script"}); code != http.StatusForbidden {
+		t.Fatalf("service worker script: %d", code)
+	}
 	if code, _ := get("kc-alice", "/stream/"+bob.ID+"/app.js", nil); code != http.StatusNotFound {
 		t.Fatalf("bob's desktop for alice: %d", code)
 	}
@@ -287,7 +308,7 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	// same as a stopped one) gets the start page; assets keep the error.
 	bobPage := "/stream/" + bob.ID + "/?path=x"
 	if code, hdr := get("kc-alice", bobPage, nil); code != http.StatusNotFound ||
-		!strings.HasPrefix(hdr.Get("Content-Type"), "text/html") || !strings.Contains(hdr.Get("Content-Security-Policy"), "default-src 'self'") {
+		!strings.HasPrefix(hdr.Get("Content-Type"), "text/html") || !strings.Contains(hdr.Get("Content-Security-Policy"), "default-src 'none'") {
 		t.Fatalf("start page: %d %v", code, hdr)
 	}
 	if _, hdr := get("kc-alice", "/stream/"+bob.ID+"/app.js", nil); strings.HasPrefix(hdr.Get("Content-Type"), "text/html") {
@@ -305,7 +326,7 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	// The start page looks the desktop up: running, gone but restartable
 	// (persistent), or someone else's (unknown).
 	desk := func(id string) (int, string) {
-		req, _ := http.NewRequest(http.MethodGet, front.URL+"/ui/api/desktops/"+id, nil)
+		req, _ := http.NewRequest(http.MethodGet, console.URL+"/ui/api/desktops/"+id, nil)
 		req.Header.Set("X-Forwarded-User", "kc-alice")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

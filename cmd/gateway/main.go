@@ -76,7 +76,9 @@ func main() {
 		BackupDir:    config.Get("BACKUP_DIR", ""),
 		SnapshotKeep: int(config.Int("SNAPSHOT_KEEP", 5)),
 		// Upper bound for one home export (download or backup).
-		ExportTimeout: config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
+		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
+		ExportMaxBytes:    exportMaxBytes(),
+		ExportConcurrency: int(config.Int("EXPORT_CONCURRENCY", 4)),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -139,4 +141,26 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// exportMaxBytes is EXPORT_MAX_BYTES (e.g. "25G", "0" for no cap) or, when it
+// is unset, derived from HOME_VOLUME_SIZE: the quota plus an eighth plus 64M
+// for tar headers. A home within its quota then always fits, while a sparse
+// file cannot stretch an export far beyond what the user is charged.
+func exportMaxBytes() int64 {
+	if v := config.Get("EXPORT_MAX_BYTES", ""); v != "" {
+		n, err := config.ParseSize(v)
+		if err != nil {
+			log.Fatalf("EXPORT_MAX_BYTES: %v", err)
+		}
+		return n
+	}
+	if v := config.Get("HOME_VOLUME_SIZE", ""); v != "" {
+		n, err := config.ParseSize(v)
+		if err != nil {
+			log.Fatalf("HOME_VOLUME_SIZE: %v", err)
+		}
+		return n + n/8 + 64<<20
+	}
+	return 0
 }

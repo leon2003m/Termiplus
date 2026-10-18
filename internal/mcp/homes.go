@@ -158,6 +158,13 @@ func (s *Server) WithUIBase(u string) *Server {
 	return s
 }
 
+// WithDesktopBase sets the browser-facing base URL of the desktops' own
+// origin (STREAM_PUBLIC_URL), used for share links.
+func (s *Server) WithDesktopBase(u string) *Server {
+	s.desktopBase = strings.TrimSuffix(u, "/")
+	return s
+}
+
 // downloadURL is the console link that downloads a home or a snapshot.
 func (s *Server) downloadURL(workspace, id string) string {
 	if s.uiBase == "" {
@@ -277,7 +284,33 @@ func (s *Server) homeTools() []tool {
 			inputSchema: `{"type":"object","properties":{"action":{"type":"string","enum":["list","create","restore","delete"]},"workspace":{"type":"string"},"snapshot_id":{"type":"string"}},"required":["action","workspace"],"additionalProperties":true}`,
 			destructive: true,
 			gate:        s.snapshotsGate,
+			confirmIf:   s.snapshotWouldPrune,
 			handle:      s.manageSnapshots,
 		},
 	}
+}
+
+// snapshotWouldPrune: a create that pushes out the oldest snapshot deletes
+// it, so it needs the same human confirmation as delete (security audit
+// run 1). When the count cannot be read, ask rather than risk it.
+func (s *Server) snapshotWouldPrune(ctx context.Context, p Principal, args map[string]any) bool {
+	if argString(args, "action") != "create" {
+		return false
+	}
+	hb, err := s.homeBackend()
+	if err != nil {
+		return false // the handler reports that create is unavailable
+	}
+	raw, err := hb.Snapshots(ctx, p, argString(args, "workspace"), "list", "")
+	if err != nil {
+		return true
+	}
+	var list struct {
+		Snapshots []json.RawMessage `json:"snapshots"`
+		Keep      int               `json:"keep"`
+	}
+	if json.Unmarshal(raw, &list) != nil || list.Keep <= 0 {
+		return true
+	}
+	return len(list.Snapshots) >= list.Keep
 }

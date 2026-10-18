@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,5 +75,61 @@ func TestShareStoreExpiryLimitsAndHashing(t *testing.T) {
 	}
 	if err := st.Revoke("alice", id); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Revoking a share ends the connections viewers have open through it, and a
+// relay started after the revoke never runs (security audit run 1).
+func TestShareRevokeCancelsOpenRelays(t *testing.T) {
+	st, err := OpenShareStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, _, err := st.Create("alice", "ot-u-x", "desk", time.Hour, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx1, done1 := st.relayContext(context.Background(), sh)
+	defer done1()
+	ctx2, done2 := st.relayContext(context.Background(), sh)
+	done2() // a finished request is forgotten
+	if ctx1.Err() != nil || ctx2.Err() == nil {
+		t.Fatal("relay contexts before the revoke")
+	}
+	if err := st.Revoke("alice", sh.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx1.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("open relay survived the revoke")
+	}
+	ctx3, done3 := st.relayContext(context.Background(), sh)
+	defer done3()
+	if ctx3.Err() == nil {
+		t.Fatal("relay through a revoked share")
+	}
+	st.mu.Lock()
+	n := len(st.relays)
+	st.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d relay sets left", n)
+	}
+}
+
+// A relay through a share ends when the share expires.
+func TestShareRelayEndsAtExpiry(t *testing.T) {
+	st, _ := OpenShareStore("")
+	sh, _, err := st.Create("alice", "ot-u-x", "desk", time.Hour, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Expires = time.Now().Add(100 * time.Millisecond)
+	ctx, done := st.relayContext(context.Background(), sh)
+	defer done()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay outlived the share")
 	}
 }

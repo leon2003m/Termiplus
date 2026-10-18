@@ -5,6 +5,7 @@
 #   WEBUI_URL=https://chat.example.com \
 #   KEYCLOAK_PUBLIC_URL=https://sso.example.com \
 #   DESKTOP_PUBLIC_URL=https://desk.example.com \
+#   DESKTOP_STREAM_URL=https://desktops.example.com \
 #   FORWARD_PUBLIC_URL=https://fwd.example.com \
 #   deploy/setup-alpha.sh
 #
@@ -20,8 +21,9 @@ SECRETS="$DEPLOY/secrets"
 : "${WEBUI_URL:?set WEBUI_URL (how browsers reach Open WebUI, https://...)}"
 : "${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL (https://... in front of Keycloak)}"
 : "${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL (https://... in front of desk-auth)}"
+: "${DESKTOP_STREAM_URL:?set DESKTOP_STREAM_URL (https://... in front of desk-stream-auth, its own origin)}"
 : "${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL (https://... in front of fwd-auth, its own origin)}"
-for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL" "$FORWARD_PUBLIC_URL"; do
+for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL" "$DESKTOP_STREAM_URL" "$FORWARD_PUBLIC_URL"; do
   case "$u" in
     https://*) ;;
     *) echo "setup-alpha: $u must be an https:// URL (cookies are Secure)" >&2; exit 1 ;;
@@ -29,8 +31,17 @@ for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL" "$FORWARD_PUB
   case "$u" in */) echo "setup-alpha: $u must not end with /" >&2; exit 1 ;; esac
 done
 
+if [ "${DESKTOP_STREAM_URL#https://}" = "${DESKTOP_PUBLIC_URL#https://}" ]; then
+  echo "setup-alpha: DESKTOP_STREAM_URL must be another origin than DESKTOP_PUBLIC_URL (desktop content must not run on the console's origin)" >&2
+  exit 1
+fi
+
 umask 077
 mkdir -p "$SECRETS"
+# The files below are readable for the containers' non-root users (bind
+# mounts do not consult the directory); the directory keeps everyone else on
+# the host out, also when it was created earlier with a looser umask.
+chmod 0700 "$SECRETS"
 
 # secret NAME BYTES: create deploy/secrets/NAME with random hex, unless present.
 secret() {
@@ -49,6 +60,7 @@ secret mcp_oidc_cookie_secret 16
 secret mcp_kc_admin_client_secret 32
 secret desk_oidc_client_secret 32
 secret desk_oidc_cookie_secret 16
+secret dstream_oidc_cookie_secret 16
 secret fwd_oidc_client_secret 32
 secret fwd_oidc_cookie_secret 16
 secret owui_oidc_client_secret 32
@@ -57,7 +69,7 @@ secret keycloak_db_password 32
 secret keycloak_admin_password 24
 
 # The services read these as non-root users.
-chmod 0644 "$SECRETS"/control_api_key "$SECRETS"/mcp_* "$SECRETS"/desk_* "$SECRETS"/fwd_* "$SECRETS"/keycloak_db_password
+chmod 0644 "$SECRETS"/control_api_key "$SECRETS"/mcp_* "$SECRETS"/desk_* "$SECRETS"/dstream_* "$SECRETS"/fwd_* "$SECRETS"/keycloak_db_password
 
 if [ -s "$SECRETS/keycloak.env" ]; then
   echo "keep     secrets/keycloak.env"
@@ -78,6 +90,7 @@ src, dst = sys.argv[1], sys.argv[2]
 values = {
     "__WEBUI_URL__": "$WEBUI_URL",
     "__DESKTOP_PUBLIC_URL__": "$DESKTOP_PUBLIC_URL",
+    "__DESKTOP_STREAM_URL__": "$DESKTOP_STREAM_URL",
     "__FORWARD_PUBLIC_URL__": "$FORWARD_PUBLIC_URL",
     "__FWD_CLIENT_SECRET__": open("$SECRETS/fwd_oidc_client_secret").read(),
     "__OWUI_CLIENT_SECRET__": open("$SECRETS/owui_oidc_client_secret").read(),
@@ -111,6 +124,7 @@ fi
   echo "MCP_OIDC_ISSUER_URL=$ISSUER"
   echo "KEYCLOAK_PUBLIC_URL=$KEYCLOAK_PUBLIC_URL"
   echo "DESKTOP_PUBLIC_URL=$DESKTOP_PUBLIC_URL"
+  echo "DESKTOP_STREAM_URL=$DESKTOP_STREAM_URL"
   echo "FORWARD_PUBLIC_URL=$FORWARD_PUBLIC_URL"
 } >"$ENVFILE"
 [ "$ENVFILE" = /dev/stdout ] || echo "wrote    deploy/.env"
@@ -120,7 +134,8 @@ cat <<EOF
 Next steps
 ==========
 1. TLS reverse proxy: $KEYCLOAK_PUBLIC_URL -> 127.0.0.1:8180 (Keycloak),
-   $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth),
+   $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth, console),
+   $DESKTOP_STREAM_URL -> 127.0.0.1:4183 (desk-stream-auth, desktops),
    $FORWARD_PUBLIC_URL -> 127.0.0.1:4182 (fwd-auth). Open WebUI and the
    oauth2-proxies must reach $ISSUER under that same URL.
 2. Start (TERMINAL_IMAGE = the desktop image if you want desktops; the

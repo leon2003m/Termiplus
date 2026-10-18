@@ -54,6 +54,7 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, re
 	}
 	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(creds))
 	rp := &httputil.ReverseProxy{
+		Transport: streamTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.URL.Path = "/" + path
@@ -70,6 +71,9 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, re
 		ModifyResponse: func(resp *http.Response) error {
 			// A rejected password must not make the browser ask the user.
 			resp.Header.Del("Www-Authenticate")
+			for _, h := range untrustedResponseHeaders {
+				resp.Header.Del(h)
+			}
 			return nil
 		},
 		FlushInterval: -1,
@@ -80,7 +84,10 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, re
 	}
 	// Count the (usually WebSocket) connection so the reaper does not stop a
 	// desktop someone is looking at.
-	g.mgr.touch(inst, 1)
+	if !g.mgr.tryTouch(inst, maxProxiedConns) {
+		httpError(w, http.StatusTooManyRequests, "too many open connections to this desktop")
+		return
+	}
 	defer g.mgr.touch(inst, -1)
 	rp.ServeHTTP(w, r)
 }

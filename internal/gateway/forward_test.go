@@ -252,4 +252,11 @@ func TestForwardThroughMCP(t *testing.T) {
 	if code, _, _ := get("kc-alice", "/"+s.ID+"/abc/", nil); code != http.StatusBadRequest {
 		t.Fatalf("bad port: %d", code)
 	}
+	// Only container names are sessions: the trailing-slash redirect must
+	// never point to another site (security audit run 1).
+	for _, p := range []string{"/%5Cevil.example/80", "/%2F%2Fevil.example/80", "/evil.example/80", "/./80"} {
+		if code, hdr, _ := get("kc-alice", p, nil); code != http.StatusNotFound || hdr.Get("Location") != "" {
+			t.Errorf("%s: %d %q", p, code, hdr.Get("Location"))
+		}
+	}
 }

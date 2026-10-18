@@ -67,6 +67,11 @@ services:
       POLICIES_FILE: /etc/termiplus/policies.json
       IDLE_TIMEOUT: 30m
       MAX_RUNNING: "50"
+      # Exports (downloads, snapshots, archives) stop at EXPORT_MAX_BYTES, by
+      # default HOME_VOLUME_SIZE plus an eighth plus 64M: sparse files count
+      # at their full size in a tar but barely against the quota.
+      HOME_VOLUME_SIZE: ${HOME_VOLUME_SIZE:-}
+      EXPORT_MAX_BYTES: ${EXPORT_MAX_BYTES:-}
     volumes:
       - ./policies.json:/etc/termiplus/policies.json:ro
     secrets: [proxy_token, gateway_api_key, key_secret]

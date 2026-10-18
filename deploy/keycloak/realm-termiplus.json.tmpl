@@ -58,7 +58,7 @@
       "secret": "__DESK_CLIENT_SECRET__",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": ["__DESKTOP_PUBLIC_URL__/oauth2/callback"],
+      "redirectUris": ["__DESKTOP_PUBLIC_URL__/oauth2/callback", "__DESKTOP_STREAM_URL__/oauth2/callback"],
       "attributes": {"pkce.code.challenge.method": "S256"},
       "protocolMappers": [
         {"name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",

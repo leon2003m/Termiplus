@@ -1,10 +1,20 @@
 "use strict";
-// Shown in place of a desktop that is stopped or still starting (the
-// stream proxy serves it on /stream/<session>/). Starting asks first and goes
-// through the console API like the console's Start button.
+// desktop.html?session=<id>, on the console's origin: a desktop that is
+// stopped or still starting links here from its own origin (which has no
+// console API). Starting asks first and goes through the console API like the
+// console's Start button, then opens the desktop again.
 
 const $ = (id) => document.getElementById(id);
-const session = decodeURIComponent(location.pathname.split("/")[2] || "");
+const session = new URLSearchParams(location.search).get("session") || "";
+
+function safeURL(u) {
+  try {
+    const parsed = new URL(u, location.href);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+  } catch (e) {
+    return null;
+  }
+}
 
 function say(text, isError) {
   $("status").textContent = text;
@@ -17,7 +27,7 @@ async function api(path, options) {
     opts.headers["X-Termiplus-UI"] = "1";
     opts.headers["Content-Type"] = "application/json";
   }
-  const resp = await fetch("/ui/api/" + path, opts);
+  const resp = await fetch("api/" + path, opts);
   let body = null;
   try { body = await resp.json(); } catch (e) { body = null; }
   if (!resp.ok) throw new Error((body && body.error) || resp.status + " " + resp.statusText);
@@ -25,21 +35,25 @@ async function api(path, options) {
 }
 
 // Start (or, if running, look up) the session until the gateway reports it
-// ready, then reload once the desktop answers; KasmVNC needs a few seconds
-// more. Starting is idempotent, so a request lost to a timeout or a network
-// change is simply sent again.
+// ready, then open the desktop on its own origin; KasmVNC needs a few seconds
+// more, so wait briefly first. Starting is idempotent, so a request lost to a
+// timeout or a network change is simply sent again.
 async function startAndWait(s) {
   say("Starting the desktop …");
   const body = JSON.stringify({ workspace: s.workspace, persistent: s.persistent });
   const deadline = Date.now() + 3 * 60 * 1000;
   while (Date.now() < deadline) {
     try {
-      await api("sessions", { method: "POST", body: body });
-      const resp = await fetch(location.href, { credentials: "same-origin", cache: "no-store" });
-      if (resp.ok) {
-        location.reload();
+      const started = await api("sessions", { method: "POST", body: body });
+      const target = started && started.stream_url && safeURL(started.stream_url);
+      if (target) {
+        say("Started. Opening the desktop …");
+        await new Promise((r) => setTimeout(r, 4000));
+        location.href = target;
         return;
       }
+      say("Started, but this server gives no desktop address.", true);
+      return;
     } catch (e) {
       if (!(e instanceof TypeError) && !/timeout|not become ready|502|504/i.test(e.message)) {
         say(e.message, true);

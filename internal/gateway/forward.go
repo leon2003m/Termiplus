@@ -56,6 +56,7 @@ func (g *Gateway) serveForward(w http.ResponseWriter, r *http.Request, userID, r
 	}
 	local := "localhost:" + portStr
 	rp := &httputil.ReverseProxy{
+		Transport: forwardTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.URL.Path = "/" + path
@@ -84,7 +85,10 @@ func (g *Gateway) serveForward(w http.ResponseWriter, r *http.Request, userID, r
 		},
 	}
 	// Count the connection so the reaper keeps the container while in use.
-	g.mgr.touch(inst, 1)
+	if !g.mgr.tryTouch(inst, maxProxiedConns) {
+		httpError(w, http.StatusTooManyRequests, "too many open connections to this session")
+		return
+	}
 	defer g.mgr.touch(inst, -1)
 	rp.ServeHTTP(w, r)
 }

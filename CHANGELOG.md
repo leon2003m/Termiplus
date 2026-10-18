@@ -42,6 +42,14 @@ All notable changes to this project are documented here. The format is based on 
 - Gateway: container starts reserve their slot atomically, so concurrent requests can no longer exceed `MAX_RUNNING` or an ephemeral policy's `max_per_user`.
 - Network policy: DNS entry IPs with an IPv6 zone are refused (they skipped the never-allowed check), and the hosts file is rendered only from the canonical, checked address.
 - Home exports (admin API downloads, backups) have an absolute deadline (`EXPORT_TIMEOUT`, default 2h), and work that waits for a home's archive helper (removing or archiving the home) gives up with its context instead of waiting behind a slowly read download.
+- **Desktops on their own origin** (alpha, breaking for the desktop overlay): desktop content is controlled by whoever runs code in the desktop, and on the console's origin it could call the console API as the signed-in user or register a service worker over the console. Desktops and share links now have their own listener (`STREAM_LISTEN_ADDR`), sign-in proxy (`desk-stream-auth`, cookie `_termiplus_dstream`) and URL (`DESKTOP_STREAM_URL`); the console proxy serves only `/ui/`. The MCP server refuses to start if `CONSOLE_PUBLIC_URL` and `STREAM_PUBLIC_URL` share an origin. Existing deployments need `DESKTOP_STREAM_URL`, a TLS route to `127.0.0.1:4183`, the secret `dstream_oidc_cookie_secret` (`setup-alpha.sh` creates it) and the redirect URI `${DESKTOP_STREAM_URL}/oauth2/callback` on the `termiplus-desktop` client (added to the realm template; existing realms need it added by hand).
+- Desktops origin: service-worker script requests are refused, and `Set-Cookie`, `Service-Worker-Allowed` and `Clear-Site-Data` from desktops are dropped by the gateway and the MCP server.
+- Desktop and port-forward relays use dedicated transports with response-header limits and deadlines, and a container can hold at most 32 proxied connections at once (429 beyond).
+- Revoking a shared desktop link, or its expiry, ends the connections viewers have open through it.
+- Port forwards: only container names are accepted as sessions, so the trailing-slash redirect can no longer point to another site.
+- `manage_snapshots create` asks for confirmation when it would delete the oldest snapshot (`SNAPSHOT_KEEP` reached).
+- Home exports stop at `EXPORT_MAX_BYTES` (default: `HOME_VOLUME_SIZE` + 1/8 + 64M), so a sparse file, which costs almost nothing against the home quota, can no longer stream an unbounded tar through the shared gateway and socket proxy. At most `EXPORT_CONCURRENCY` (4) exports run at once, and `EXPORT_TIMEOUT` now applies to snapshots and departed-user archives too, not only downloads.
+- `setup-alpha.sh` and `add-mcp-admin-client.sh` make `deploy/secrets/` mode 0700.
 
 ### Changed
 

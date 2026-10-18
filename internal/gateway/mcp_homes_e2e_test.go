@@ -170,9 +170,20 @@ func TestMCPSnapshots(t *testing.T) {
 		t.Fatal("alice downloaded bob's snapshot")
 	}
 
-	// Only the newest `keep` (3) stay.
+	// Only the newest `keep` (3) stay. Below keep a create needs no
+	// confirmation; once it would push out the oldest snapshot it does, like
+	// delete (security audit run 1).
+	created := 1
 	for i := 0; i < 4; i++ {
-		c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "create", "workspace": "default"}, nil)
+		args := map[string]any{"action": "create", "workspace": "default"}
+		if created >= 3 {
+			if code := c.code(t, "bob-tok", "manage_snapshots", args); code != -32010 {
+				t.Fatalf("pruning create without confirmation: %d", code)
+			}
+			args["_confirmed"] = true
+		}
+		c.ok(t, "bob-tok", "manage_snapshots", args, nil)
+		created++
 	}
 	var list struct {
 		Snapshots []struct{ ID string } `json:"snapshots"`
@@ -220,7 +231,7 @@ func TestMCPShareDesktop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := mcp.NewServer(auth, backend, "test").WithUIBase("https://desk.example").WithShares(shares).WithDirectory(dir, "")
+	srv := mcp.NewServer(auth, backend, "test").WithUIBase("https://console.example").WithDesktopBase("https://desk.example").WithShares(shares).WithDirectory(dir, "")
 	c := &mcpChain{h: h, srv: srv}
 	var s mcp.Session
 	c.ok(t, "alice-tok", "request_session", map[string]any{"workspace": "desk", "persistent": true, "_confirmed": true}, &s)
@@ -249,7 +260,7 @@ func TestMCPShareDesktop(t *testing.T) {
 	}
 
 	ids, _ := mcp.OpenIdentityStore(filepath.Join(t.TempDir(), "ids.json"))
-	ui, err := mcp.NewUI(srv, ids).WithStream(h.gw.URL, testControlKey)
+	ui, err := mcp.NewDesktopHandler(srv, ids, h.gw.URL, testControlKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +336,7 @@ func TestMCPShareDesktop(t *testing.T) {
 	// for view mode.
 	ids2, _ := mcp.OpenIdentityStore(filepath.Join(t.TempDir(), "ids2.json"))
 	_ = ids2.Record("kc-alice", "alice")
-	ui2, _ := mcp.NewUI(srv, ids2).WithStream(h.gw.URL, testControlKey)
+	ui2, _ := mcp.NewDesktopHandler(srv, ids2, h.gw.URL, testControlKey)
 	front2 := httptest.NewServer(ui2)
 	t.Cleanup(front2.Close)
 	req, _ := http.NewRequest(http.MethodGet, front2.URL+"/stream/"+s.ID+"/app.js", nil)

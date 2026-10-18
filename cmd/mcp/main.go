@@ -10,6 +10,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -103,8 +104,16 @@ func main() {
 		entDesc += ", audit log " + f
 	}
 
-	// Download links and share links point at the console's public origin.
-	srv.WithUIBase(config.Get("STREAM_PUBLIC_URL", ""))
+	// Console links (downloads, "start this desktop") use the console's origin;
+	// desktop and share links use the desktops' own origin. They must differ:
+	// desktop content is user-controlled and must not run on the console's
+	// origin.
+	consoleURL := config.Get("CONSOLE_PUBLIC_URL", "")
+	desktopURL := config.Get("STREAM_PUBLIC_URL", "")
+	if consoleURL != "" && desktopURL != "" && sameOrigin(consoleURL, desktopURL) {
+		log.Fatal("STREAM_PUBLIC_URL (desktops) must be a different origin from CONSOLE_PUBLIC_URL (console)")
+	}
+	srv.WithUIBase(consoleURL).WithDesktopBase(desktopURL)
 
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
 	// calls; the management UI needs it.
@@ -144,18 +153,28 @@ func main() {
 			log.Fatal(err)
 		}
 		srv.WithShares(shares)
-		handler := mcp.NewUI(srv, ids)
-		// Desktops (/stream/) go through the gateway's control API.
-		if controlKey := config.Secret("CONTROL_API_KEY", false); controlKey != "" {
-			h, err := handler.WithStream(gatewayURL, controlKey)
-			if err != nil {
-				log.Fatal(err)
-			}
-			handler = h
-		}
-		ui := &http.Server{Addr: uiAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+		ui := &http.Server{Addr: uiAddr, Handler: mcp.NewUI(srv, ids), ReadHeaderTimeout: 10 * time.Second}
 		go func() { log.Fatal(ui.ListenAndServe()) }()
 		log.Printf("management UI listening on %s", uiAddr)
+	}
+
+	// Desktops and share links: own listener, own origin, own sign-in proxy
+	// (desk-stream-auth), never the console's.
+	if streamAddr := config.Get("STREAM_LISTEN_ADDR", ""); streamAddr != "" {
+		controlKey := config.Secret("CONTROL_API_KEY", false)
+		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil || controlKey == "" {
+			log.Fatal("STREAM_LISTEN_ADDR needs MCP_AUTH=proxy, MCP_IDENTITY_FILE and CONTROL_API_KEY")
+		}
+		if consoleURL == "" || desktopURL == "" {
+			log.Fatal("STREAM_LISTEN_ADDR needs CONSOLE_PUBLIC_URL and STREAM_PUBLIC_URL (two different origins)")
+		}
+		h, err := mcp.NewDesktopHandler(srv, ids, gatewayURL, controlKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+		ds := &http.Server{Addr: streamAddr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
+		go func() { log.Fatal(ds.ListenAndServe()) }()
+		log.Printf("desktops listening on %s", streamAddr)
 	}
 
 	// Port forwards: own listener behind their own sign-in proxy (fwd-auth).
@@ -186,4 +205,23 @@ func splitRoles(s string) []string {
 		}
 	}
 	return out
+}
+
+// sameOrigin reports whether two URLs share scheme, host and port (a missing
+// port is the scheme's default). Unparsable URLs count as the same, so a
+// typo cannot slip past the check.
+func sameOrigin(a, b string) bool {
+	ua, err1 := url.Parse(a)
+	ub, err2 := url.Parse(b)
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	origin := func(u *url.URL) string {
+		port := u.Port()
+		if port == "" {
+			port = map[string]string{"http": "80", "https": "443"}[strings.ToLower(u.Scheme)]
+		}
+		return strings.ToLower(u.Scheme) + "://" + strings.ToLower(strings.TrimSuffix(u.Hostname(), ".")) + ":" + port
+	}
+	return origin(ua) == origin(ub)
 }

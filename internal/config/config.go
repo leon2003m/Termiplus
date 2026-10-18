@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -47,6 +48,29 @@ func Duration(name string, def time.Duration) time.Duration {
 		log.Fatalf("%s: %v", name, err)
 	}
 	return d
+}
+
+// ParseSize reads a byte count: "0", a plain number, or a number with M, G or
+// T (binary units), as in HOME_VOLUME_SIZE.
+func ParseSize(v string) (int64, error) {
+	s := strings.ToUpper(strings.TrimSpace(v))
+	shift := 0
+	switch {
+	case strings.HasSuffix(s, "M"):
+		shift = 20
+	case strings.HasSuffix(s, "G"):
+		shift = 30
+	case strings.HasSuffix(s, "T"):
+		shift = 40
+	}
+	if shift > 0 {
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 || n > (int64(1)<<62)>>shift {
+		return 0, fmt.Errorf("size %q must look like 0, 512M, 20G or 1T", v)
+	}
+	return n << shift, nil
 }
 
 // Secret reads NAME or NAME_FILE. If required and missing, it exits.

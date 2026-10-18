@@ -20,6 +20,7 @@ if [ ! -s "$SECRET_FILE" ]; then
   echo "created  secrets/mcp_kc_admin_client_secret"
 fi
 chmod 0644 "$SECRET_FILE" # read by the MCP server (uid 65534)
+chmod 0700 "$(dirname "$SECRET_FILE")" # keeps other host users out of deploy/secrets
 
 admin_user="$(sed -n 's/^KC_BOOTSTRAP_ADMIN_USERNAME=//p' "$DEPLOY/secrets/keycloak.env")"
 admin_pw="$(sed -n 's/^KC_BOOTSTRAP_ADMIN_PASSWORD=//p' "$DEPLOY/secrets/keycloak.env")"

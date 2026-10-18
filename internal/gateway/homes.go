@@ -114,17 +114,54 @@ func (m *manager) withHelper(ctx context.Context, userID, home string, fn func(h
 // exportHome writes the user's home as a tar to w. Entries start with
 // "user/", as Docker names them. Running workspaces keep running; files they
 // change during the copy may be caught half-written.
+//
+// Every export, whoever asks for it (download, snapshot, departed-user
+// archive), has the gateway's deadline, waits for one of a few global slots
+// and stops at the byte cap (exportLimits).
 func (m *manager) exportHome(ctx context.Context, userID, home string, w io.Writer) error {
+	lim := m.exportLimits
+	if lim.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, lim.timeout)
+		defer cancel()
+	}
+	if lim.slots != nil {
+		select {
+		case lim.slots <- struct{}{}:
+			defer func() { <-lim.slots }()
+		case <-ctx.Done():
+			return fmt.Errorf("too many home exports at once: %w", ctx.Err())
+		}
+	}
 	return m.withHelper(ctx, userID, home, func(helper string) error {
 		rc, err := m.docker.GetHomeArchive(ctx, helper)
 		if err != nil {
 			return err
 		}
 		defer rc.Close()
-		_, err = io.Copy(w, rc)
+		if lim.maxBytes <= 0 {
+			_, err = io.Copy(w, rc)
+			return err
+		}
+		n, err := io.Copy(w, io.LimitReader(rc, lim.maxBytes+1))
+		if err == nil && n > lim.maxBytes {
+			err = fmt.Errorf("%w (%d bytes)", errExportTooLarge, lim.maxBytes)
+		}
 		return err
 	})
 }
+
+// exportLimits bound home exports (Config.ExportTimeout, ExportMaxBytes,
+// ExportConcurrency).
+type exportLimits struct {
+	timeout  time.Duration
+	maxBytes int64
+	slots    chan struct{}
+}
+
+// errExportTooLarge: the home's tar is larger than the export cap, usually
+// because of sparse files, which the home quota barely charges.
+var errExportTooLarge = errors.New("the home is larger than the export limit")
 
 // lockHome takes the locks of every container of the user that uses home, so
 // none of them is started while the home is rewritten, and stops the running

@@ -129,7 +129,7 @@ one's entitlement are autonomous.
 | `manage_user(action, username, group?)` *(admin)* | Show a user's `termiplus-*` groups, add or remove them (see *User management*) | destructive | **admin entitlement + confirm** for changes |
 | `get_audit_log(actor?, tool?, since?, limit?)` *(admin)* | Recorded state-changing calls, newest first (see *Audit log*) | readOnly | **admin entitlement** |
 | `reset_workspace(session_id)` | Start a session over from a fresh container (persistent: home kept) | destructive | **confirm** |
-| `manage_snapshots(action, workspace, snapshot_id?)` | Snapshots of a persistent workspace's home: list (with download links), create, restore, delete (see *Backups*) | destructive | workspace entitlement; **confirm** for restore and delete |
+| `manage_snapshots(action, workspace, snapshot_id?)` | Snapshots of a persistent workspace's home: list (with download links), create, restore, delete (see *Backups*) | destructive | workspace entitlement; **confirm** for restore and delete, and for create when it would delete the oldest snapshot |
 | `share_desktop(action, session_id?, minutes?, for_user?, share_id?)` | View-only links to one of your desktops: create, list, revoke (see *Shared desktops*) | destructive | **confirm** for create |
 | `manage_departed(action, username?)` *(admin)* | Departed users and their archived homes: list, archive now, restore (see *Departed users*) | destructive | **admin entitlement + confirm** for archive and restore |
 
@@ -206,6 +206,20 @@ the loop.
 - **Exposure.** The UI listener trusts the proxy's identity headers. Only
   `desk-auth` forwards browser requests to it; `mcp-auth` and the gateway,
   which share other networks with the MCP server, never do.
+- **Desktops on their own origin** (security audit run 1). Desktop content is
+  controlled by whoever runs code in the desktop. On the console's origin a
+  page from a desktop could call the console API as the signed-in user, or
+  register a service worker over the console. Desktops and share links are
+  therefore served on a second listener (`STREAM_LISTEN_ADDR`) behind their
+  own sign-in proxy (`desk-stream-auth`, cookie `_termiplus_dstream`) at
+  `DESKTOP_STREAM_URL`; the console's proxy no longer forwards `/stream/`.
+  The MCP server refuses to start when `CONSOLE_PUBLIC_URL` and
+  `STREAM_PUBLIC_URL` are one origin. On the desktops' origin it refuses
+  service-worker script requests and drops `Set-Cookie`,
+  `Service-Worker-Allowed` and `Clear-Site-Data` from desktop responses (the
+  gateway drops them too). A stopped desktop's start page links back to the
+  console (`/ui/desktop.html?session=<container>`), which starts it through
+  the console API.
 
 ## 9. Desktop-environment previews
 
@@ -325,9 +339,10 @@ unusable. How it fits together:
    single IP, so it would let anyone lock the owner out, and the password has
    256 random bits.
 3. **One login.** Browsers reach a desktop at
-   `${DESKTOP_PUBLIC_URL}/stream/<container>/` behind `desk-auth`
+   `${DESKTOP_STREAM_URL}/stream/<container>/` behind `desk-stream-auth`
    (oauth2-proxy, authorization code flow with PKCE, HttpOnly SameSite=Lax
-   cookie). Its upstream is the MCP server's UI listener, which maps the
+   cookie). Its upstream is the MCP server's desktop listener
+   (`STREAM_LISTEN_ADDR`), which maps the
    signed-in OIDC subject to the Open WebUI user (IdentityStore, as for the
    console) and calls the gateway's control API
    `/control/v1/stream/<container>/<path>` with the control key and that
@@ -351,7 +366,8 @@ unusable. How it fits together:
    page is replaced by a small one (`ui/desktop.js`) that looks the desktop up
    (`/ui/api/desktops/<container>`: the user's session, or a persistent
    desktop workspace of theirs whose container is gone) and offers to start
-   it through the console API, then reloads once it answers. Other users'
+   it through the console API on the console's origin, then opens the desktop
+   again. Other users'
    desktops look like unknown ones.
 
 `test/integration/oidc/desktop.sh` verifies the sign-in against a real
@@ -510,7 +526,7 @@ session, *Backups* section):
 ### Shared desktops
 
 `share_desktop` (or *Share (view only)* on a desktop session in the console)
-creates a link `${DESKTOP_PUBLIC_URL}/share/<token>/` that lets other people
+creates a link `${DESKTOP_STREAM_URL}/share/<token>/` that lets other people
 watch the desktop until it expires (5 minutes to 24 hours, default 60) or is
 revoked.
 
@@ -519,13 +535,15 @@ revoked.
   `KEY_SECRET`), so keyboard and mouse input from viewers is ignored. Viewers
   do receive what KasmVNC sends to every client, including clipboard
   contents of the desktop.
-- **Who.** Viewers must sign in (desk-auth). Without `for_user`, anyone who can
+- **Who.** Viewers must sign in (desk-stream-auth). Without `for_user`, anyone who can
   sign in and has the link may watch; with `for_user` (needs user management),
   only that user. They need no Open WebUI link and never get the owner's
   session or console.
 - **The link** carries 256 random bits; the MCP server stores only its hash
   (`MCP_SHARES_FILE`). At most 10 active links per user. Opening a link is
   logged with the viewer's subject; creating and revoking are in the audit log.
+  Revoking a link, or its expiry, also ends connections viewers have open
+  through it.
 - **Rollout.** The viewer user exists in desktop containers created after the
   updated desktop image and gateway. Older containers are recreated when they
   are stopped and the image changed, or with a reset.

@@ -31,6 +31,7 @@ type Server struct {
 	groupPrefix string
 	auditLog    *AuditLog // nil: calls are not recorded (WithAuditLog)
 	uiBase      string    // browser-facing console base URL, for download links
+	desktopBase string    // browser-facing desktop origin, for share links
 	shares      *ShareStore
 	departed    *departed
 }
@@ -109,7 +110,10 @@ type tool struct {
 	readOnly    bool
 	destructive bool
 	gate        func(p Principal, args map[string]any) (needConfirm bool, err error)
-	handle      func(ctx context.Context, p Principal, args map[string]any) (any, error)
+	// confirmIf, when set, may require a confirmation the gate did not, from
+	// state only the backend knows (e.g. a create that would prune).
+	confirmIf func(ctx context.Context, p Principal, args map[string]any) bool
+	handle    func(ctx context.Context, p Principal, args map[string]any) (any, error)
 }
 
 // --- JSON-RPC 2.0 wire types -------------------------------------------------
@@ -280,6 +284,9 @@ func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[
 	if gerr != nil {
 		s.audit(p, t, args, "denied", gerr)
 		return nil, &rpcError{Code: codeForbidden, Message: gerr.Error()}
+	}
+	if !needConfirm && t.confirmIf != nil && !confirmed(args) {
+		needConfirm = t.confirmIf(ctx, p, args)
 	}
 	if needConfirm && !confirmed(args) {
 		// The OWUI plugin must obtain an explicit human confirmation (a modal)

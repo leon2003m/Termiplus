@@ -104,6 +104,8 @@ type manager struct {
 	pending map[string]bool
 
 	helperSem map[string]chan struct{} // per-home archive helper locks (homes.go)
+
+	exportLimits exportLimits
 }
 
 func (m *manager) lockFor(name string) *sync.Mutex {

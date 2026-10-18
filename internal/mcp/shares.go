@@ -61,11 +61,14 @@ type ShareStore struct {
 
 	mu     sync.Mutex
 	shares map[string]Share // by token hash
+	// relays are the open connections of each share (by token hash); revoking
+	// the share cancels them, so viewers lose an open desktop immediately.
+	relays map[string]map[*context.CancelFunc]struct{}
 }
 
 // OpenShareStore loads path, or starts empty. path "" keeps shares in memory.
 func OpenShareStore(path string) (*ShareStore, error) {
-	s := &ShareStore{path: path, now: time.Now, shares: map[string]Share{}}
+	s := &ShareStore{path: path, now: time.Now, shares: map[string]Share{}, relays: map[string]map[*context.CancelFunc]struct{}{}}
 	if path == "" {
 		return s, nil
 	}
@@ -192,17 +195,50 @@ func (s *ShareStore) List(owner string) []Share {
 	return out
 }
 
-// Revoke ends one of the owner's shares.
+// Revoke ends one of the owner's shares, including connections viewers have
+// open through it.
 func (s *ShareStore) Revoke(owner, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for h, sh := range s.shares {
 		if sh.Owner == owner && sh.ID == id {
 			delete(s.shares, h)
+			for c := range s.relays[h] {
+				(*c)()
+			}
+			delete(s.relays, h)
 			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("no share %q", id)
+}
+
+// relayContext returns a context for one request through a share: it ends
+// when the share expires or is revoked. Call the returned func when the
+// request is done.
+func (s *ShareStore) relayContext(parent context.Context, sh Share) (context.Context, func()) {
+	ctx, cancel := context.WithDeadline(parent, sh.Expires)
+	s.mu.Lock()
+	if _, ok := s.shares[sh.Hash]; !ok {
+		s.mu.Unlock()
+		cancel() // revoked meanwhile
+		return ctx, cancel
+	}
+	if s.relays[sh.Hash] == nil {
+		s.relays[sh.Hash] = map[*context.CancelFunc]struct{}{}
+	}
+	key := &cancel
+	s.relays[sh.Hash][key] = struct{}{}
+	s.mu.Unlock()
+	return ctx, func() {
+		cancel()
+		s.mu.Lock()
+		delete(s.relays[sh.Hash], key)
+		if len(s.relays[sh.Hash]) == 0 {
+			delete(s.relays, sh.Hash)
+		}
+		s.mu.Unlock()
+	}
 }
 
 // WithShares enables share_desktop and the /share/ links.
@@ -212,7 +248,7 @@ func (s *Server) WithShares(st *ShareStore) *Server {
 }
 
 func (s *Server) shareDesktop(ctx context.Context, p Principal, args map[string]any) (any, error) {
-	if s.shares == nil || s.uiBase == "" {
+	if s.shares == nil || s.desktopBase == "" {
 		return nil, errors.New("desktop sharing is not configured on this server (needs the desktop overlay)")
 	}
 	switch argString(args, "action") {
@@ -272,7 +308,7 @@ func (s *Server) shareDesktop(ctx context.Context, p Principal, args map[string]
 	}
 	return map[string]any{
 		"share_id": sh.ID,
-		"url":      s.uiBase + sharePathPrefix + token + "/",
+		"url":      s.desktopBase + sharePathPrefix + token + "/",
 		"expires":  sh.Expires,
 		"who":      who,
 		"note":     "view only: viewers see the screen (and clipboard contents) but cannot type or click; revoke with share_desktop action revoke",
