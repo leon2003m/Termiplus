@@ -109,20 +109,20 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 	case rest == "user/archive" && r.Method == http.MethodPost:
 		res, err := g.archiveUser(r.Context(), userID)
 		if err != nil {
-			log.Printf("archive user %s: %v", userID, err)
+			log.Printf("archive user %q: %q", userID, err)
 			writeJSON(w, http.StatusBadGateway, map[string]any{"detail": "could not archive all homes: " + err.Error(), "homes": res})
 			return true
 		}
-		log.Printf("archived user %s: %d home(s)", userID, len(res))
+		log.Printf("archived user %q: %d home(s)", userID, len(res))
 		writeJSON(w, http.StatusOK, map[string]any{"homes": res})
 	case rest == "user/restore" && r.Method == http.MethodPost:
 		res, err := g.restoreUser(r.Context(), userID)
 		if err != nil {
-			log.Printf("restore user %s: %v", userID, err)
+			log.Printf("restore user %q: %q", userID, err)
 			writeJSON(w, http.StatusBadGateway, map[string]any{"detail": "could not restore all homes: " + err.Error(), "homes": res})
 			return true
 		}
-		log.Printf("restored user %s: %d home(s)", userID, len(res))
+		log.Printf("restored user %q: %d home(s)", userID, len(res))
 		writeJSON(w, http.StatusOK, map[string]any{"homes": res})
 	case rest == "user/archives" && r.Method == http.MethodGet:
 		if g.backups == nil {

@@ -101,7 +101,7 @@ func main() {
 	// Every state-changing tool call (chat and console) is recorded here and
 	// admins read it with get_audit_log.
 	if f := config.Get("MCP_AUDIT_FILE", ""); f != "" {
-		a, err := mcp.OpenAuditLog(f, int64(config.Int("MCP_AUDIT_MAX_MB", 5))<<20)
+		a, err := mcp.OpenAuditLog(f, config.IntIn("MCP_AUDIT_MAX_MB", 5, 0, 1<<20)<<20)
 		if err != nil {
 			log.Fatal(err)
 		}

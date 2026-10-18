@@ -337,7 +337,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) ensureError(w http.ResponseWriter, userID, policy string, err error) {
-	log.Printf("ensure %s/%s: %v", userID, policy, err)
+	log.Printf("ensure %q/%q: %q", userID, policy, err)
 	g.mgr.stats.startFailures.Add(1)
 	switch {
 	case errors.Is(err, errCapacity):
@@ -379,7 +379,7 @@ func (g *Gateway) proxyHTTP(w http.ResponseWriter, r *http.Request, inst *instan
 		},
 		FlushInterval: -1, // stream command output immediately
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("proxy %s: %v", inst.name, err)
+			log.Printf("proxy %q: %q", inst.name, err)
 			g.mgr.invalidate(inst.name)
 			httpError(w, http.StatusBadGateway, "terminal unavailable")
 		},

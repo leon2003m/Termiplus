@@ -37,6 +37,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Security
 
+- Logs quote every request-derived value (`%q`), so user ids, names, paths or error texts containing line breaks cannot forge extra log lines (CodeQL go/log-injection).
+- Numeric settings are range-checked at startup and the program refuses to start outside the range, instead of wrapping on conversion or overflowing when scaled: `TERMINAL_PORT` 1-65535, `MAX_RUNNING` 0-100000, `SNAPSHOT_KEEP` 0-10000, `EXPORT_CONCURRENCY` 0-1024, `MAX_MEMORY_MB` 1-16777216, `MAX_CPUS` 1-4096, `MAX_PIDS` 1-4194304, `MCP_AUDIT_MAX_MB` 0-1048576 (CodeQL go/incorrect-integer-conversion).
+
 - Gateway: a terminal's WebSocket upgrade response is read through a 64 KiB budget, so a container can no longer make the shared gateway buffer an endless status line or header (OOM of the gateway for all users).
 - Gateway: the terminal HTTP proxy uses a dedicated transport with a 256 KiB response-header limit (was Go's 10 MiB default) and never an environment HTTP proxy.
 - Gateway: container starts reserve their slot atomically, so concurrent requests can no longer exceed `MAX_RUNNING` or an ephemeral policy's `max_per_user`.

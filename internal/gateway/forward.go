@@ -80,7 +80,7 @@ func (g *Gateway) serveForward(w http.ResponseWriter, r *http.Request, userID, r
 		},
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("forward %s:%d: %v", name, port, err)
+			log.Printf("forward %q:%d: %q", name, port, err)
 			httpError(w, http.StatusBadGateway, "nothing is listening on this port")
 		},
 	}

@@ -128,7 +128,7 @@ func (s *streamProxy) serveShare(w http.ResponseWriter, r *http.Request, shares 
 		return
 	}
 	if r.URL.Path == sharePathPrefix+token+"/" && r.Method == http.MethodGet {
-		log.Printf("share %s (%s of %s) opened by %s", sh.ID, sh.Session, sh.Owner, p.UserID)
+		log.Printf("share %q (%q of %q) opened by %q", sh.ID, sh.Session, sh.Owner, p.UserID)
 	}
 	// The relay (usually the desktop's WebSocket) ends when the share expires
 	// or is revoked, not only when one side closes it.
@@ -202,7 +202,7 @@ func (s *streamProxy) proxy(w http.ResponseWriter, r *http.Request, base, sessio
 		},
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("stream %s: %v", session, err)
+			log.Printf("stream %q: %q", session, err)
 			forwardError(w, http.StatusBadGateway, "The gateway is not reachable.")
 		},
 	}

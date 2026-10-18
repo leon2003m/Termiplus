@@ -148,7 +148,7 @@ func (g *Gateway) archiveUser(ctx context.Context, userID string) ([]ArchivedHom
 		res := ArchivedHome{Home: home, Backup: b.ID}
 		if err := g.mgr.removeHome(ctx, userID, home); err != nil {
 			res.Note = "archived, but the home was kept: " + err.Error()
-			log.Printf("archive %s/%s: %v", userID, home, err)
+			log.Printf("archive %q/%q: %q", userID, home, err)
 		} else {
 			res.Removed = true
 		}
@@ -231,13 +231,13 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		case errors.Is(err, errNoHome):
 			httpError(w, http.StatusNotFound, "this workspace has no home yet: start it once")
 		case errors.Is(err, errExportTooLarge):
-			log.Printf("snapshot %s/%s: %v", userID, home, err)
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusRequestEntityTooLarge, "the home is larger than the export limit (EXPORT_MAX_BYTES); large sparse files count at their full size")
 		case err != nil:
-			log.Printf("snapshot %s/%s: %v", userID, home, err)
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusBadGateway, "could not take the snapshot")
 		default:
-			log.Printf("snapshot %s of %s/%s", b.ID, userID, home)
+			log.Printf("snapshot %q of %q/%q", b.ID, userID, home)
 			writeJSON(w, http.StatusCreated, b)
 		}
 	case rest == "snapshots":
@@ -264,10 +264,10 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		case errors.Is(err, errNoBackup):
 			httpError(w, http.StatusNotFound, "no such snapshot")
 		case err != nil:
-			log.Printf("restore %s of %s/%s: %v", parts[1], userID, home, err)
+			log.Printf("restore %q of %q/%q: %q", parts[1], userID, home, err)
 			httpError(w, http.StatusBadGateway, "could not restore the snapshot")
 		default:
-			log.Printf("restored snapshot %s of %s/%s", parts[1], userID, home)
+			log.Printf("restored snapshot %q of %q/%q", parts[1], userID, home)
 			writeJSON(w, http.StatusOK, map[string]any{"restored": parts[1], "home": home})
 		}
 	default:

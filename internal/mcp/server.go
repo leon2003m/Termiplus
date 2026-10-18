@@ -312,10 +312,10 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 		// home to another identity.
 		if err := s.ids.Record(p.Subject, p.UserID); err != nil {
 			if errors.Is(err, ErrIdentityConflict) {
-				log.Printf("identity: rejected subject %s as Open WebUI user %s: %v", p.Subject, p.UserID, err)
+				log.Printf("identity: rejected subject %q as Open WebUI user %q: %q", p.Subject, p.UserID, err)
 				return nil, &rpcError{Code: codeForbidden, Message: "identity is linked to a different account; contact an administrator"}
 			}
-			log.Printf("identity: cannot record subject %s: %v", p.Subject, err)
+			log.Printf("identity: cannot record subject %q: %q", p.Subject, err)
 			return nil, &rpcError{Code: codeInternal, Message: "identity store unavailable"}
 		}
 	}

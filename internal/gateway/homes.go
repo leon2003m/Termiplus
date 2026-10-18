@@ -105,7 +105,7 @@ func (m *manager) withHelper(ctx context.Context, userID, home string, fn func(h
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := m.docker.Remove(rctx, helper); err != nil {
-			log.Printf("remove archive helper %s: %v", helper, err)
+			log.Printf("remove archive helper %q: %q", helper, err)
 		}
 	}()
 	return fn(helper)

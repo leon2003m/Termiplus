@@ -197,7 +197,7 @@ func (s *Server) manageUser(ctx context.Context, p Principal, args map[string]an
 }
 
 func logAdmin(p Principal, action, username, group string) {
-	log.Printf("admin %s (subject %s): %s %s %s", p.UserID, p.Subject, action, username, group)
+	log.Printf("admin %q (subject %q): %q %q %q", p.UserID, p.Subject, action, username, group)
 }
 
 // manageUserGate: admins only; changes need a human confirmation, reads do not.

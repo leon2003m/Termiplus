@@ -103,7 +103,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("forward %s: %v", prefix, err)
+			log.Printf("forward %q: %q", prefix, err)
 			forwardError(w, http.StatusBadGateway, "The gateway is not reachable.")
 		},
 	}
