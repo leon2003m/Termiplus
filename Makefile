@@ -36,6 +36,10 @@ lint: fmt-check vet staticcheck ## Go linters
 	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/desktop/start-desktop.sh image/start image/start-docker
 	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
 	actionlint
+	@# Scripts that hosts and tests run directly must stay executable in git.
+	@for f in deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh test/integration/*.sh test/integration/oidc/*.sh .github/scripts/*.sh; do \
+	  git ls-files -s "$$f" | grep -q '^100755' || { echo "$$f is not executable in git (git update-index --chmod=+x $$f)"; exit 1; }; \
+	done
 
 check: lint test test-plugin ## Everything CI checks on code and config
 
