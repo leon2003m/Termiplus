@@ -57,24 +57,28 @@ func main() {
 		}
 	}
 
+	// The MCP control API (/control/v1) is on only when CONTROL_API_KEY is set.
 	g, err := gateway.New(gateway.Config{
 		APIKey:       config.Secret("GATEWAY_API_KEY", true),
 		KeySecret:    config.Secret("KEY_SECRET", true),
 		Image:        config.Must("TERMINAL_IMAGE"),
 		Network:      config.Get("SANDBOX_NETWORK", "ot-sandbox"),
-		Port:         int(config.Int("TERMINAL_PORT", 8000)),
+		Port:         config.SmallInt("TERMINAL_PORT", 8000, 1, 65535),
 		Policies:     policies,
 		StartWait:    config.Duration("START_TIMEOUT", 90*time.Second),
 		IdleTimeout:  config.Duration("IDLE_TIMEOUT", 30*time.Minute),
-		MaxRunning:   int(config.Int("MAX_RUNNING", 50)),
+		MaxRunning:   config.SmallInt("MAX_RUNNING", 50, 0, 100000),
 		Docker:       dockerapi.New(config.Get("DOCKER_API", "http://sockproxy:2375"), config.Secret("PROXY_TOKEN", false)),
 		AdminKey:     adminKey,
 		NetPolicy:    store,
+		ControlKey:   config.Secret("CONTROL_API_KEY", false),
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
+		BackupDir:    config.Get("BACKUP_DIR", ""),
+		SnapshotKeep: config.SmallInt("SNAPSHOT_KEEP", 5, 0, 10000),
 		// Upper bound for one home export (download or backup).
 		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
 		ExportMaxBytes:    exportMaxBytes(),
-		ExportConcurrency: int(config.Int("EXPORT_CONCURRENCY", 4)),
+		ExportConcurrency: config.SmallInt("EXPORT_CONCURRENCY", 4, 0, 1024),
 	})
 	if err != nil {
 		log.Fatal(err)

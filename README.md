@@ -40,7 +40,9 @@ image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
-                            docker-compose.netpolicy.yml (opt-in), dns-forwarder/
+                            docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
+                            docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP),
+                            docker-compose.mcp-users.yml (opt-in: group membership via MCP)
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
 
@@ -307,7 +309,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `EXTRA_IMAGES` | sockproxy | empty; further images policies may name with `image`, comma-separated |
 | `CONTAINER_ROOTFS_SIZE` | sockproxy | empty (no limit); cap on each terminal's container layer, e.g. `10G` |
 | `ALLOW_HOME_REMOVE` | sockproxy | empty; `1` lets the gateway delete home volumes |
-| `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, backup) |
+| `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, snapshot, archive) |
 | `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); largest tar one home export may stream, e.g. `25G`. Sparse files count at their full size in a tar but barely against the quota |
 | `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further ones wait within their deadline |
 | `METRICS_LISTEN_ADDR` | gateway | empty (off); Prometheus `/metrics` listener, e.g. `:9100` |
@@ -398,7 +400,7 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 - Instance state lives in gateway memory: run one gateway replica. After a restart it adopts running containers.
 - `X-User-Id` is trusted because only Open WebUI knows the gateway key. Use an admin connection, never a user connection, so the key never reaches a browser.
 - Disk usage is capped only where `HOME_VOLUME_SIZE` (homes, set at creation) and `CONTAINER_ROOTFS_SIZE` (container layers) apply, which needs XFS project quotas.
-- No per-user audit log beyond the gateway and proxy logs.
+- The audit log (`get_audit_log`) covers changes made through the MCP server: chat and the management console. Direct calls to the gateway's admin API only appear in the gateway log.
 
 ## Development
 

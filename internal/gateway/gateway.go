@@ -46,10 +46,19 @@ type Config struct {
 	// NetPolicy is the runtime network-policy store the admin API reads and
 	// writes. Required if AdminKey is set, forbidden otherwise.
 	NetPolicy *netpolicy.Store
+	// ControlKey gates the /control/v1 provisioning API used by the termiplus
+	// MCP server. It must be at least 32 characters and differ from APIKey and
+	// AdminKey. Empty disables the control surface (it returns 404).
+	ControlKey string
 	// ForwarderDNS, when set, pins every terminal to this resolver address via
 	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
 	ForwarderDNS string
+	// BackupDir stores snapshots and archived homes (control API). Empty
+	// disables them; downloads of the current home still work.
+	BackupDir string
+	// SnapshotKeep is how many snapshots per home are kept (default 5).
+	SnapshotKeep int
 
 	// ExportTimeout bounds one home export (download, backup). Default 2h.
 	ExportTimeout time.Duration
@@ -73,6 +82,7 @@ type Gateway struct {
 	// specPolicy maps every policy to the policy whose container answers
 	// user-less spec requests for it (see specPolicies).
 	specPolicy map[string]string
+	backups    *backupStore // nil without BackupDir
 }
 
 // The user-less "spec" identity serves Open WebUI's connection checks and
@@ -102,6 +112,15 @@ func New(cfg Config) (*Gateway, error) {
 		}
 		if subtle.ConstantTimeCompare([]byte(cfg.AdminKey), []byte(cfg.APIKey)) == 1 {
 			return nil, errors.New("admin API key must differ from the connection API key")
+		}
+	}
+	if cfg.ControlKey != "" {
+		if len(cfg.ControlKey) < 32 {
+			return nil, errors.New("control API key must be at least 32 characters")
+		}
+		if subtle.ConstantTimeCompare([]byte(cfg.ControlKey), []byte(cfg.APIKey)) == 1 ||
+			(cfg.AdminKey != "" && subtle.ConstantTimeCompare([]byte(cfg.ControlKey), []byte(cfg.AdminKey)) == 1) {
+			return nil, errors.New("control API key must differ from the connection and admin keys")
 		}
 	}
 	for name, p := range cfg.Policies {
@@ -168,7 +187,15 @@ func New(cfg Config) (*Gateway, error) {
 		instances: map[string]*instance{},
 		locks:     map[string]*sync.Mutex{},
 	}
-	return &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}, nil
+	g := &Gateway{cfg: cfg, mgr: m, specPolicy: specPolicies(cfg.Policies)}
+	if cfg.BackupDir != "" {
+		b, err := newBackupStore(cfg.BackupDir, cfg.SnapshotKeep)
+		if err != nil {
+			return nil, err
+		}
+		g.backups = b
+	}
+	return g, nil
 }
 
 // specPolicies picks, for each runtime, one policy whose container answers the
@@ -229,6 +256,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The admin network-policy API has its own key and is not a terminal
 	// policy; handle it before the policy split and the per-user bearer check.
 	if g.serveAdmin(w, r) {
+		return
+	}
+	// Likewise the MCP control API: its own key, handled before routing.
+	if g.serveControl(w, r) {
 		return
 	}
 
@@ -306,7 +337,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) ensureError(w http.ResponseWriter, userID, policy string, err error) {
-	log.Printf("ensure %s/%s: %v", userID, policy, err)
+	log.Printf("ensure %q/%q: %q", userID, policy, err)
 	g.mgr.stats.startFailures.Add(1)
 	switch {
 	case errors.Is(err, errCapacity):
@@ -348,7 +379,7 @@ func (g *Gateway) proxyHTTP(w http.ResponseWriter, r *http.Request, inst *instan
 		},
 		FlushInterval: -1, // stream command output immediately
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("proxy %s: %v", inst.name, err)
+			log.Printf("proxy %q: %q", inst.name, err)
 			g.mgr.invalidate(inst.name)
 			httpError(w, http.StatusBadGateway, "terminal unavailable")
 		},

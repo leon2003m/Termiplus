@@ -1,0 +1,4 @@
+{
+  "default": "deny",
+  "workspaces": {}
+}

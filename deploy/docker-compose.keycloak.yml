@@ -1,0 +1,86 @@
+# Opt-in overlay: a Keycloak for the alpha features (MCP, desktops, console),
+# if you do not already run an OIDC provider. Any OIDC IdP works; this is the
+# tested one.
+#
+#   deploy/setup-alpha.sh ...        # once: secrets + rendered realm
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
+#     -f docker-compose.desktop.yml -f docker-compose.keycloak.yml up -d
+#
+# Keycloak listens on 127.0.0.1:${KEYCLOAK_PORT:-8180} (plain HTTP); put your
+# TLS reverse proxy in front and set KEYCLOAK_PUBLIC_URL to that HTTPS URL.
+# The issuer (${KEYCLOAK_PUBLIC_URL}/realms/termiplus) must be reachable under
+# that same URL from browsers, Open WebUI and the two oauth2-proxies.
+# The realm (clients owui / termiplus-mcp / termiplus-desktop, groups
+# termiplus-users / -persist / -admin) is imported on first start from
+# deploy/secrets/realm-termiplus.json, which setup-alpha.sh renders.
+name: termiplus
+
+services:
+  keycloak:
+    # Keycloak 26.7.5 (same as the integration tests)
+    image: quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
+    command: ["start", "--import-realm"]
+    restart: unless-stopped
+    # Not read_only: "start" re-augments Keycloak for the configured database
+    # under /opt/keycloak/lib on first run.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    depends_on:
+      keycloak-db: { condition: service_healthy }
+    env_file: [./secrets/keycloak.env]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./secrets/realm-termiplus.json:/opt/keycloak/data/import/realm-termiplus.json:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
+    networks: [kc-db, owui]
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 512
+
+  keycloak-db:
+    # postgres:17-alpine, pinned 2026-10-13
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD_FILE: /run/secrets/keycloak_db_password
+    secrets: [keycloak_db_password]
+    volumes:
+      - keycloak-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "keycloak", "-d", "keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [kc-db]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 256
+
+networks:
+  kc-db:
+    internal: true
+
+volumes:
+  keycloak-db:
+
+secrets:
+  keycloak_db_password: { file: ./secrets/keycloak_db_password }
