@@ -70,6 +70,12 @@ jobs:
       - name: actionlint
         if: success() || failure()
         run: actionlint
+      - name: system map twins
+        if: success() || failure()
+        run: |
+          for f in map/AGENTS.md map/routing.md; do
+            cmp -s map/CLAUDE.md "$f" || { echo "::error file=$f::differs from map/CLAUDE.md (run make map)"; exit 1; }
+          done
 
   test:
     name: test
