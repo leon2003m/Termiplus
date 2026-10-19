@@ -2,6 +2,10 @@
 
 These rules apply to every AI coding agent working in this repository (Claude Code, Codex, Copilot, others). They are not suggestions. If a task would require breaking one, stop and ask the maintainer (@leon2003m).
 
+## Finding your way
+
+Before changing code, open [map/CLAUDE.md](map/CLAUDE.md), the system map. It names what each noun is in code, how requests move, and what else a change touches, including things outside this repo. When you change code that a map card cites, update the card in the same PR. Edit `map/CLAUDE.md`, never its generated twins, then run `make map`.
+
 ## Branches and releases
 
 - Work on `dev` or on a feature branch created from `dev`. Push only to those.
