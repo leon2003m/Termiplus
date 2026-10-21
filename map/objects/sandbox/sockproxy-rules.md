@@ -34,7 +34,7 @@ Citations: `internal/sockproxy/validate.go:17` (Rules), `:134` (ValidateCreate),
 
 ## If you change this
 
-- **Hits:** the security boundary. Per [AGENTS.md](../../../AGENTS.md), any loosening needs a test, a Security impact section and maintainer approval. Also `internal/sockproxy/*_test.go` and the gateway's create body (`lifecycle.go:424`).
+- **Hits:** the security boundary. Per [AGENTS.md](../../../AGENTS.md), any loosening needs a test, a Security impact section and maintainer approval. Also `internal/sockproxy/*_test.go` and the gateway's create body (`lifecycle.go:437`).
 - **Does not hit:** MCP, the plugin
 
 ## Surfaces

@@ -4,3 +4,4 @@
 !start
 !start-docker
 !apt-docker.conf
+!agent/

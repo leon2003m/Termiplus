@@ -147,6 +147,9 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 | `home` | Persistent only. Policies with the same `home` share the user's volume |
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
+| `locale` | Optional. `LANG` in the workspace, e.g. `de_DE.UTF-8` (default `C.UTF-8`) |
+| `keyboard` | Desktop only. XKB layout of the desktop, e.g. `de` |
+| `record` | Desktop only. `true` records the screen at 2 fps into `~/recordings`, kept for 2 days, so the user can review what a model did |
 | `image` | Optional. Runs this policy on another image than `TERMINAL_IMAGE`, e.g. a Python or Node image. The socket proxy must list it in `EXTRA_IMAGES` |
 
 **Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image reference, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays. A new image under the same tag (after a pull or rebuild) is picked up when a stopped workspace starts again: it is recreated on the new image with the same volume. A running workspace is never recreated for that. Anything installed outside `/home/user` is lost on recreation.

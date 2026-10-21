@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format is based on 
 ### Added
 
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
+- Images: tools for models working in a workspace (`docs/agents.md`). Each start writes a manifest to `~/AGENTS.md` (mode, root, desktop, rules, tools), which Open WebUI reads into every turn, and links bundled skills into `~/.agents/skills`. `tp-status` shows it plus live facts. The terminal image adds pandoc, LibreOffice, poppler, openpyxl, python-docx, tesseract, recoll, nextcloudcmd and all locales.
+- Desktop image: Chromium with a managed policy (no password manager, sync or metrics), driven by `tp-browser` through Playwright over a loopback CDP port; `tp-screenshot`, `tp-act`, `tp-ocr` and `tp-ui` (AT-SPI) for desktop apps; Nextcloud and LibreOffice desktop apps.
+- Policies: `locale` sets `LANG`; for desktops, `keyboard` sets the XKB layout and `record` records the screen into `~/recordings` (2 fps, kept 2 days).
 
 ## [1.0.0-rc.2] - 2026-10-18
 

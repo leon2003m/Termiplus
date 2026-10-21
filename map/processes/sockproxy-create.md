@@ -20,7 +20,7 @@ The gateway is internet-facing (through Open WebUI) and parses user traffic. If 
 
 ## Steps
 
-1. Gateway builds the spec. For persistent policies it first checks the volume's owner label, then creates the volume: `internal/gateway/lifecycle.go:424-475`.
+1. Gateway builds the spec. For persistent policies it first checks the volume's owner label, then creates the volume: `internal/gateway/lifecycle.go:437-497`.
 2. Sockproxy: token check (`X-Proxy-Token`), path normalization, then the route switch: `internal/sockproxy/proxy.go:91-120`, `:429`.
 3. `/volumes/create` → `ValidateVolume` (no driver options; size from `HOME_VOLUME_SIZE`): `proxy.go:153`, `validate.go:262`.
 4. `/containers/create` → `ValidateCreate`: `proxy.go:142`, `internal/sockproxy/validate.go:134`.

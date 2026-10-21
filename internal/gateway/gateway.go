@@ -153,6 +153,15 @@ func New(cfg Config) (*Gateway, error) {
 		if p.MaxPerUser < 0 {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
 		}
+		if p.Locale != "" && !localeRe.MatchString(p.Locale) {
+			return nil, fmt.Errorf("policy %s: locale must look like de_DE.UTF-8", name)
+		}
+		if p.Keyboard != "" && !keyboardRe.MatchString(p.Keyboard) {
+			return nil, fmt.Errorf("policy %s: keyboard must be a layout like de", name)
+		}
+		if (p.Keyboard != "" || p.Record) && !p.Desktop {
+			return nil, fmt.Errorf("policy %s: keyboard and record need desktop", name)
+		}
 		cfg.Policies[name] = p
 	}
 	if cfg.ExportTimeout <= 0 {

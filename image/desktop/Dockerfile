@@ -25,8 +25,28 @@ RUN curl -fsSL -o /tmp/kasmvnc.deb \
     && rm -rf /var/lib/apt/lists/* /tmp/kasmvnc.deb \
     && usermod -aG ssl-cert user
 
+# Tools for models on the desktop (docs/agents.md): Chromium, driven by tp-browser over the DevTools protocol (Playwright, no
+# browser download), accessibility (AT-SPI) for tp-ui, screenshots, input
+# and OCR for tp-screenshot/tp-act/tp-ocr, recording, Nextcloud and the
+# LibreOffice GUI.
+ARG PLAYWRIGHT_VERSION=1.55.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        chromium fonts-liberation \
+        at-spi2-core libatk-adaptor python3-pyatspi \
+        scrot xdotool wmctrl xclip x11-xkb-utils ffmpeg \
+        nextcloud-desktop libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-gtk3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/termiplus/playwright \
+    && /opt/termiplus/playwright/bin/pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"
+
 COPY start-desktop.sh /usr/local/bin/start-desktop
-RUN chmod 755 /usr/local/bin/start-desktop
+COPY tpdesk.py /usr/local/lib/termiplus/tpdesk.py
+COPY tp-browser.py /usr/local/bin/tp-browser
+COPY skills/ /usr/share/termiplus/skills/
+COPY chromium-policy.py /tmp/chromium-policy.py
+RUN chmod 755 /usr/local/bin/start-desktop /usr/local/bin/tp-browser /usr/local/lib/termiplus/tpdesk.py \
+    && for n in tp-screenshot tp-act tp-ocr tp-ui; do ln -s /usr/local/lib/termiplus/tpdesk.py "/usr/local/bin/$n"; done \
+    && python3 /tmp/chromium-policy.py && rm /tmp/chromium-policy.py
 
 USER 1000:1000
 # The terminal image's HEALTHCHECK (Open Terminal on 8000) still applies.

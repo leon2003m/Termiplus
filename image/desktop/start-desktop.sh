@@ -9,10 +9,18 @@
 # OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD, for shared desktops) may only watch.
 # Without the password the image behaves like the terminal image.
 set -euo pipefail
+pids=()
 
 pw="${OPEN_TERMINAL_DESKTOP_PASSWORD:-}"
 viewpw="${OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD:-}"
-unset OPEN_TERMINAL_DESKTOP_PASSWORD OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD
+keyboard="${OPEN_TERMINAL_KEYBOARD:-}"
+record="${OPEN_TERMINAL_RECORD:-}"
+unset OPEN_TERMINAL_DESKTOP_PASSWORD OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD OPEN_TERMINAL_KEYBOARD OPEN_TERMINAL_RECORD
+# Checked by the gateway as well; it ends up in a script.
+if ! [[ "$keyboard" =~ ^[a-z]{2,8}$ ]]; then
+  [ -z "$keyboard" ] || echo "start-desktop: ignoring malformed OPEN_TERMINAL_KEYBOARD" >&2
+  keyboard=
+fi
 
 if [ -n "$pw" ]; then
   if [ "${#pw}" -lt 32 ]; then
@@ -36,7 +44,17 @@ security:
   brute_force_protection:
     blacklist_threshold: 0
 YAML
-  printf '#!/bin/sh\nexec dbus-launch --exit-with-session startxfce4\n' >"$HOME/.vnc/xstartup"
+  # The session's D-Bus address is saved so the model's shell (not part of the
+  # session) can reach the accessibility bus (tp-ui, tp-screenshot --marks).
+  cat >"$HOME/.vnc/xstartup" <<XSTARTUP
+#!/bin/sh
+export QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 NO_AT_BRIDGE=0
+exec dbus-launch --exit-with-session sh -c '
+  mkdir -p "\$HOME/.cache/termiplus"
+  printf "%s" "\$DBUS_SESSION_BUS_ADDRESS" >"\$HOME/.cache/termiplus/dbus"
+  ${keyboard:+setxkbmap $keyboard}
+  exec startxfce4'
+XSTARTUP
   chmod 700 "$HOME/.vnc/xstartup"
   touch "$HOME/.vnc/.de-was-selected"
   # Write permission only (no "owner"): the stream user cannot use the admin API.
@@ -52,11 +70,33 @@ YAML
   # ~/.vnc: stale lock and pid files of display :1 would stop KasmVNC.
   rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 "$HOME"/.vnc/*:1.pid
   vncserver :1 -fg -geometry 1280x800 -depth 24 &
+  pids=($!)
+  # Opt-in recording of the screen (policy "record"): 2 frames per second,
+  # one file per hour in ~/recordings, kept for two days. Matroska stays
+  # playable when the container stops in the middle of a file.
+  if [ "$record" = 1 ]; then
+    mkdir -p "$HOME/recordings"
+    (
+      while :; do
+        find "$HOME/recordings" -name '*.mkv' -mtime +2 -delete 2>/dev/null || true
+        sleep 3600
+      done
+    ) &
+    (
+      for _ in $(seq 60); do [ -e /tmp/.X11-unix/X1 ] && break; sleep 1; done
+      exec ffmpeg -nostdin -loglevel error -f x11grab -framerate 2 -i :1 \
+        -c:v libx264 -preset ultrafast -crf 35 -pix_fmt yuv420p \
+        -f segment -segment_time 3600 -reset_timestamps 1 -strftime 1 \
+        "$HOME/recordings/%Y%m%d-%H%M%S.mkv"
+    ) &
+  fi
 fi
 unset pw viewpw
 
 /opt/open-terminal/bin/open-terminal run --host 0.0.0.0 --port 8000 --cwd /home/user &
+pids+=($!)
 
-# Stop the container when either process ends; the gateway recreates it.
-wait -n
+# Stop the container when KasmVNC or Open Terminal ends (not the recorder);
+# the gateway recreates it.
+wait -n "${pids[@]}"
 exit 1
