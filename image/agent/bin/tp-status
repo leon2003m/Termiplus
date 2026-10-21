@@ -1,0 +1,29 @@
+#!/bin/bash
+# Shows what this workspace is and what is running in it: the manifest's
+# rules, then live facts. Read-only.
+set -uo pipefail
+
+if [ -r "$HOME/AGENTS.md" ]; then
+  cat "$HOME/AGENTS.md"
+  echo
+fi
+echo "## Now"
+echo
+echo "- Disk (home): $(df -h "$HOME" 2>/dev/null | awk 'NR==2 {print $3 " used, " $4 " free"}')"
+echo "- Memory: $(free -h 2>/dev/null | awk '/^Mem:/ {print $3 " used of " $2}')"
+echo "- Outputs: $(find "$HOME/outputs" -maxdepth 1 -type f 2>/dev/null | wc -l) file(s) in ~/outputs"
+if [ -n "${DISPLAY:-}" ] || [ -e /tmp/.X11-unix/X1 ]; then
+  export DISPLAY="${DISPLAY:-:1}"
+  if wmctrl -m >/dev/null 2>&1; then
+    echo "- Desktop: running on $DISPLAY"
+    echo "- Windows:"
+    wmctrl -l 2>/dev/null | awk '{ $1=""; $2=""; $3=""; sub(/^ +/, ""); print "  - " $0 }'
+  else
+    echo "- Desktop: not answering on $DISPLAY"
+  fi
+fi
+if [ -f "$HOME/.cache/termiplus/browser.json" ]; then
+  echo "- Browser: tp-browser session open"
+fi
+echo "- Top processes (CPU):"
+ps -eo pcpu=,comm= --sort=-pcpu 2>/dev/null | head -5 | awk '{print "  - " $2 " " $1 "%"}'

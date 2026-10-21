@@ -22,7 +22,7 @@ The container is disposable (it is recreated on any config change); the volume i
 - Ephemeral policies have no volume.
 - Operations: reset, snapshot, restore, export, import, remove. All go through the [archive helper](archive-helper.md).
 
-Citations: `internal/naming/naming.go:55`, `internal/gateway/lifecycle.go:436-446` (ownership check), `internal/gateway/homes.go:31` (homeOf), `:121` (exportHome), `:197` (importHome), `:224` (removeHome), `internal/gateway/userhomes.go:61` (reset), `:90` (snapshot), `internal/sockproxy/validate.go:262` (ValidateVolume)
+Citations: `internal/naming/naming.go:55`, `internal/gateway/lifecycle.go:449-459` (ownership check), `internal/gateway/homes.go:31` (homeOf), `:121` (exportHome), `:197` (importHome), `:224` (removeHome), `internal/gateway/userhomes.go:61` (reset), `:90` (snapshot), `internal/sockproxy/validate.go:262` (ValidateVolume)
 
 ## Connected to
 

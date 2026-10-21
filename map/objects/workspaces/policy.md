@@ -22,10 +22,11 @@ Open WebUI only knows "a terminal connection with a URL". Putting runtime, limit
 - `home`: groups policies that share one home volume (default: the policy name; ignored for ephemeral)
 - `idle_timeout`, `max_per_user` (ephemeral cap, default 3; the least recently used idle sandbox is evicted)
 - `desktop`: KasmVNC XFCE next to Open Terminal (needs the desktop image)
+- `locale` (`LANG`), and for desktops `keyboard` (XKB layout) and `record` (screen recording into `~/recordings`); see [docs/agents.md](../../../docs/agents.md)
 - `image`: another image built on the terminal image. It must be in the sockproxy's `EXTRA_IMAGES`.
 - Name: `[a-z0-9]{1,24}` (`naming.go:31-44`)
 
-Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lifecycle.go:154-158` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
+Citations: `internal/gateway/lifecycle.go:22-62` (Policy), `internal/gateway/lifecycle.go:167-171` (configHash), `internal/gateway/gateway.go:210` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
 
 ## Connected to
 

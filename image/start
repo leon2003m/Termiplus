@@ -26,4 +26,22 @@ if grep -q sysboxfs /proc/self/mountinfo 2>/dev/null; then
   OPEN_TERMINAL_EXECUTE_DESCRIPTION="${OPEN_TERMINAL_EXECUTE_DESCRIPTION:-} Docker works in this container: if docker is missing, sudo apt-get update && sudo apt-get install -y docker.io starts it too; then use docker without sudo. If the daemon is not running, run start-docker."
   export OPEN_TERMINAL_EXECUTE_DESCRIPTION
 fi
+# Locale for commands and documents (policy "locale", checked by the gateway
+# too); locales-all provides every one.
+locale="${OPEN_TERMINAL_LOCALE:-C.UTF-8}"
+unset OPEN_TERMINAL_LOCALE
+case "$locale" in
+  *[!A-Za-z_.0-9-]*) locale=bad ;;
+esac
+if echo "$locale" | grep -Eq '^(C|[a-z]{2,3}(_[A-Z]{2})?)\.UTF-8$'; then
+  LANG="$locale"
+else
+  echo "start: ignoring malformed OPEN_TERMINAL_LOCALE" >&2
+  LANG=C.UTF-8
+fi
+export LANG
+# Tell the model what this workspace is (~/AGENTS.md) and link the skills.
+/usr/local/libexec/termiplus/agent-setup || echo "start: agent setup failed" >&2
+OPEN_TERMINAL_EXECUTE_DESCRIPTION="${OPEN_TERMINAL_EXECUTE_DESCRIPTION:-} Before your first command, read ~/AGENTS.md (or run tp-status): it says what this workspace is and which tools to use."
+export OPEN_TERMINAL_EXECUTE_DESCRIPTION
 exec "$@"

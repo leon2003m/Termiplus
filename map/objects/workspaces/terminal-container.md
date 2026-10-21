@@ -22,7 +22,7 @@ The name *is* the lookup key. The gateway finds a user's container by hashing th
 - Env: `OPEN_TERMINAL_API_KEY` = HMAC(`KEY_SECRET`, name). DNS is pinned to the [DNS forwarder](../sandbox/dns-forwarder.md).
 - Lifecycle: `ensure` adopts, creates or recreates it on a config-hash mismatch. The reaper stops persistent containers and removes ephemeral ones once idle. Admission enforces `MAX_RUNNING` and `max_per_user`.
 
-Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Container, Ephemeral, IsManagedContainer, UserHash), `internal/gateway/lifecycle.go:140` (containerKey), `:165` (ensure), `:201-203` (owner check), `:291` (admit), `:424` (create), `:542` (adopt), `:576` (reap)
+Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Container, Ephemeral, IsManagedContainer, UserHash), `internal/gateway/lifecycle.go:153` (containerKey), `:178` (ensure), `:214-216` (owner check), `:304` (admit), `:437` (create), `:564` (adopt), `:598` (reap)
 
 ## Connected to
 

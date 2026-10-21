@@ -29,6 +29,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         sqlite3 ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
+# Office work for models (docs/agents.md): documents, spreadsheets, OCR,
+# search and Nextcloud sync, so the common tasks need neither root nor apt.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pandoc poppler-utils libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
+        python3-openpyxl python3-docx python3-pil \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu \
+        recollcmd nextcloud-desktop-cmd locales-all \
+    && rm -rf /var/lib/apt/lists/*
+
 # Open Terminal (MIT) in its own venv, outside the user's PATH so the model's
 # pip installs never touch the server.
 RUN python3 -m venv /opt/open-terminal \
@@ -54,6 +63,15 @@ COPY start /usr/local/libexec/termiplus/start
 COPY start-docker /usr/local/bin/start-docker
 COPY apt-docker.conf /etc/apt/apt.conf.d/90termiplus-docker
 RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/start /usr/local/bin/start-docker
+
+# Agent setup: the workspace manifest (~/AGENTS.md, which Open WebUI reads into
+# every chat), skills for Open Terminal's /skills and tp-status.
+COPY agent/agent-setup /usr/local/libexec/termiplus/agent-setup
+COPY agent/bin/ /usr/local/bin/
+COPY agent/skills/ /usr/share/termiplus/skills/
+RUN chmod 0755 /usr/local/libexec/termiplus/agent-setup /usr/local/bin/tp-status \
+    && mkdir -p /etc/termiplus \
+    && chmod -R a+rX /usr/share/termiplus
 
 USER 1000:1000
 WORKDIR /home/user

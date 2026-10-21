@@ -26,7 +26,7 @@ Terminals must resolve names without reaching internal resolvers directly, and D
 - dnsmasq flags: `--no-resolv --no-hosts`, so only the listed upstreams and the hosts dir are used.
 - Gateway: `ALLOWED_DNS` → `ForwarderDNS`. It is pinned into each container's `Dns` and `OPEN_TERMINAL_RESOLVER`, and it is part of the config hash.
 
-Citations: `deploy/dns-forwarder/entrypoint.sh:1-33`, `deploy/docker-compose.netpolicy.yml:21-59`, `cmd/gateway/main.go:75`, `internal/gateway/lifecycle.go:158` (configHash), `internal/sockproxy/validate.go:166-174`
+Citations: `deploy/dns-forwarder/entrypoint.sh:1-33`, `deploy/docker-compose.netpolicy.yml:21-59`, `cmd/gateway/main.go:75`, `internal/gateway/lifecycle.go:171` (configHash), `internal/sockproxy/validate.go:166-174`
 
 ## Connected to
 

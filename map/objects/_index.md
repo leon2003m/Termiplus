@@ -16,6 +16,7 @@ One line per noun. Read the line; open the card only if you need it. `stub` = no
 - [Terminal container](workspaces/terminal-container.md) · verified · a "session": `ot-u-…` persistent or `ot-e-…` per chat, created via sockproxy, reaped when idle
 - [Home volume](workspaces/home-volume.md) · verified · `ot-home-…` at `/home/user`, per user and home group
 - [Archive helper](workspaces/archive-helper.md) · verified · never-started `ot-a-…` container that mounts a home for tar export/import
+- [Agent manifest](workspaces/agent-manifest.md) · verified · `~/AGENTS.md`, skills and `tp-*` tools that tell a model what its workspace is; guidance, not a boundary
 
 ## sandbox
 

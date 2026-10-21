@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -49,9 +50,21 @@ type Policy struct {
 	// EXTRA_IMAGES. It must be built on the termiplus terminal image (Open
 	// Terminal on the same port, the same start script).
 	Image string `json:"image,omitempty"`
+	// Locale sets LANG in the workspace, e.g. "de_DE.UTF-8" (default C.UTF-8).
+	Locale string `json:"locale,omitempty"`
+	// Keyboard is the desktop's keyboard layout, e.g. "de" (setxkbmap).
+	Keyboard string `json:"keyboard,omitempty"`
+	// Record records the desktop screen to ~/recordings (2 fps, kept two
+	// days), so the user can review what a model did. Needs Desktop.
+	Record bool `json:"record,omitempty"`
 
 	idle time.Duration
 }
+
+var (
+	localeRe   = regexp.MustCompile(`^(C|[a-z]{2,3}(_[A-Z]{2})?)\.UTF-8$`)
+	keyboardRe = regexp.MustCompile(`^[a-z]{2,8}$`)
+)
 
 func (p Policy) ephemeral() bool { return p.Storage == storageEphemeral }
 
@@ -471,6 +484,15 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	if pol.Desktop {
 		env = append(env, "OPEN_TERMINAL_DESKTOP_PASSWORD="+m.desktopPassword(name),
 			"OPEN_TERMINAL_DESKTOP_VIEW_PASSWORD="+m.desktopViewPassword(name))
+		if pol.Keyboard != "" {
+			env = append(env, "OPEN_TERMINAL_KEYBOARD="+pol.Keyboard)
+		}
+		if pol.Record {
+			env = append(env, "OPEN_TERMINAL_RECORD=1")
+		}
+	}
+	if pol.Locale != "" {
+		env = append(env, "OPEN_TERMINAL_LOCALE="+pol.Locale)
 	}
 	spec := map[string]any{
 		"Image":      m.imageFor(pol),

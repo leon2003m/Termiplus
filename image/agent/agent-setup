@@ -1,0 +1,108 @@
+#!/bin/sh
+# Called by the image's start script before Open Terminal starts. Writes the
+# workspace manifest (/etc/termiplus/AGENTS.md), which Open WebUI reads from
+# ~/AGENTS.md into every chat, links the bundled skills into ~/.agents/skills
+# (Open Terminal lists them at /skills) and creates ~/outputs. Nothing here is
+# a boundary: the model can change all of it. It only tells the model what
+# this workspace is and how to use it.
+set -eu
+
+manifest=/etc/termiplus/AGENTS.md
+skills=/usr/share/termiplus/skills
+
+if grep -q ' /home/user ' /proc/self/mountinfo 2>/dev/null; then
+  storage=persistent
+else
+  storage=sandbox
+fi
+if sudo -n true 2>/dev/null; then root=yes; else root=no; fi
+if [ -n "${OPEN_TERMINAL_DESKTOP_PASSWORD:-}" ]; then desktop=yes; else desktop=no; fi
+
+render() {
+  cat <<EOF
+# This workspace (termiplus)
+
+Generated when the workspace started. Do not edit; it is rewritten on every start.
+
+- Mode: **${storage}**.
+EOF
+  if [ "$storage" = persistent ]; then
+    echo "  Only /home/user survives a restart or an image update. Software installed outside it (apt) may disappear; reinstall it when needed."
+  else
+    echo "  A sandbox for this chat only, without storage. Everything is deleted when the chat goes idle. Nothing here is private to you beyond this chat."
+  fi
+  if [ "$root" = yes ]; then
+    echo "- Root: **yes**. sudo works without a password (sudo apt-get install -y PACKAGE)."
+  else
+    echo "- Root: **no**. sudo and apt are not available. Install Python packages in a venv (python3 -m venv ~/.venv) and Node packages with npm (prefix ~/.local)."
+  fi
+  if [ "$desktop" = yes ]; then
+    cat <<'EOF'
+- Desktop: **yes**, XFCE on DISPLAY=:1, which the user can watch and take over.
+EOF
+  else
+    echo "- Desktop: **no**, a shell only."
+  fi
+  cat <<'EOF'
+
+## Rules
+
+- Prefer the cheapest way that works: shell and files first, then the browser through `tp-browser`, then accessibility (`tp-ui`), and screenshots with mouse and keyboard (`tp-screenshot`, `tp-act`) only as a last resort.
+- After every action that should change something, check that it did (read the file back, `tp-act` reports whether the screen changed, `tp-browser` returns the page after each step). Never claim success you did not verify.
+- Do not keep memory or notes about the user in files here. Long-term memory is handled by the chat, not this workspace.
+- Put files meant for the user in ~/outputs. They open them from the terminal file browser in the chat, so name them clearly.
+- Ask the user in the chat before anything irreversible or outward-facing: sending, buying, deleting their data, signing in somewhere new, accepting terms. When a site needs a login, a captcha or a payment, stop and hand over: tell the user to open the desktop and do that step, then continue.
+- For long work, report progress in the chat after each larger step.
+- Run `tp-status` to see this list again plus what is running now.
+
+## Tools
+
+| Command | Use |
+|---|---|
+| `tp-status` | mode, root, desktop, disk, running apps |
+| `pandoc`, `soffice --headless --convert-to pdf FILE` | convert documents |
+| `python3` with `openpyxl`, `docx` (python-docx) | read and write Excel and Word files |
+| `tesseract IMAGE - -l eng+deu` | text from images and scans |
+| `rg PATTERN`, `recollindex` / `recollq QUERY` | search file names and contents |
+| `nextcloudcmd` | sync a Nextcloud folder (needs the user's app password; ask) |
+EOF
+  if [ "$desktop" = yes ]; then
+    cat <<'EOF'
+| `tp-browser open URL` / `snapshot` / `click REF` / `fill REF TEXT` / `screenshot` | drive Chromium on the desktop through Playwright; returns the page's accessibility tree with refs |
+| `tp-ui tree` / `tp-ui click NAME` | read and press GUI elements of desktop apps through accessibility (AT-SPI) |
+| `tp-screenshot [--marks]` | small screenshot of the desktop; `--marks` numbers the clickable elements |
+| `tp-act click X Y` / `type TEXT` / `key KEYS` | mouse and keyboard; reports whether the screen changed |
+| `tp-ocr` | text on the screen with positions |
+| `wmctrl -l`, `xdotool`, `xclip` | windows, input, clipboard |
+EOF
+  fi
+  cat <<'EOF'
+
+Skills with step-by-step guides are in ~/.agents/skills.
+EOF
+}
+
+out=$(render)
+if printf '%s\n' "$out" | sudo -n tee "$manifest" >/dev/null 2>&1; then
+  :
+else
+  # Without root the image's copy stays; write ours next to it.
+  manifest="$HOME/.cache/termiplus/AGENTS.md"
+  mkdir -p "${manifest%/*}"
+  printf '%s\n' "$out" >"$manifest"
+fi
+
+# Link the manifest unless the user keeps an AGENTS.md of their own.
+if [ ! -e "$HOME/AGENTS.md" ] || [ -L "$HOME/AGENTS.md" ]; then
+  ln -sfn "$manifest" "$HOME/AGENTS.md"
+fi
+
+mkdir -p "$HOME/.agents/skills" "$HOME/outputs"
+for d in "$skills"/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  t="$HOME/.agents/skills/$n"
+  if [ ! -e "$t" ] || [ -L "$t" ]; then
+    ln -sfn "${d%/}" "$t"
+  fi
+done
