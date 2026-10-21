@@ -312,6 +312,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, snapshot, archive) |
 | `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); largest tar one home export may stream, e.g. `25G`. Sparse files count at their full size in a tar but barely against the quota |
 | `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further ones wait within their deadline |
+| `FORWARD_PUBLIC_URL` | gateway | empty: Open WebUI Ports panel links (`/proxy/<port>/`) are refused; set: they are redirected to the port forwards on that origin (docs/mcp.md, *Port forwarding*) |
 | `METRICS_LISTEN_ADDR` | gateway | empty (off); Prometheus `/metrics` listener, e.g. `:9100` |
 | `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` / `_FILE`, `MQTT_CLIENT_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, `MQTT_INTERVAL`, `MQTT_CA_FILE` | gateway | MQTT off unless `MQTT_URL` is set; defaults `termiplus-gateway`, `termiplus`, `homeassistant`, `30s` |
 | `HOME_VOLUME_SIZE` | sockproxy | empty (no limit); quota for new home volumes, e.g. `20G` (needs XFS project quotas, see *Disk quota for home volumes*) |

@@ -19,7 +19,7 @@ Each hop has its own blast radius. Open WebUI may start terminals but not read h
 
 | Key | Env / secret | Held by | Proves | Checked at |
 |---|---|---|---|---|
-| gateway API key | `GATEWAY_API_KEY` / `gateway_api_key` | Open WebUI | may use `/p/<policy>/` | `internal/gateway/gateway.go:354` (checkBearer), `internal/gateway/ws.go:78` (first WS message) |
+| gateway API key | `GATEWAY_API_KEY` / `gateway_api_key` | Open WebUI | may use `/p/<policy>/` | `internal/gateway/gateway.go:373` (checkBearer), `internal/gateway/ws.go:78` (first WS message) |
 | control key | `CONTROL_API_KEY` | MCP server | may use `/control/v1/` and name any user | `internal/gateway/control.go:29`, `:73` |
 | admin key | `ADMIN_API_KEY` | MCP server (admin tools) | may set network policy, manage homes | `internal/gateway/admin.go:96` |
 | proxy token | `PROXY_TOKEN` / `proxy_token` | gateway | may talk to the sockproxy | `internal/sockproxy/proxy.go:98` (`X-Proxy-Token`) |

@@ -25,7 +25,7 @@ Open WebUI only knows "a terminal connection with a URL". Putting runtime, limit
 - `image`: another image built on the terminal image. It must be in the sockproxy's `EXTRA_IMAGES`.
 - Name: `[a-z0-9]{1,24}` (`naming.go:31-44`)
 
-Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lifecycle.go:154-158` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
+Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lifecycle.go:154-158` (configHash), `internal/gateway/gateway.go:217` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
 
 ## Connected to
 

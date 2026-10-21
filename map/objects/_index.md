@@ -43,5 +43,5 @@ One line per noun. Read the line; open the card only if you need it. `stub` = no
 
 - [Compose overlays](config/compose-overlays.md) · verified · base compose + opt-in overlays; absence switches a feature off
 - Environment settings · stub · every variable is read in one place → `cmd/gateway/main.go`, `cmd/mcp/main.go`, `cmd/sockproxy/main.go`, `internal/config/`
-- Metrics and MQTT · stub · gateway counters on `METRICS_LISTEN_ADDR` and to an MQTT broker → `cmd/gateway/main.go:92-125`, `deploy/docker-compose.mqtt.yml`
+- Metrics and MQTT · stub · gateway counters on `METRICS_LISTEN_ADDR` and to an MQTT broker → `cmd/gateway/main.go:93-126`, `deploy/docker-compose.mqtt.yml`
 - Images · stub · terminal and desktop images → `image/`, `.github/workflows/release.yml`

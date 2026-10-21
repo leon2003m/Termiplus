@@ -190,6 +190,13 @@ services:
     cpus: 0.5
     pids_limit: 64
 
+  gateway:
+    environment:
+      # Open WebUI's Ports panel links (Open Terminal's /proxy/<port>/) are
+      # redirected to the port forwards instead of being served on Open
+      # WebUI's origin. Without this they are refused.
+      FORWARD_PUBLIC_URL: ${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL}
+
   mcp:
     environment:
       # Console (downloads, "start this desktop") and desktops: two origins.

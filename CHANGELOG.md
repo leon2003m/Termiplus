@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format is based on 
 
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
 
+### Security
+
+- Gateway: Open Terminal's own port proxy (`/proxy/<port>/`, linked from Open WebUI's Ports panel) no longer reaches a terminal. Open WebUI served those apps on its own origin, where script from an app in the session could act with the user's Open WebUI sign-in. With `FORWARD_PUBLIC_URL` set on the gateway (the desktop overlay sets it), a GET for one of the user's running sessions is redirected to the termiplus port forward on its own origin. Otherwise the link is refused. The panel's port list (`/ports`) still works. Its inline preview stays blank because the forward is cross-origin, so use "Open in new tab".
+
 ## [1.0.0-rc.2] - 2026-10-18
 
 Same code as 1.0.0-rc.1, whose release run stopped before the GitHub release because the desktop image failed to build for arm64. The rc.1 images that were already pushed (gateway, sockproxy, mcp, terminal, dns-forwarder) are superseded by rc.2. Upgrade notes and changes: see 1.0.0-rc.1 below.

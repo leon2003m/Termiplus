@@ -20,16 +20,16 @@ Open WebUI thinks it talks to *one* Open Terminal. The gateway must therefore be
 
 ## Steps
 
-1. Reject encoded slashes and non-canonical paths: `internal/gateway/gateway.go:241-254`.
-2. Admin and control APIs are tried first, each with its own key: `gateway.go:258-264`.
-3. Split `/p/<policy>`, defaulting to `default`. An unknown policy is 404: `gateway.go:266-275`, `:394`.
-4. Bearer check, except for WebSockets, which authenticate in their first message (`ws.go:78`): `gateway.go:277-283`, `:354`.
-5. Validate `X-User-Id` and `X-Session-Id`. Spec paths use a shared spec user: `gateway.go:291-325`.
+1. Reject encoded slashes and non-canonical paths: `internal/gateway/gateway.go:251-264`.
+2. Admin and control APIs are tried first, each with its own key: `gateway.go:268-274`.
+3. Split `/p/<policy>`, defaulting to `default`. An unknown policy is 404: `gateway.go:276-285`, `:413`.
+4. Bearer check, except for WebSockets, which authenticate in their first message (`ws.go:78`): `gateway.go:287-293`, `:373`.
+5. Validate `X-User-Id` and `X-Session-Id`. Spec paths use a shared spec user: `gateway.go:301-334`. Open Terminal's own port proxy (`/proxy/…`) stops here and goes to [port-forward](port-forward.md): `gateway.go:336-343`.
 6. `ensure`: name = `naming.Container` or `naming.Ephemeral`, lock per name, fast path for a ready instance: `internal/gateway/lifecycle.go:165-189`.
 7. Inspect. Refuse on an owner label mismatch. Recreate when the config hash differs, an ephemeral sandbox is stopped, or a stopped persistent container's image moved: `lifecycle.go:191-221`.
 8. `admit` (capacity, making room for ephemerals), then `create` via [sockproxy-create](sockproxy-create.md), then start: `lifecycle.go:223-242`, `:291`, `:424`.
 9. Wait until ready, then record the instance: `lifecycle.go:244-269`, `:504`.
-10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:367-390`.
+10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:386-409`.
 11. Later the reaper stops idle persistent containers and removes idle ephemeral ones: `lifecycle.go:576`.
 
 ## If you change this

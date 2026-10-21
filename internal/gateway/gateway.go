@@ -71,6 +71,11 @@ type Config struct {
 	// (default 4); further ones wait, within their deadline.
 	ExportConcurrency int
 
+	// ForwardPublicURL is the public origin of termiplus' port forwards
+	// (FORWARD_PUBLIC_URL). Open Terminal's /proxy/<port>/ is redirected there;
+	// empty refuses it (see otproxy.go).
+	ForwardPublicURL string
+
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
 	AddrFor func(name string, port int) string
@@ -155,6 +160,11 @@ func New(cfg Config) (*Gateway, error) {
 		}
 		cfg.Policies[name] = p
 	}
+	fwd, ok := forwardBase(cfg.ForwardPublicURL)
+	if !ok {
+		return nil, errors.New("forward public URL must be an absolute http(s) URL without query or fragment")
+	}
+	cfg.ForwardPublicURL = fwd
 	if cfg.ExportTimeout <= 0 {
 		cfg.ExportTimeout = 2 * time.Hour
 	}
@@ -320,6 +330,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sessionID = "nochat"
 	case !naming.UserID.MatchString(sessionID):
 		httpError(w, http.StatusBadRequest, "invalid session id")
+		return
+	}
+
+	if isOTProxy(rest) {
+		if ws {
+			httpError(w, http.StatusNotFound, "not found")
+			return
+		}
+		g.serveOTProxy(w, r, userID, otProxyContainer(userID, sessionID, policyName, pol), rest)
 		return
 	}
 
