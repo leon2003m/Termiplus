@@ -79,6 +79,7 @@ func main() {
 		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
 		ExportMaxBytes:    exportMaxBytes(),
 		ExportConcurrency: config.SmallInt("EXPORT_CONCURRENCY", 4, 0, 1024),
+		ForwardPublicURL:  config.Get("FORWARD_PUBLIC_URL", ""),
 	})
 	if err != nil {
 		log.Fatal(err)

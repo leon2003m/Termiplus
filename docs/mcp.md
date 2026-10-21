@@ -426,6 +426,16 @@ the identity store) -> gateway `/control/v1/forward/<container>/<port>/`
 - The base needs its trailing slash; apps with absolute asset paths (`/assets/…`)
   need a base-path setting (Vite `base`, webpack `publicPath`), as with
   code-server's path proxy.
+- **Open WebUI's Ports panel** lists the ports from Open Terminal's `/ports`
+  and links to Open Terminal's own proxy, `/proxy/<port>/`, which Open WebUI
+  serves on *its* origin. An app there (anything the model wrote) would run
+  with the user's Open WebUI sign-in, so that proxy never reaches a terminal.
+  With `FORWARD_PUBLIC_URL` set on the gateway (the desktop overlay does
+  this), a GET for one of the user's running sessions is redirected (307) to
+  the forward above, with the same port rules. Otherwise, and for other
+  methods and WebSockets, it is 404. "Open in new tab" works after the
+  forward sign-in. The panel's inline preview stays blank, because the forward
+  is on another origin.
 
 ### Workspace entitlements
 
