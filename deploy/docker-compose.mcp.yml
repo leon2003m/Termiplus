@@ -103,6 +103,11 @@ services:
       MCP_IDENTITY_FILE: /data/identities.json
       MCP_AUDIT_FILE: /data/audit.log
       MCP_SHARES_FILE: /data/shares.json
+      # Your own group/role names for the persist and admin roles
+      # (comma-separated; empty keeps termiplus-persist / termiplus-admin).
+      # See docs/mcp.md, section 4.
+      MCP_PERSIST_ROLES: ${MCP_PERSIST_ROLES:-}
+      MCP_ADMIN_ROLES: ${MCP_ADMIN_ROLES:-}
     volumes:
       - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]
