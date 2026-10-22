@@ -20,7 +20,7 @@ KasmVNC knows only basic auth, and the desktop serves arbitrary user-controlled 
 
 ## Steps
 
-1. `DesktopHandler`: refuse `Service-Worker`, route `/stream/` and `/share/`: `internal/mcp/stream.go:64-80`.
+1. `DesktopHandler`: refuse `Service-Worker`, route `/stream/` and `/share/`: `internal/mcp/stream.go:64-81`.
 2. Authenticate the proxy headers, look up the Open WebUI id (unlinked → 403), check entitlement: `stream.go:86-108`.
 3. Share path: look up the token hash, check expiry and the optional named viewer, set `view`: `stream.go:114`, `internal/mcp/shares.go:58`.
 4. `proxy`: same-origin check on upgrades, strip the identity headers, set `X-User-Id` = owner, `view_only` if view, drop `untrustedResponseHeaders`: `stream.go:84`, `:142-190`.

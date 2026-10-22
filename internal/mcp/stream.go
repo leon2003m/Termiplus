@@ -65,6 +65,7 @@ func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/healthz":
 		uiJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	case serveFavicon(w, r):
 	case r.Header.Get("Service-Worker") != "":
 		// A worker registered here would outlive the desktop and control the
 		// whole origin for later sign-ins; KasmVNC needs none.
@@ -239,6 +240,8 @@ func stoppedPage(console, session string) string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>termiplus desktop</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
 </head>
 <body style="font-family: system-ui, sans-serif; margin: 2em">
 <h1>termiplus</h1>
@@ -255,6 +258,8 @@ const sharedStoppedPage = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>termiplus desktop</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
 </head>
 <body style="font-family: system-ui, sans-serif; margin: 2em">
 <h1>termiplus</h1>
@@ -265,7 +270,7 @@ const sharedStoppedPage = `<!doctype html>
 
 func setStoppedPage(h http.Header) {
 	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 }
