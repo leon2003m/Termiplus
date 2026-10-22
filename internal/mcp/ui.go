@@ -71,7 +71,7 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		return
 	}
 	// Identity comes from the sign-in proxy only (it overwrites client copies).
-	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
+	p, err := u.srv.identity().Authenticate(r)
 	if err != nil {
 		uiError(w, http.StatusUnauthorized, "not signed in")
 		return

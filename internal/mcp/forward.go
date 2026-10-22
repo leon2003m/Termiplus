@@ -44,7 +44,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		uiJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
-	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
+	p, err := f.srv.identity().Authenticate(r)
 	if err != nil {
 		forwardError(w, http.StatusUnauthorized, "Not signed in.")
 		return
