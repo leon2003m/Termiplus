@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- MCP: `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES` name your own groups or roles (e.g. `ki-nutzer`, `ki-admin`) for the persist and admin roles. When set, forwarded group names are normalised (`/name`, `role:name` and `name` are the same) for roles and workspace entitlements, in MCP tools, the management UI and the desktop, share and port-forward pages. Unset, names match exactly as before.
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
 
 ## [1.0.0-rc.2] - 2026-10-18

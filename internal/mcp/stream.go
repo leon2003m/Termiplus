@@ -84,7 +84,7 @@ func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var untrustedResponseHeaders = []string{"Www-Authenticate", "Set-Cookie", "Service-Worker-Allowed", "Clear-Site-Data"}
 
 func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
+	p, err := s.srv.identity().Authenticate(r)
 	if err != nil {
 		forwardError(w, http.StatusUnauthorized, "Not signed in.")
 		return
@@ -112,7 +112,7 @@ func (s *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // serveShare serves /share/<token>/: the shared desktop, view only, to any
 // signed-in user (or only the one it was shared with) while the link lasts.
 func (s *streamProxy) serveShare(w http.ResponseWriter, r *http.Request, shares *ShareStore) {
-	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
+	p, err := s.srv.identity().Authenticate(r)
 	if err != nil {
 		forwardError(w, http.StatusUnauthorized, "Not signed in.")
 		return

@@ -3,7 +3,7 @@ type: object
 cluster: identity
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-10-22 @ feat/role-mapping
 entity: internal/mcp/mcp.go
 ---
 
@@ -18,11 +18,11 @@ termiplus never verifies tokens itself. oauth2-proxy does that and forwards the 
 ## Shape
 
 - `UserID`: the key every container, volume and archive name is hashed from. It is passed to the gateway as `X-User-Id`.
-- `Roles`: group names. `termiplus-persist` (RolePersist) is needed to *request* a persistent session. `termiplus-admin` (RoleAdmin) is needed for the admin tools.
+- `Roles`: group names. `termiplus-persist` (RolePersist) is needed to *request* a persistent session. `termiplus-admin` (RoleAdmin) is needed for the admin tools. With `MCP_PERSIST_ROLES` / `MCP_ADMIN_ROLES` set, a [RoleMap](../../../internal/mcp/roles.go) normalises the forwarded groups (`/name`, `role:name`) and adds the two roles when a listed group is present; the authenticator applies it, so every role and entitlement check sees the mapped list.
 - `Subject`: the OIDC subject when `UserID` came from the plugin. It is recorded in the [IdentityStore](identity-store.md).
 - Headers: `X-Forwarded-User` / `X-Forwarded-Groups` from the proxy, and `X-Termiplus-Owui-Key` / `X-Termiplus-Owui-User` from the plugin.
 
-Citations: `internal/mcp/mcp.go:22` (Principal), `internal/mcp/mcp.go:104-105` (RolePersist, RoleAdmin), `internal/mcp/auth.go:13-23` (headers), `internal/mcp/auth.go:40` (ProxyHeaderAuthenticator), `internal/mcp/server.go:431-439` (persist check), `internal/mcp/server.go:575-578` (adminOnly)
+Citations: `internal/mcp/mcp.go:22` (Principal), `internal/mcp/mcp.go:104-105` (RolePersist, RoleAdmin), `internal/mcp/auth.go:13-23` (headers), `internal/mcp/auth.go:43` (ProxyHeaderAuthenticator), `internal/mcp/roles.go:20` (RoleMap), `internal/mcp/roles.go:62` (apply), `internal/mcp/server.go:52-65` (WithRoles, identity), `internal/mcp/server.go:451-460` (persist check), `internal/mcp/server.go:593-597` (adminOnly), `cmd/mcp/main.go:47-55` (MCP_PERSIST_ROLES, MCP_ADMIN_ROLES)
 
 ## Connected to
 
