@@ -56,6 +56,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/healthz":
 		uiJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	case serveFavicon(w, r):
 	case strings.HasPrefix(r.URL.Path, uiPrefix+"api/"):
 		u.api(w, r, strings.TrimPrefix(r.URL.Path, uiPrefix+"api/"))
 	case strings.HasPrefix(r.URL.Path, uiPrefix) && r.Method == http.MethodGet:
@@ -63,6 +64,35 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		uiError(w, http.StatusNotFound, "not found")
 	}
+}
+
+// Favicon paths at the root of the console and desktop origins. Browsers ask
+// for /favicon.ico on pages without an icon link (KasmVNC's, error pages).
+var faviconFiles = map[string]struct{ file, contentType string }{
+	"/favicon.ico": {"ui/favicon.png", "image/png"},
+	"/favicon.svg": {"ui/favicon.svg", "image/svg+xml"},
+	"/favicon.png": {"ui/favicon.png", "image/png"},
+}
+
+// serveFavicon answers a GET for a root favicon path and reports whether it did.
+func serveFavicon(w http.ResponseWriter, r *http.Request) bool {
+	f, ok := faviconFiles[r.URL.Path]
+	if !ok || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return false
+	}
+	b, err := uiFiles.ReadFile(f.file)
+	if err != nil {
+		return false
+	}
+	h := w.Header()
+	h.Set("Content-Type", f.contentType)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "public, max-age=86400")
+	if f.contentType == "image/svg+xml" {
+		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	}
+	_, _ = w.Write(b)
+	return true
 }
 
 func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {

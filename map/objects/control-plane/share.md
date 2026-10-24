@@ -21,7 +21,7 @@ Showing a colleague your screen must not hand over control or your session. So t
 - Fields: public `share_id` (first 12 hex characters of the token hash), owner (Open WebUI id), session, workspace, created, expires, optional for-subject/for-name.
 - Created and revoked with `share_desktop` (confirmed). Served by the desktop listener, which asks the gateway stream for the view-only user.
 
-Citations: `internal/mcp/shares.go:19-24` (doc), `:26-31` (limits), `:34` (Share), `:58` (ShareStore), `:330` (tool), `internal/mcp/stream.go:114` (serveShare), `:142` (proxy, `view`), `internal/gateway/stream.go:13-22`
+Citations: `internal/mcp/shares.go:19-24` (doc), `:26-31` (limits), `:34` (Share), `:58` (ShareStore), `:330` (tool), `internal/mcp/stream.go:115` (serveShare), `:142` (proxy, `view`), `internal/gateway/stream.go:13-22`
 
 ## Connected to
 

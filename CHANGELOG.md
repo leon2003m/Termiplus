@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- Console and desktop pages have a favicon (SVG with a 32 px PNG fallback). Both origins also answer `/favicon.ico`, so KasmVNC and error pages show it too. A test fails if a served HTML page does not link an icon.
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
 
 ## [1.0.0-rc.2] - 2026-10-18
