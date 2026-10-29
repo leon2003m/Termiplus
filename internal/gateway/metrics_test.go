@@ -66,14 +66,14 @@ func TestMetrics(t *testing.T) {
 func TestMetricsMQTT(t *testing.T) {
 	h := newHarness(t)
 	h.get(t, "/files/cwd", "alice", testAPIKey)
-	b := mqtttest.NewBroker(t, "ha", "pw")
+	b := mqtttest.NewBroker(t, "metrics", "pw")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		h.g.RunMQTT(ctx, MQTTConfig{
-			Options:         mqtt.Options{URL: b.URL(), ClientID: "termiplus-gateway", Username: "ha", Password: "pw"},
+			Options:         mqtt.Options{URL: b.URL(), ClientID: "termiplus-gateway", Username: "metrics", Password: "pw"},
 			Prefix:          "termiplus",
-			DiscoveryPrefix: "homeassistant",
+			DiscoveryPrefix: "discovery",
 			Interval:        200 * time.Millisecond,
 		})
 		close(done)
@@ -102,14 +102,14 @@ func TestMetricsMQTT(t *testing.T) {
 	pubs := waitFor("two states", func(p []mqtttest.Pub) bool { return count(p, "termiplus/state") >= 2 })
 
 	cn := b.Connects()[0]
-	if cn.WillTopic != "termiplus/status" || cn.WillPayload != "offline" || cn.User != "ha" {
+	if cn.WillTopic != "termiplus/status" || cn.WillPayload != "offline" || cn.User != "metrics" {
 		t.Fatalf("connect: %+v", cn)
 	}
 	var cfg map[string]any
 	var state Metrics
 	for _, p := range pubs {
 		switch {
-		case p.Topic == "homeassistant/sensor/termiplus-gateway/running_workspaces/config":
+		case p.Topic == "discovery/sensor/termiplus-gateway/running_workspaces/config":
 			_ = json.Unmarshal([]byte(p.Payload), &cfg)
 		case p.Topic == "termiplus/state":
 			if err := json.Unmarshal([]byte(p.Payload), &state); err != nil {
@@ -126,7 +126,7 @@ func TestMetricsMQTT(t *testing.T) {
 	}
 	discovery := 0
 	for _, p := range pubs {
-		if strings.HasPrefix(p.Topic, "homeassistant/") {
+		if strings.HasPrefix(p.Topic, "discovery/") {
 			discovery++
 		}
 	}

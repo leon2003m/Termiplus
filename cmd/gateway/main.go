@@ -94,8 +94,8 @@ func main() {
 		go func() { log.Fatal(ms.ListenAndServe()) }()
 		log.Printf("metrics on %s/metrics", addr)
 	}
-	// The same metrics to an MQTT broker (e.g. Home Assistant's), off unless
-	// MQTT_URL is set.
+	// The same metrics to an MQTT broker, off unless MQTT_URL is set. Discovery
+	// messages only when MQTT_DISCOVERY_PREFIX is set.
 	if mqttURL := config.Get("MQTT_URL", ""); mqttURL != "" {
 		opts := mqtt.Options{
 			URL:      mqttURL,
@@ -114,7 +114,7 @@ func main() {
 			}
 			opts.TLS = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 		}
-		discovery := config.Get("MQTT_DISCOVERY_PREFIX", "homeassistant")
+		discovery := config.Get("MQTT_DISCOVERY_PREFIX", "")
 		if discovery == "off" {
 			discovery = ""
 		}

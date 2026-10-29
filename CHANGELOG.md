@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format is based on 
 
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
 
+### Changed
+
+- MQTT discovery messages are off by default. Set `MQTT_DISCOVERY_PREFIX` to your hub's discovery prefix to keep sending them; the MQTT docs and examples no longer name a specific hub.
+
 ## [1.0.0-rc.2] - 2026-10-18
 
 Same code as 1.0.0-rc.1, whose release run stopped before the GitHub release because the desktop image failed to build for arm64. The rc.1 images that were already pushed (gateway, sockproxy, mcp, terminal, dns-forwarder) are superseded by rc.2. Upgrade notes and changes: see 1.0.0-rc.1 below.

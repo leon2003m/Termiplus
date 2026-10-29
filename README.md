@@ -295,7 +295,7 @@ The gateway reads and writes the home through a short-lived archive helper conta
 The gateway counts what it runs and does, without user ids or names: running and stopped workspaces, running sandboxes, open sessions, users with something running, starts, failed requests, idle stops, deleted sandboxes, refusals at `MAX_RUNNING`, image-update recreations, and the socket proxy's allowed, denied and failed calls.
 
 - **Prometheus:** set `METRICS_LISTEN_ADDR` (e.g. `:9100`) and scrape `/metrics` on that port. It is a separate listener; publish it only to your monitoring network.
-- **MQTT / Home Assistant:** add `deploy/docker-compose.mqtt.yml` with `MQTT_URL` (e.g. `mqtt://homeassistant.local:1883`), optional `MQTT_USERNAME` and `deploy/secrets/mqtt_password`. The gateway publishes the numbers as JSON to `termiplus/state` (retained, every `MQTT_INTERVAL`, default 30s) and `online`/`offline` to `termiplus/status` (also its last will). With Home Assistant's MQTT discovery (prefix `homeassistant`, `MQTT_DISCOVERY_PREFIX=off` to disable) the values appear as sensors of a "termiplus" device. `mqtts://` uses TLS; `MQTT_CA_FILE` adds your own CA. The overlay gives the gateway a network with a route out to reach the broker.
+- **MQTT:** add `deploy/docker-compose.mqtt.yml` with `MQTT_URL` (e.g. `mqtt://broker.local:1883`), optional `MQTT_USERNAME` and `deploy/secrets/mqtt_password`. The gateway publishes the numbers as JSON to `termiplus/state` (retained, every `MQTT_INTERVAL`, default 30s) and `online`/`offline` to `termiplus/status` (also its last will). Set `MQTT_DISCOVERY_PREFIX` to your hub's discovery prefix to also send MQTT discovery messages; the values then appear as sensors of a "termiplus" device. Off by default. `mqtts://` uses TLS; `MQTT_CA_FILE` adds your own CA. The overlay gives the gateway a network with a route out to reach the broker.
 
 ## Settings
 
@@ -313,7 +313,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); largest tar one home export may stream, e.g. `25G`. Sparse files count at their full size in a tar but barely against the quota |
 | `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further ones wait within their deadline |
 | `METRICS_LISTEN_ADDR` | gateway | empty (off); Prometheus `/metrics` listener, e.g. `:9100` |
-| `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` / `_FILE`, `MQTT_CLIENT_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, `MQTT_INTERVAL`, `MQTT_CA_FILE` | gateway | MQTT off unless `MQTT_URL` is set; defaults `termiplus-gateway`, `termiplus`, `homeassistant`, `30s` |
+| `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` / `_FILE`, `MQTT_CLIENT_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, `MQTT_INTERVAL`, `MQTT_CA_FILE` | gateway | MQTT off unless `MQTT_URL` is set; defaults `termiplus-gateway`, `termiplus`, empty (no discovery), `30s` |
 | `HOME_VOLUME_SIZE` | sockproxy | empty (no limit); quota for new home volumes, e.g. `20G` (needs XFS project quotas, see *Disk quota for home volumes*) |
 | `DOCKER_SOCKET` | sockproxy | `/var/run/docker.sock` |
 | `GATEWAY_API_KEY` / `_FILE` | gateway | required, min. 32 chars |

@@ -1,7 +1,7 @@
 // Package mqtt is a minimal MQTT 3.1.1 publisher: connect (optionally over
 // TLS, with username/password and a last-will message), publish at QoS 0,
 // keep the connection alive and disconnect. It cannot subscribe. That is all
-// the gateway needs to report its metrics to Home Assistant or any broker.
+// the gateway needs to report its metrics to a broker.
 package mqtt
 
 import (

@@ -149,8 +149,7 @@ type MQTTConfig struct {
 	// Prefix is the topic prefix: <prefix>/state (JSON, retained) and
 	// <prefix>/status ("online"/"offline", retained; offline is the will).
 	Prefix string
-	// DiscoveryPrefix enables Home Assistant MQTT discovery under it (usually
-	// "homeassistant"). Empty: no discovery messages.
+	// DiscoveryPrefix enables MQTT discovery messages under it. Empty: none.
 	DiscoveryPrefix string
 	Interval        time.Duration
 }
@@ -225,7 +224,7 @@ func (g *Gateway) publishLoop(ctx context.Context, c *mqtt.Client, cfg MQTTConfi
 	}
 }
 
-// discoveryMessage is the Home Assistant config for one sensor.
+// discoveryMessage is the MQTT discovery config for one sensor.
 func discoveryMessage(cfg MQTTConfig, d metricDesc, status string) (string, []byte) {
 	id := "termiplus_" + d.key
 	sc := "measurement"
