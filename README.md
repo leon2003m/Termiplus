@@ -4,6 +4,9 @@
 [![Security](https://github.com/leon2003m/termiplus/actions/workflows/security.yml/badge.svg?branch=dev)](https://github.com/leon2003m/termiplus/actions/workflows/security.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
+> [!WARNING]
+> **Experimental. Do not use in production.** termiplus is a personal project and test environment. Most of the code was written with AI assistance and has not been independently security reviewed, so expect serious security bugs. It runs untrusted code and controls Docker on the host, so one such bug can expose the host, other users' files or your network. Run it only on a machine you can wipe, keep it off the public internet, and keep real users and real data away from it. Found a problem? See [SECURITY.md](SECURITY.md).
+
 Per-user Open Terminal containers for Open WebUI. Every user gets their own isolated terminal, started on demand and stopped when idle. Users can pick a **persistent** terminal (home directory survives) or a **throwaway sandbox** per chat. A self-hosted replacement for the paid Open WebUI "Terminals" orchestrator.
 
 ```
