@@ -493,7 +493,7 @@ func (m *manager) probe(ctx context.Context, inst *instance) bool {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+inst.addr+"/health", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := healthClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -504,10 +504,9 @@ func (m *manager) probe(ctx context.Context, inst *instance) bool {
 func (m *manager) waitReady(ctx context.Context, inst *instance) error {
 	ctx, cancel := context.WithTimeout(ctx, m.startWait)
 	defer cancel()
-	client := &http.Client{Timeout: 2 * time.Second}
 	for {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+inst.addr+"/health", nil)
-		resp, err := client.Do(req)
+		resp, err := healthClient.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
