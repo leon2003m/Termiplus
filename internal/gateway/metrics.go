@@ -15,8 +15,8 @@ import (
 )
 
 // Metrics: counts of what the gateway runs and has done, for Prometheus
-// (MetricsHandler, on its own listener) and MQTT (RunMQTT, e.g. into Home
-// Assistant). They hold no user ids or names.
+// (MetricsHandler, on its own listener) and MQTT (RunMQTT, to a broker).
+// They hold no user ids or names.
 
 type counters struct {
 	starts, startFailures, idleStops, sandboxesDeleted, capacityRefusals, imageRecreates atomic.Int64
