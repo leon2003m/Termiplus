@@ -22,7 +22,7 @@ An LLM picks the calls, so the server must not trust *it*: every destructive too
 | `list_workspaces`, `list_sessions` | entitled | no | `server.go:416`, `:454` |
 | `request_session` | entitled; persistent needs `termiplus-persist` | persistent only | `server.go:430` |
 | `destroy_session` | own session | yes | `server.go:468` |
-| `reset_workspace`, `manage_snapshots` | own home | yes | `homes.go:260`, `:286` |
+| `reset_workspace`, `manage_snapshots` | own home | yes | `homes.go:267`, `:293` |
 | `share_desktop` | own desktop session | yes | `shares.go:330` |
 | `get_network_policy`, `get_entitlements`, `get_audit_log`, `manage_group` | admin | no | `server.go:485`, `:495`, `:561`, `:541` |
 | `set_network_policy`, `set_entitlements`, `manage_user`, `manage_departed` | admin | yes | `server.go:524`, `:506`, `:551`, `departed.go:310` |

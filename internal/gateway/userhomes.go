@@ -229,6 +229,7 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		b, err := g.snapshot(r.Context(), userID, ws, r.URL.Query().Get("prune") == "1")
 		switch {
 		case errors.Is(err, errWouldPrune):
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusConflict, err.Error()+"; it needs a confirmation")
 		case errors.Is(err, errNoHome):
 			httpError(w, http.StatusNotFound, "this workspace has no home yet: start it once")

@@ -30,7 +30,7 @@ Open WebUI thinks it talks to *one* Open Terminal. The gateway must therefore be
 8. `admit` (capacity, making room for ephemerals), then `create` via [sockproxy-create](sockproxy-create.md), then start: `lifecycle.go:223-242`, `:291`, `:424`.
 9. Wait until ready, then record the instance: `lifecycle.go:244-269`, `:504`.
 10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:367-390`.
-11. Later the reaper stops idle persistent containers and removes idle ephemeral ones: `lifecycle.go:576`.
+11. Later the reaper stops idle persistent containers and removes idle ephemeral ones: `lifecycle.go:575`.
 
 ## If you change this
 

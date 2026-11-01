@@ -19,10 +19,11 @@ Homes are Docker volumes, so a reset or a departure would otherwise destroy data
 
 - Layout: `<BACKUP_DIR>/snapshots/<volume>/<id>.tar.gz` (kept: `SNAPSHOT_KEEP`, default 5) and `<BACKUP_DIR>/archived/<volume>/<id>.tar.gz`.
 - Id: UTC creation time, `20261016T221500Z`, with a suffix `-001`… inside one second. Ids sort in creation order and are never reused.
+- A create that would prune the oldest snapshot is refused (409) unless it carries `?prune=1`. The MCP server sends that only after the human confirmation, and the gateway checks it under the store lock, so overlapping creates cannot both prune.
 - Tar entries are `user/...`, the `exportHome` format. Restores go back through the [archive helper](../workspaces/archive-helper.md), which filters uploaded tars.
 - Without `BACKUP_DIR`, snapshots, user archives and departed handling answer "not configured". The MCP overlay sets it to `/data/backups`.
 
-Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:41` (Backup), `:47` (backupStore), `:54` (newBackupStore), `:66` (homeDir), `:106` (create), `internal/gateway/gateway.go:57-59`, `:191-192`, `cmd/gateway/main.go:76-77`, `internal/gateway/userhomes.go:107` (restoreBackup), `:121` (ArchivedHome), `:131` (archiveUser), `:177` (restoreUser), `deploy/docker-compose.mcp.yml:118`
+Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:46` (Backup), `:52` (backupStore), `:59` (newBackupStore), `:71` (homeDir), `:113` (create), `internal/gateway/gateway.go:57-59`, `:191-192`, `cmd/gateway/main.go:76-77`, `internal/gateway/userhomes.go:107` (restoreBackup), `:121` (ArchivedHome), `:131` (archiveUser), `:177` (restoreUser), `deploy/docker-compose.mcp.yml:118`
 
 ## Connected to
 

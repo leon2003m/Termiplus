@@ -22,7 +22,7 @@ The default is fixed in code: public egress allowed, internal destinations denie
 - `Store.Put` validates, then writes policy, hosts and egress files atomically. A rejected policy changes nothing on disk.
 - Files (netpolicy overlay): `NETPOLICY_FILE`, `NETPOLICY_DNSMASQ_FILE`, `NETPOLICY_EGRESS_FILE` under `deploy/netpolicy/`.
 
-Citations: `internal/netpolicy/netpolicy.go:1-11` (rule), `:43` (Policy), `:50-61` (denyList), `:72` (Validate), `internal/netpolicy/render.go:18`, `:41`, `internal/netpolicy/store.go:85` (Put), `:142` (writeFilesAtomic), `internal/gateway/admin.go:64` (putNetPolicy), `deploy/docker-compose.netpolicy.yml:55-59`
+Citations: `internal/netpolicy/netpolicy.go:1-11` (rule), `:43` (Policy), `:50-61` (denyList), `:72` (Validate), `internal/netpolicy/render.go:18`, `:41`, `internal/netpolicy/store.go:85` (Put), `:142` (writeFilesAtomic), `internal/gateway/admin.go:65` (putNetPolicy), `deploy/docker-compose.netpolicy.yml:55-59`
 
 ## Connected to
 

@@ -21,8 +21,8 @@ The gateway runs unprivileged and never touches iptables. It only renders files.
 ## Steps
 
 1. MCP path, if used: `set_network_policy`, admin only, with confirmation: `internal/mcp/server.go:524`. It forwards to the gateway: `internal/mcp/gateway_backend.go:138`.
-2. `serveAdmin` returns 404 when no admin key or policy store is configured. It routes `/admin/netpolicy`: `internal/gateway/admin.go:18-23`, `:31`, `:48`. The key is checked at `checkAdminKey`, `admin.go:96`.
-3. `putNetPolicy` takes a size-limited body, decodes it strictly and rejects trailing data: `admin.go:64`.
+2. `serveAdmin` returns 404 when no admin key or policy store is configured. It routes `/admin/netpolicy`: `internal/gateway/admin.go:19-24`, `:32`, `:49`. The key is checked at `checkAdminKey`, `admin.go:97`.
+3. `putNetPolicy` takes a size-limited body, decodes it strictly and rejects trailing data: `admin.go:65`.
 4. `Store.Put` → `write` → `Validate`, which checks the `DenyList` plus any extra deny: `internal/netpolicy/store.go:85`, `:93`, `netpolicy.go:72`, `:147`.
 5. Render, then write the three files atomically: `render.go:18` (`DnsmasqHosts`), `:41` (`EgressRules`), `store.go:142` (`writeFilesAtomic`).
 6. The forwarder reloads the hosts dir via inotify; no signal is needed: `deploy/dns-forwarder/entrypoint.sh:7-9`, `:20`.

@@ -144,19 +144,20 @@ func (b *backupStore) create(kind, volume string, prune bool, write func(io.Writ
 	base := now.Format("20060102T150405Z")
 	next := 0
 	existing, err := b.list(kind, volume)
-	if kind == kindSnapshot && !prune && (err != nil || len(existing) >= b.keep) {
+	if err != nil {
+		return Backup{}, err
+	}
+	if kind == kindSnapshot && !prune && len(existing) >= b.keep {
 		return Backup{}, errWouldPrune
 	}
-	if err == nil {
-		for _, e := range existing {
-			if e.ID == base && next < 1 {
-				next = 1
-			}
-			if n, ok := strings.CutPrefix(e.ID, base+"-"); ok {
-				var v int
-				if _, err := fmt.Sscanf(n, "%03d", &v); err == nil && v+1 > next {
-					next = v + 1
-				}
+	for _, e := range existing {
+		if e.ID == base && next < 1 {
+			next = 1
+		}
+		if n, ok := strings.CutPrefix(e.ID, base+"-"); ok {
+			var v int
+			if _, err := fmt.Sscanf(n, "%03d", &v); err == nil && v+1 > next {
+				next = v + 1
 			}
 		}
 	}

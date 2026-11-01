@@ -12,6 +12,12 @@ All notable changes to this project are documented here. The format is based on 
 
 - MQTT discovery messages are off by default. Set `MQTT_DISCOVERY_PREFIX` to your hub's discovery prefix to keep sending them; the MQTT docs and examples no longer name a specific hub.
 
+### Security
+
+- Snapshots: a create that would delete the oldest snapshot now needs the human confirmation at the gateway too (`?prune=1` on the control API, 409 without it). Before, two overlapping unconfirmed `manage_snapshots create` calls could both pass the MCP check and delete it. The console is unchanged. (security audit run 2)
+- Health checks no longer follow redirects: a container whose `/health` answers 3xx is not ready, and the gateway never requests the redirect target, which may be on a network the terminal cannot reach. (security audit run 2)
+- Home downloads end at `EXPORT_TIMEOUT` even when the client stops reading. Before, a stalled download held the home's archive helper and an export slot until the client went away. (security audit run 2)
+
 ## [1.0.0-rc.2] - 2026-10-18
 
 Same code as 1.0.0-rc.1, whose release run stopped before the GitHub release because the desktop image failed to build for arm64. The rc.1 images that were already pushed (gateway, sockproxy, mcp, terminal, dns-forwarder) are superseded by rc.2. Upgrade notes and changes: see 1.0.0-rc.1 below.
