@@ -1,0 +1,68 @@
+name: CI
+
+# Forgejo CI on the maintainer's runner: lint and tests, as in `make check`.
+# Image builds, the desktop smoke test and the OIDC integration stay in
+# .github/workflows/ci.yml on the GitHub mirror (no Docker in this runner).
+
+on:
+  push:
+    branches: [dev, alpha]
+  pull_request:
+    branches: [main, dev, alpha]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in step with .github/workflows/ci.yml (GO_VERSION, LINT_GO_VERSION).
+  STATICCHECK_VERSION: "2026.2.1"
+
+jobs:
+  lint:
+    runs-on: docker
+    container:
+      # staticcheck cannot read Go 1.27 export data yet, so lint on 1.26.
+      image: harbor.leonm.internal/dockerhub/library/golang:1.26-bookworm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git config --global --add safe.directory "$PWD"
+          git init -q .
+          git -c http.extraHeader="Authorization: token $TOKEN" \
+            fetch -q --depth=1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+      - name: Install tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends shellcheck >/dev/null
+          .github/scripts/install-tools.sh actionlint hadolint
+          go install "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}"
+      - name: make lint
+        run: PATH="$HOME/.local/bin:$(go env GOPATH)/bin:$PATH" make lint
+
+  test:
+    runs-on: docker
+    container:
+      image: harbor.leonm.internal/dockerhub/library/golang:1.27-bookworm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git config --global --add safe.directory "$PWD"
+          git init -q .
+          git -c http.extraHeader="Authorization: token $TOKEN" \
+            fetch -q --depth=1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+      - name: Install python3
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends python3 >/dev/null
+      - name: make test test-plugin
+        run: make test test-plugin
