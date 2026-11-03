@@ -58,6 +58,10 @@ check "desktop: Open Terminal does not get the desktop password" 0 "$leaked"
 check "desktop: Firefox policies are in place" 0 "$(docker exec "$P" test -r /usr/lib/firefox-esr/distribution/policies.json; echo $?)"
 check "desktop: uBlock Origin is installed" 0 "$(docker exec "$P" sh -c 'test -d /usr/share/mozilla/extensions/*/uBlock0@raymondhill.net'; echo $?)"
 
+check "desktop: Dolphin is installed" 0 "$(docker exec "$P" sh -c 'command -v dolphin >/dev/null'; echo $?)"
+check "desktop: panel launches Dolphin" 0 "$(docker exec "$P" grep -q org.kde.dolphin.desktop /etc/xdg/xfce4/panel/default.xml; echo $?)"
+check "desktop: preferred file manager is Dolphin" 0 "$(docker exec "$P" grep -q FileManager=dolphin /etc/xdg/xfce4/helpers.rc; echo $?)"
+
 for _ in $(seq 1 60); do [ "$(code "http://$TP/health")" = 200 ] && break; sleep 1; done
 check "plain: Open Terminal health" 200 "$(code "http://$TP/health")"
 check "plain: no desktop without the password" 000 "$(code "http://$VP/")"

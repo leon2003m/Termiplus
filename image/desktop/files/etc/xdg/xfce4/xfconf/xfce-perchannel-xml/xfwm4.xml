@@ -3,7 +3,7 @@
      off: shadows and transparency only cost bandwidth over the stream. -->
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
-    <property name="theme" type="string" value="Arc-Dark"/>
+    <property name="theme" type="string" value="Termiplus-Dark"/>
     <property name="title_font" type="string" value="Inter Semi-Bold 10"/>
     <property name="title_alignment" type="string" value="center"/>
     <property name="button_layout" type="string" value="O|HMC"/>

@@ -642,3 +642,15 @@ PNG bytes and decoded dimensions are validated (320×320 maximum, 256 KiB);
 requests time out after five seconds, cache for 30 seconds per running instance,
 and return private image responses with nosniff. Preview requests do not count
 as user activity, so an unattended temporary desktop can still expire.
+
+### Desktop appearance and file manager
+
+New homes use Dolphin for folders and Home/File System, Firefox ESR for links,
+Kate for text, Inter fonts and Papirus-Dark icons. Qt uses Breeze with a dark
+palette and KDE applications use the matching `kdeglobals`; the default terminal
+is xfce4-terminal. Baloo indexing is disabled. XFCE continues to provide the
+session, window manager and compact bottom dock; Plasma is not started.
+`image/desktop/theme.py` derives Termiplus-Dark from the Debian Arc-Dark package
+at build time and changes its blue selection accents to green. The wallpaper
+replacement mechanism is unchanged. Existing homes keep their XFCE settings;
+changing image defaults does not overwrite personal configuration.

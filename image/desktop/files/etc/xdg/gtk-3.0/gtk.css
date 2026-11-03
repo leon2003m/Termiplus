@@ -1,0 +1,4 @@
+/* Compact dock on the maintained Arc base. */
+.xfce4-panel { border-radius: 14px; border: 1px solid #41464c; }
+.xfce4-panel button { border-radius: 9px; margin: 3px; }
+.xfce4-panel button:checked { border-bottom: 2px solid #3fb950; }

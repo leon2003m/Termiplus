@@ -53,3 +53,8 @@ checks owner and running state before its 30-second instance cache.
 `internal/mcp/preview.go` checks the owner's entitlement and validates the bounded
 PNG again. `internal/mcp/ui/app.js` refreshes running desktop thumbnails only
 while visible. No Docker socket allowlist change or KasmVNC owner rights.
+
+Desktop image defaults in `image/desktop/files/` select Dolphin, Breeze/dark Qt,
+Papirus-Dark and an XFCE dock. `image/desktop/theme.py` recolours Debian's Arc
+resource bundle at build time. `image/desktop/start-desktop.sh` still starts
+XFCE/KasmVNC; no Plasma session or new container permissions are involved.

@@ -21,8 +21,8 @@ RUN curl -fsSL -o /tmp/kasmvnc.deb \
     && echo "${KASMVNC_SHA256}  /tmp/kasmvnc.deb" | sha256sum -c - \
     && apt-get update && apt-get install -y --no-install-recommends \
         /tmp/kasmvnc.deb xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-terminal xfce4-settings \
-        maim python3-pil dbus-x11 x11-xserver-utils fonts-dejavu-core \
-        thunar tumbler kate ristretto xfce4-appfinder xfce4-whiskermenu-plugin exo-utils xdg-utils \
+        libglib2.0-bin maim python3-pil dbus-x11 x11-xserver-utils fonts-dejavu-core \
+        dolphin kio-extras qt6ct kde-style-breeze kate ristretto xfce4-appfinder xfce4-whiskermenu-plugin exo-utils xdg-utils \
         firefox-esr webext-ublock-origin-firefox arc-theme papirus-icon-theme fonts-inter fonts-noto-color-emoji fonts-noto-cjk librsvg2-common \
     && rm -rf /var/lib/apt/lists/* /tmp/kasmvnc.deb \
     && usermod -aG ssl-cert user
@@ -36,6 +36,15 @@ COPY files/ /
 # default image until a user picks another one, so that path points here.
 RUN dpkg-divert --quiet --local --rename --add /usr/share/backgrounds/xfce/xfce-x.svg \
     && ln -s ../termiplus/default.svg /usr/share/backgrounds/xfce/xfce-x.svg
+
+ENV QT_QPA_PLATFORMTHEME=qt6ct \
+    QT_LOGGING_RULES="*.debug=false;kf.solid.backends.udisks2.warning=false"
+
+COPY theme.py /usr/local/libexec/termiplus/theme.py
+RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-dev-bin qt6-svg-plugins libkf6iconthemes-bin \
+    && python3 /usr/local/libexec/termiplus/theme.py \
+    && apt-get purge -y libglib2.0-dev-bin \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY start-desktop.sh /usr/local/bin/start-desktop
 RUN chmod 755 /usr/local/bin/start-desktop

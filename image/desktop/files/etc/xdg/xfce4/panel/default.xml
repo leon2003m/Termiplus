@@ -9,16 +9,16 @@
     <property name="dark-mode" type="bool" value="true"/>
     <property name="panel-1" type="empty">
       <property name="position" type="string" value="p=10;x=0;y=0"/>
-      <property name="length" type="double" value="100"/>
+      <property name="length" type="double" value="78"/>
       <property name="position-locked" type="bool" value="true"/>
-      <property name="size" type="uint" value="40"/>
-      <property name="icon-size" type="uint" value="24"/>
+      <property name="size" type="uint" value="48"/>
+      <property name="icon-size" type="uint" value="28"/>
       <property name="background-style" type="uint" value="1"/>
       <property name="background-rgba" type="array">
         <value type="double" value="0.11"/>
         <value type="double" value="0.12"/>
-        <value type="double" value="0.21"/>
-        <value type="double" value="0.92"/>
+        <value type="double" value="0.13"/>
+        <value type="double" value="1"/>
       </property>
       <property name="plugin-ids" type="array">
         <value type="int" value="1"/>
@@ -26,6 +26,7 @@
         <value type="int" value="3"/>
         <value type="int" value="4"/>
         <value type="int" value="5"/>
+        <value type="int" value="11"/>
         <value type="int" value="6"/>
         <value type="int" value="7"/>
         <value type="int" value="8"/>
@@ -42,7 +43,7 @@
       <property name="show-generic-names" type="bool" value="true"/>
       <property name="favorites" type="array">
         <value type="string" value="firefox-esr.desktop"/>
-        <value type="string" value="thunar.desktop"/>
+        <value type="string" value="org.kde.dolphin.desktop"/>
         <value type="string" value="org.kde.kate.desktop"/>
         <value type="string" value="org.xfce.ristretto.desktop"/>
         <value type="string" value="xfce4-terminal.desktop"/>
@@ -65,18 +66,21 @@
     </property>
     <property name="plugin-3" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="xfce4-terminal.desktop"/>
+        <value type="string" value="firefox-esr.desktop"/>
       </property>
     </property>
     <property name="plugin-4" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="thunar.desktop"/>
+        <value type="string" value="org.kde.dolphin.desktop"/>
       </property>
     </property>
     <property name="plugin-5" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="firefox-esr.desktop"/>
+        <value type="string" value="xfce4-terminal.desktop"/>
       </property>
+    </property>
+    <property name="plugin-11" type="string" value="launcher">
+      <property name="items" type="array"><value type="string" value="org.kde.kate.desktop"/></property>
     </property>
     <property name="plugin-6" type="string" value="separator">
       <property name="style" type="uint" value="0"/>
