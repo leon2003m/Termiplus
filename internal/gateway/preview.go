@@ -18,7 +18,7 @@ import (
 // maim captures X as the existing desktop user; Pillow bounds the image before
 // base64 transport through Open Terminal. timeout also bounds a detached command
 // if the HTTP caller leaves. The container is untrusted despite these limits.
-const screenshotCommand = `/usr/bin/timeout -k 1 4 /usr/bin/python3 -c 'import base64,io,subprocess,sys; from PIL import Image; p=subprocess.run(["/usr/bin/maim","--display=:1"],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=3,check=True); im=Image.open(io.BytesIO(p.stdout)); im.thumbnail((320,320)); b=io.BytesIO(); im.convert("RGB").save(b,format="PNG"); data=b.getvalue(); sys.exit(1) if len(data)>262144 else print(base64.b64encode(data).decode())'`
+const screenshotCommand = `DISPLAY=:1 /usr/bin/timeout -k 1 4 /usr/bin/python3 -c 'import base64,io,subprocess,sys; from PIL import Image; p=subprocess.run(["/usr/bin/maim"],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=3,check=True); im=Image.open(io.BytesIO(p.stdout)); im.thumbnail((320,320)); b=io.BytesIO(); im.convert("RGB").save(b,format="PNG"); data=b.getvalue(); sys.exit(1) if len(data)>262144 else print(base64.b64encode(data).decode())'`
 
 var previewClient = &http.Client{
 	Transport:     newUpstreamTransport(5 * time.Second),
@@ -43,9 +43,13 @@ func (g *Gateway) servePreview(w http.ResponseWriter, r *http.Request, user, nam
 		httpError(w, 404, "offline")
 		return
 	}
-	if !inst.previewMu.TryLock() {
-		httpError(w, 429, "preview busy")
-		return
+	for !inst.previewMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			httpError(w, 504, "preview timed out")
+			return
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	defer inst.previewMu.Unlock()
 	if time.Since(inst.previewAt) >= 30*time.Second {
@@ -64,11 +68,11 @@ func (g *Gateway) servePreview(w http.ResponseWriter, r *http.Request, user, nam
 
 func (g *Gateway) capturePreview(ctx context.Context, inst *instance) ([]byte, error) {
 	body, _ := json.Marshal(map[string]string{"command": screenshotCommand, "cwd": "/home/user"})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+inst.addr+"/execute?wait=4", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+g.mgr.addrFor(inst.name, g.mgr.port)+"/execute?wait=4", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+inst.key)
+	req.Header.Set("Authorization", "Bearer "+g.mgr.containerKey(inst.name))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := previewClient.Do(req)
 	if err != nil {
@@ -94,7 +98,7 @@ func (g *Gateway) capturePreview(ctx context.Context, inst *instance) ([]byte, e
 	}
 	var text strings.Builder
 	for _, out := range result.Output {
-		if out.Type == "stdout" {
+		if out.Type == "stdout" || out.Type == "output" {
 			text.WriteString(out.Data)
 		}
 	}

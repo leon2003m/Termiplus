@@ -131,7 +131,7 @@ async function loadSessions() {
     }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
     items.push(el("span", { class: "meta", text: meta }));
-    const card = el("li", {}, items);
+    const card = el("li", { "data-session": s.session_id }, items);
     if (url) card.prepend(desktopPreview(s));
     ul.append(card);
   }
@@ -169,7 +169,18 @@ let refreshingSessions = false;
 async function refreshVisibleSessions() {
   if (document.visibilityState !== "visible" || refreshingSessions || $("sessions-section").hidden) return;
   refreshingSessions = true;
-  try { await loadSessions(); } catch (e) { status(e.message, true); }
+  try {
+    const sessions = await api("sessions");
+    const current = new Map(sessions.map((s) => [s.session_id, s]));
+    for (const card of $("sessions").children) {
+      const box = card.querySelector(".desktop-preview");
+      if (!box) continue;
+      const session = current.get(card.dataset.session) || { running: false };
+      const running = Boolean(box.querySelector("img[data-preview]"));
+      if (running !== Boolean(session.running)) box.replaceWith(desktopPreview(session));
+    }
+    refreshPreviews();
+  } catch (e) { status(e.message, true); }
   finally { refreshingSessions = false; }
 }
 setInterval(refreshVisibleSessions, 30000);

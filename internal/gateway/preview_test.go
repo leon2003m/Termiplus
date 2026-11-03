@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDesktopPreview(t *testing.T) {
@@ -29,7 +30,7 @@ func TestDesktopPreview(t *testing.T) {
 	data := frame.Bytes()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/execute" || r.Header.Get("Authorization") != "Bearer "+inst.key {
+		if r.URL.Path != "/execute" || r.Header.Get("Authorization") != "Bearer "+h.g.mgr.containerKey(inst.name) {
 			t.Error("wrong execution target/auth")
 		}
 		var request map[string]string
@@ -37,10 +38,19 @@ func TestDesktopPreview(t *testing.T) {
 		if request["command"] != screenshotCommand {
 			t.Error("non-fixed command")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "done", "exit_code": 0, "output": []map[string]string{{"type": "stdout", "data": base64.StdEncoding.EncodeToString(data)}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "done", "exit_code": 0, "output": []map[string]string{{"type": "output", "data": base64.StdEncoding.EncodeToString(data)}}})
 	}))
 	defer server.Close()
-	inst.addr = strings.TrimPrefix(server.URL, "http://")
+	orig := h.g.mgr.addrFor
+	h.g.mgr.addrFor = func(name string, port int) string {
+		if name == inst.name {
+			return strings.TrimPrefix(server.URL, "http://")
+		}
+		return orig(name, port)
+	}
+	// Adopted instances have no stored terminal address or key. Capture must
+	// derive both without calling ensure or starting the container.
+	inst.addr, inst.key = "", ""
 	get := func(key, user string) int {
 		code, _ := h.control(t, http.MethodGet, "preview/"+session.ID, key, user, "")
 		return code
@@ -60,7 +70,7 @@ func TestDesktopPreview(t *testing.T) {
 		t.Fatalf("cache calls: %d", calls.Load())
 	}
 	for _, bad := range [][]byte{[]byte("<svg/>"), bytes.Repeat([]byte{'x'}, 256<<10+1)} {
-		inst.previewAt = inst.previewAt.Add(-60 * 1000000000)
+		inst.previewAt = inst.previewAt.Add(-time.Minute)
 		data = bad
 		if code := get(testControlKey, "alice"); code != 502 {
 			t.Fatalf("invalid bytes: %d", code)
