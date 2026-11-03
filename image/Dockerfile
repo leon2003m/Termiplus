@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config \
         python3 python3-venv python3-pip python3-dev \
         nodejs npm \
-        sqlite3 ripgrep \
+        sqlite3 ripgrep fd-find rsync bc pipx \
     && rm -rf /var/lib/apt/lists/*
 
 # Open Terminal (MIT) in its own venv, outside the user's PATH so the model's

@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- Terminal image includes fdfind, rsync, bc and pipx (about 10 MB additional image size); workspace tool and desktop-control design notes document the proposal and egress limits.
+
 - Console dialogs replace browser prompts, with duration presets, an exact-name person picker and copyable share links. Terminal cards show observed activity and idle-deletion estimates; workspace and port help explain private access.
 
 - Owner-only desktop thumbnails in the console, refreshed every 30 seconds while visible. Stopped desktops show Offline without starting a container.

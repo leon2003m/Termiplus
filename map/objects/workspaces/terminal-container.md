@@ -54,3 +54,7 @@ and idle deadline to the owner console. `internal/gateway/lifecycle.go:ensure`
 records starts observed here; already-running adopted containers have no known
 start time. Active connections suppress idle expiry. These are display metadata,
 not process telemetry or a new Docker endpoint.
+
+The terminal image includes small agent utilities (fd-find, rsync, bc, pipx) in
+`image/Dockerfile`. Inventory, measured growth and the unimplemented hybrid
+desktop-control/egress design are in `docs/workspace-tools.md`.
