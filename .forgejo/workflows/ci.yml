@@ -11,10 +11,15 @@ on:
     branches: [main, dev, alpha]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: forgejo-ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The registry host comes from the repository variable REGISTRY, so no real
+# hostname is committed (AGENTS.md, Secrets).
 env:
   # Keep in step with .github/workflows/ci.yml (GO_VERSION, LINT_GO_VERSION).
   STATICCHECK_VERSION: "2026.2.1"
@@ -24,7 +29,7 @@ jobs:
     runs-on: docker
     container:
       # staticcheck cannot read Go 1.27 export data yet, so lint on 1.26.
-      image: harbor.leonm.internal/dockerhub/library/golang:1.26-bookworm
+      image: ${{ vars.REGISTRY }}/dockerhub/library/golang:1.26-bookworm
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -39,8 +44,8 @@ jobs:
       - name: Install tools
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends shellcheck >/dev/null
-          .github/scripts/install-tools.sh actionlint hadolint
+          apt-get install -y -qq --no-install-recommends xz-utils >/dev/null
+          .github/scripts/install-tools.sh actionlint hadolint shellcheck
           go install "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}"
       - name: make lint
         run: PATH="$HOME/.local/bin:$(go env GOPATH)/bin:$PATH" make lint
@@ -48,7 +53,7 @@ jobs:
   test:
     runs-on: docker
     container:
-      image: harbor.leonm.internal/dockerhub/library/golang:1.27-bookworm
+      image: ${{ vars.REGISTRY }}/dockerhub/library/golang:1.27-bookworm
     timeout-minutes: 20
     steps:
       - name: Checkout
