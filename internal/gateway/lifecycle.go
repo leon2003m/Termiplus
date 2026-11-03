@@ -79,6 +79,7 @@ type instance struct {
 	key         string // per-container Open Terminal API key
 	ready       bool
 	lastUsed    time.Time
+	startedAt   time.Time
 	conns       int // open WebSocket sessions (terminal and desktop stream)
 	desktop     bool
 	// controlSession is the session id of an ephemeral sandbox created through
@@ -271,6 +272,9 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	}
 	inst.ready = true
 	inst.lastUsed = time.Now()
+	if ct == nil || !ct.State.Running {
+		inst.startedAt = inst.lastUsed
+	}
 
 	m.mu.Lock()
 	if old := m.instances[name]; old != nil {

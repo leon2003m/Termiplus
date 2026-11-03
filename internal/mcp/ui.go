@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"termiplus/internal/naming"
 )
@@ -18,7 +20,7 @@ import (
 // subject is mapped to the Open WebUI user via the IdentityStore. Every action
 // goes through the same tools, RBAC and entitlements as the MCP server. The
 // person clicking is the human in the loop, so consequential actions are sent
-// as confirmed after the page has asked them (window.confirm).
+// as confirmed after the page has asked them (an in-page dialog).
 //
 // Cross-site request forgery: the session cookie is SameSite=Lax, and every
 // non-GET request must carry X-Termiplus-UI and a same-origin Origin header,
@@ -34,9 +36,11 @@ const uiCSRFHeader = "X-Termiplus-UI"
 
 // UI serves the management console.
 type UI struct {
-	srv    *Server
-	ids    *IdentityStore
-	static http.Handler
+	lookupMu sync.Mutex
+	lookups  map[string]time.Time
+	srv      *Server
+	ids      *IdentityStore
+	static   http.Handler
 }
 
 // NewUI returns the management UI for srv. ids maps browser identities (OIDC
@@ -165,6 +169,8 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		u.run(w, r, p, "share_desktop", args)
 	case strings.HasPrefix(rest, "shares/") && r.Method == http.MethodDelete:
 		u.run(w, r, p, "share_desktop", map[string]any{"action": "revoke", "share_id": strings.TrimPrefix(rest, "shares/")})
+	case strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/people") && r.Method == http.MethodGet:
+		u.people(w, r, p, strings.TrimSuffix(strings.TrimPrefix(rest, "desktops/"), "/people"))
 	case strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/preview") && r.Method == http.MethodGet:
 		u.preview(w, r, p, strings.TrimSuffix(strings.TrimPrefix(rest, "desktops/"), "/preview"))
 	case strings.HasPrefix(rest, "desktops/") && r.Method == http.MethodGet:

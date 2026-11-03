@@ -48,3 +48,9 @@ Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Contai
 
 - Source: `internal/naming/naming.go`, `internal/gateway/lifecycle.go`
 - Process: [request-to-terminal](../../processes/request-to-terminal.md), [sockproxy-create](../../processes/sockproxy-create.md)
+
+`internal/gateway/control.go:withStream` exposes in-memory observed start/activity
+and idle deadline to the owner console. `internal/gateway/lifecycle.go:ensure`
+records starts observed here; already-running adopted containers have no known
+start time. Active connections suppress idle expiry. These are display metadata,
+not process telemetry or a new Docker endpoint.

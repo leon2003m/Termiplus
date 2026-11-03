@@ -661,3 +661,22 @@ service is removed, leaving Dolphin to handle “Show in folder”. Dolphin is t
 default file manager; compatibility launchers route old user shortcuts to Dolphin.
 The desktop session activates Dolphin’s standard folder D-Bus service before
 XFCE starts, so Thunar’s trash backend cannot claim that interface first.
+
+### Console dialogs and terminal status
+
+The console uses native modal dialogs with keyboard focus containment, Escape
+and focus restoration. Desktop sharing offers 15 minutes, 1 hour, 8 hours,
+24 hours or 5–1440 custom minutes; viewers remain view-only. A session owner
+can look up one exact directory username, select it and create a link with
+its expiry and Copy button. The picker checks current session ownership and
+entitlement before lookup, never lists the directory, returns only usernames,
+and limits each owner to one lookup per second with a five-second deadline.
+
+Terminal status uses gateway-observed start/activity timestamps and the reaper's
+idle deadline. Start time is unknown for containers adopted after a gateway
+restart. Activity means requests/connections seen by the gateway, not commands
+or CPU usage; estimates refresh every 30 seconds while visible. Connected
+sessions pause idle deletion. CPU/RAM and terminal contents are not collected.
+Open WebUI connection hints describe the default deployment names; custom
+deployments can name connections differently. Open port gives the owner a
+private browser link; desktop share links share the screen only, not ports.

@@ -46,3 +46,9 @@ Citations: `internal/mcp/shares.go:19-24` (doc), `:26-31` (limits), `:34` (Share
 
 - Source: `internal/mcp/shares.go`, `internal/mcp/stream.go`
 - Process: [desktop-stream](../../processes/desktop-stream.md)
+
+Console sharing uses native modal dialogs, duration presets/custom minutes and
+an exact-name directory picker (`internal/mcp/ui/app.js:shareDesktop`,
+`internal/mcp/ui_people.go:people`). The picker requires current session ownership
+and entitlement, limits lookups and returns only the matching enabled username;
+it does not enumerate users. Copy/expiry UI does not alter share authorization.

@@ -58,3 +58,8 @@ Citations: `internal/mcp/server.go:154-166` (tool), `:231` (ServeHTTP), `:303` (
 
 - Source: `internal/mcp/server.go`
 - Process: [mcp-tool-call](../../processes/mcp-tool-call.md)
+
+The console (`internal/mcp/ui/app.js:ask`) uses native accessible dialogs rather
+than browser prompts. Session/workspace metadata flows through
+`internal/mcp/gateway_backend.go:ListWorkspaces` and `session`; connection hints
+refer to default Open WebUI configuration. No CPU/RAM or terminal text is read.

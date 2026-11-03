@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/naming"
@@ -37,6 +38,7 @@ const maxControlBody = 16 << 10
 const controlSessionPrefix = "mcp-"
 
 type workspaceInfo struct {
+	IdleSeconds int64  `json:"idle_seconds,omitempty"`
 	Name        string `json:"name"`
 	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -46,10 +48,14 @@ type workspaceInfo struct {
 }
 
 type sessionInfo struct {
-	ID         string `json:"session_id"` // container name
-	Workspace  string `json:"workspace"`
-	Persistent bool   `json:"persistent"`
-	Running    bool   `json:"running"`
+	StartedAt     string `json:"started_at,omitempty"`
+	LastActivity  string `json:"last_activity,omitempty"`
+	IdleExpiresAt string `json:"idle_expires_at,omitempty"`
+	IdleSeconds   int64  `json:"idle_seconds,omitempty"`
+	ID            string `json:"session_id"` // container name
+	Workspace     string `json:"workspace"`
+	Persistent    bool   `json:"persistent"`
+	Running       bool   `json:"running"`
 	// TerminalPath is the gateway path that reaches the session; for an
 	// ephemeral session TerminalSession must be sent as X-Session-Id.
 	TerminalPath    string `json:"terminal_path,omitempty"`
@@ -59,8 +65,22 @@ type sessionInfo struct {
 	StreamPath string `json:"stream_path,omitempty"`
 }
 
-// withStream fills the desktop stream handle for desktop policies.
+// withStream adds observed activity and the desktop stream handle.
 func (m *manager) withStream(s sessionInfo, pol Policy) sessionInfo {
+	s.IdleSeconds = int64(m.idleFor(pol) / time.Second)
+	m.mu.Lock()
+	if inst := m.instances[s.ID]; inst != nil && s.Running {
+		if !inst.startedAt.IsZero() {
+			s.StartedAt = inst.startedAt.UTC().Format(time.RFC3339)
+		}
+		if !inst.lastUsed.IsZero() {
+			s.LastActivity = inst.lastUsed.UTC().Format(time.RFC3339)
+			if inst.ephemeral && inst.conns == 0 && inst.idle > 0 {
+				s.IdleExpiresAt = inst.lastUsed.Add(inst.idle).UTC().Format(time.RFC3339)
+			}
+		}
+	}
+	m.mu.Unlock()
 	if pol.Desktop {
 		s.StreamPath = "/" + streamPrefix + s.ID + "/"
 	}
@@ -196,7 +216,7 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 func (g *Gateway) workspaces() []workspaceInfo {
 	out := make([]workspaceInfo, 0, len(g.cfg.Policies))
 	for name, p := range g.cfg.Policies {
-		out = append(out, workspaceInfo{Name: name, Label: p.Label, Description: p.Description, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop})
+		out = append(out, workspaceInfo{Name: name, Label: p.Label, Description: p.Description, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop, IdleSeconds: int64(g.mgr.idleFor(p) / time.Second)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

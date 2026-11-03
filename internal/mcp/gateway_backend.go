@@ -62,6 +62,7 @@ func (b *GatewayBackend) WithForwardBase(u string) *GatewayBackend {
 
 // gwWorkspace / gwSession mirror the gateway control API's JSON.
 type gwWorkspace struct {
+	IdleSeconds int64  `json:"idle_seconds,omitempty"`
 	Name        string `json:"name"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
@@ -71,6 +72,10 @@ type gwWorkspace struct {
 }
 
 type gwSession struct {
+	StartedAt       string `json:"started_at,omitempty"`
+	LastActivity    string `json:"last_activity,omitempty"`
+	IdleExpiresAt   string `json:"idle_expires_at,omitempty"`
+	IdleSeconds     int64  `json:"idle_seconds,omitempty"`
 	ID              string `json:"session_id"`
 	Workspace       string `json:"workspace"`
 	Persistent      bool   `json:"persistent"`
@@ -91,7 +96,13 @@ func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Wor
 		if desc == "" {
 			desc = "runtime " + w.Runtime
 		}
-		out = append(out, Workspace{Name: w.Name, Label: w.Label, Description: desc, Persistent: w.Persistent, Desktop: w.Desktop})
+		connection := "Terminal"
+		if !w.Persistent {
+			connection = "Temporary terminal"
+		} else if w.Runtime == "sysbox-runc" {
+			connection = "Terminal with Docker"
+		}
+		out = append(out, Workspace{ConnectionName: connection, Name: w.Name, Label: w.Label, Description: desc, Persistent: w.Persistent, Desktop: w.Desktop, IdleSeconds: w.IdleSeconds})
 	}
 	return out, nil
 }
@@ -172,7 +183,8 @@ func (b *GatewayBackend) GetNetworkPolicy(ctx context.Context, _ Principal) (jso
 
 func (b *GatewayBackend) session(s gwSession, userID string) Session {
 	out := Session{
-		ID:              s.ID,
+		ID:        s.ID,
+		StartedAt: s.StartedAt, LastActivity: s.LastActivity, IdleExpiresAt: s.IdleExpiresAt, IdleSeconds: s.IdleSeconds,
 		Workspace:       s.Workspace,
 		UserID:          userID,
 		Persistent:      s.Persistent,

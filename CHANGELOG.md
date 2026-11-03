@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- Console dialogs replace browser prompts, with duration presets, an exact-name person picker and copyable share links. Terminal cards show observed activity and idle-deletion estimates; workspace and port help explain private access.
+
 - Owner-only desktop thumbnails in the console, refreshed every 30 seconds while visible. Stopped desktops show Offline without starting a container.
 
 - Workspaces can have a `label` and `description` in `policies.json`. The console and `list_workspaces` show them instead of the bare policy name; the default policies are now called Terminal, Temporary terminal and Terminal with Docker. Changing them does not recreate containers.
