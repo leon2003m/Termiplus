@@ -24,7 +24,8 @@ docker exec -i codex-tools-test timeout 10 python3 - --app dolphin \
 
 For the optional browser DOM test, download Mozilla's pinned upstream driver
 outside the internal runtime network, verify the recorded test archive digest,
-extract it under /tmp and copy just the binary into the disposable container:
+extract it under /tmp and stream just the binary into the disposable container's
+runtime /tmp:
 
 ```sh
 mkdir -p /tmp/codex-geckodriver
@@ -32,7 +33,8 @@ curl -fL -o /tmp/codex-geckodriver/driver.tar.gz \
   https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz
 printf '%s\n' 'e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e  /tmp/codex-geckodriver/driver.tar.gz' | sha256sum -c -
 tar -xzf /tmp/codex-geckodriver/driver.tar.gz -C /tmp/codex-geckodriver
-docker cp /tmp/codex-geckodriver/geckodriver codex-tools-test:/tmp/geckodriver
+docker exec -i codex-tools-test sh -c 'cat > /tmp/geckodriver && chmod 700 /tmp/geckodriver' \
+  < /tmp/codex-geckodriver/geckodriver
 docker exec -i codex-tools-test python3 - < test/integration/desktop/browser_dom.py
 ```
 
@@ -42,6 +44,10 @@ test exercises WebDriver commands and negotiates BiDi; it does not test BiDi
 messages. No browser system-access option or permissive origin list is enabled.
 AT-SPI `accepted=true` is **not** proof the app changed: verify saved file/form
 outcomes, which the exploratory semantic tests did not reliably achieve.
+Inspection reports `incomplete=true` on traversal limits or errors; actions are
+refused for every incomplete traversal, even if one match was found.
+Run the probe regression tests without desktop dependencies using
+`python3 -m unittest discover -s test/integration/desktop -p test_a11y_probe.py`.
 
 Read screenshots from runtime /tmp using `docker exec ... cat`, because Sysbox's
 mount layout can make `docker cp` read a different /tmp. Test outputs include only

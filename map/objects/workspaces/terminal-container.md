@@ -63,3 +63,7 @@ Desktop control experiments remain test-only under `test/integration/desktop/`
 (Dockerfile.tools, control_smoke.py, browser_dom.py, a11y_probe.py). Their measured
 results and semantic-action limitations are in `docs/workspace-tools.md`; no
 production tools/endpoints are enabled by these fixtures.
+
+The test-only AT-SPI probe marks incomplete tree inspection and refuses all
+actions after a traversal limit or error. Stdlib regressions in
+`test/integration/desktop/test_a11y_probe.py` cover these refusal paths.

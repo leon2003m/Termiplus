@@ -46,10 +46,12 @@ def main():
     start = time.monotonic()
     records, matches = [], []
     visited = 0
+    incomplete = False
 
     def walk(node, depth=0):
-        nonlocal visited
+        nonlocal visited, incomplete
         if visited >= 2000 or depth > 30 or time.monotonic() - start > 3:
+            incomplete = True
             return
         visited += 1
         try:
@@ -66,14 +68,21 @@ def main():
             for child in node:
                 walk(child, depth + 1)
         except Exception:
-            # A window may disappear while traversing; keep the partial result.
+            # Inspection can return partial data, but actions must fail closed.
+            incomplete = True
             return
 
-    for app in pyatspi.Registry.getDesktop(0):
-        if app is not None and app.name == args.app:
-            walk(app)
-    result = dict(nodes=records, visited=visited, seconds=round(time.monotonic() - start, 3))
+    try:
+        for app in pyatspi.Registry.getDesktop(0):
+            if app is not None and app.name == args.app:
+                walk(app)
+    except Exception:
+        incomplete = True
+    result = dict(nodes=records, visited=visited, incomplete=incomplete,
+                  seconds=round(time.monotonic() - start, 3))
     if args.click or args.set_text is not None:
+        if incomplete:
+            parser.error('action refused: application tree traversal was incomplete')
         if len(matches) != 1:
             parser.error('action needs exactly one visible match; found ' + str(len(matches)))
         target = matches[0]

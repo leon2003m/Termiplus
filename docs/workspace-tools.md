@@ -207,7 +207,9 @@ The reusable probe limits depth, traversal count and traversal time, emits
 role/name/bounds, rejects ambiguous action matches, and supports click/set-text
 for experiments. Traversal timing is not a hard IPC deadline: run the probe
 under an outer timeout because an accessibility service can block a call.
-Applications can disappear during traversal; output may be partial. AT-SPI
+Applications can disappear during traversal; inspection output marks partial
+results with `incomplete=true`. Actions are refused after any traversal limit or
+error, because an unseen second match could make the selection ambiguous. AT-SPI
 operations returning true did not prove file/form outcomes, even after an event
 loop dispatch retest. It is useful for locating targets, but pure semantic
 control is not yet a proven replacement for verified keyboard/DOM actions.
