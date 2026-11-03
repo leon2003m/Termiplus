@@ -64,7 +64,7 @@ desktop only for desktop policies. For example:
 }
 ```
 
-The desktop is XFCE with a file manager (Thunar), Firefox ESR, a text editor,
+The desktop is XFCE with a file manager (Thunar), Firefox ESR with uBlock Origin, Kate,
 an image viewer and a dark theme. To change the wallpaper for everyone, replace
 `image/desktop/files/usr/share/backgrounds/termiplus/default.svg` (any SVG,
 PNG or JPEG under that name) and rebuild the image. Users can pick another one

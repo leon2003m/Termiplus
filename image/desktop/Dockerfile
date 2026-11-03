@@ -22,8 +22,8 @@ RUN curl -fsSL -o /tmp/kasmvnc.deb \
     && apt-get update && apt-get install -y --no-install-recommends \
         /tmp/kasmvnc.deb xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-terminal xfce4-settings \
         dbus-x11 x11-xserver-utils fonts-dejavu-core \
-        thunar tumbler mousepad ristretto xfce4-appfinder xfce4-whiskermenu-plugin exo-utils xdg-utils \
-        firefox-esr arc-theme papirus-icon-theme fonts-inter fonts-noto-color-emoji fonts-noto-cjk librsvg2-common \
+        thunar tumbler kate ristretto xfce4-appfinder xfce4-whiskermenu-plugin exo-utils xdg-utils \
+        firefox-esr webext-ublock-origin-firefox arc-theme papirus-icon-theme fonts-inter fonts-noto-color-emoji fonts-noto-cjk librsvg2-common \
     && rm -rf /var/lib/apt/lists/* /tmp/kasmvnc.deb \
     && usermod -aG ssl-cert user
 

@@ -43,7 +43,7 @@
       <property name="favorites" type="array">
         <value type="string" value="firefox-esr.desktop"/>
         <value type="string" value="thunar.desktop"/>
-        <value type="string" value="org.xfce.mousepad.desktop"/>
+        <value type="string" value="org.kde.kate.desktop"/>
         <value type="string" value="org.xfce.ristretto.desktop"/>
         <value type="string" value="xfce4-terminal.desktop"/>
         <value type="string" value="termiplus-background.desktop"/>
