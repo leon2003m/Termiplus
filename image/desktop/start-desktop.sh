@@ -48,7 +48,7 @@ security:
   brute_force_protection:
     blacklist_threshold: 0
 YAML
-  printf '#!/bin/sh\nexec dbus-launch --exit-with-session startxfce4\n' >"$HOME/.vnc/xstartup"
+  printf '#!/bin/sh\nexec dbus-launch --exit-with-session /usr/local/libexec/termiplus/start-xfce\n' >"$HOME/.vnc/xstartup"
   chmod 700 "$HOME/.vnc/xstartup"
   touch "$HOME/.vnc/.de-was-selected"
   # Write permission only (no "owner"): the stream user cannot use the admin API.

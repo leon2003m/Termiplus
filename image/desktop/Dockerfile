@@ -41,10 +41,15 @@ ENV QT_QPA_PLATFORMTHEME=qt6ct \
     QT_LOGGING_RULES="*.debug=false;kf.solid.backends.udisks2.warning=false"
 
 COPY theme.py /usr/local/libexec/termiplus/theme.py
-RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-dev-bin qt6-svg-plugins libkf6iconthemes-bin \
+RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-dev-bin qt6-svg-plugins libkf6iconthemes-bin thunar gvfs \
+    && rm /usr/share/dbus-1/services/org.xfce.Thunar.FileManager1.service \
     && python3 /usr/local/libexec/termiplus/theme.py \
     && apt-get purge -y libglib2.0-dev-bin \
     && rm -rf /var/lib/apt/lists/*
+
+# Restore our hidden Dolphin compatibility entry after installing the XFCE trash backend.
+COPY files/usr/share/applications/thunar.desktop /usr/share/applications/thunar.desktop
+COPY files/usr/share/xfce4/helpers/thunar.desktop /usr/share/xfce4/helpers/thunar.desktop
 
 COPY start-desktop.sh /usr/local/bin/start-desktop
 RUN chmod 755 /usr/local/bin/start-desktop

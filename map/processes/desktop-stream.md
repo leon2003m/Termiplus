@@ -58,3 +58,7 @@ Desktop image defaults in `image/desktop/files/` select Dolphin, Breeze/dark Qt,
 Papirus-Dark and an XFCE dock. `image/desktop/theme.py` recolours Debian's Arc
 resource bundle at build time. `image/desktop/start-desktop.sh` still starts
 XFCE/KasmVNC; no Plasma session or new container permissions are involved.
+
+XFCE trash keeps Thunar and local GIO VFS as its backend. The image removes
+Thunar’s competing FileManager1 service, and start-xfce activates Dolphin’s
+standard folder interface before xfdesktop starts the trash backend.

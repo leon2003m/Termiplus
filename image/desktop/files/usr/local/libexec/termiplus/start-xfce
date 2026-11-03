@@ -1,0 +1,9 @@
+#!/bin/sh
+# Claim the standard folder interface before xfdesktop activates its Thunar
+# trash backend. Thunar also tries to claim this name at runtime.
+set -eu
+timeout 5 gdbus call --session --dest org.freedesktop.DBus \
+  --object-path /org/freedesktop/DBus \
+  --method org.freedesktop.DBus.StartServiceByName \
+  org.freedesktop.FileManager1 0 >/dev/null 2>&1 || true
+exec startxfce4

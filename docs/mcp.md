@@ -654,3 +654,10 @@ session, window manager and compact bottom dock; Plasma is not started.
 at build time and changes its blue selection accents to green. The wallpaper
 replacement mechanism is unchanged. Existing homes keep their XFCE settings;
 changing image defaults does not overwrite personal configuration.
+
+XFCE desktop trash operations require Thunar’s D-Bus backend, so the package
+remains installed with the local GIO trash backend (`gvfs`) for those services. Its competing `org.freedesktop.FileManager1`
+service is removed, leaving Dolphin to handle “Show in folder”. Dolphin is the
+default file manager; compatibility launchers route old user shortcuts to Dolphin.
+The desktop session activates Dolphin’s standard folder D-Bus service before
+XFCE starts, so Thunar’s trash backend cannot claim that interface first.

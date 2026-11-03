@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+- Preserve XFCE desktop trash operations with Dolphin as the folder opener.
+
+
 ### Added
 
 - Owner-only desktop thumbnails in the console, refreshed every 30 seconds while visible. Stopped desktops show Offline without starting a container.

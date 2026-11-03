@@ -1,4 +1,6 @@
 #!/bin/sh
 # Compatibility for old stock launchers kept on persistent home volumes.
-case "${1:-}" in --daemon|--quit) exit 0 ;; esac
+case "${1:-}" in
+  --bulk-rename|--preferences|--daemon|--quit) exec /usr/bin/Thunar "$@" ;;
+esac
 exec dolphin "$@"
