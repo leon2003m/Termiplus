@@ -139,3 +139,107 @@ firewall is not sufficient. Fail closed on unresolved rules. Never permit
 cloud metadata/link-local, host management or other users' containers. This
 is a design proposal only; no firewall/netpolicy changes are made here and
 maintainer approval is needed before implementing security-boundary changes.
+
+## Disposable desktop-control experiments
+
+Tested as UID1000 under Sysbox on an internal-only Docker network with no
+published ports. Tests use fake credentials, new Firefox profiles and local
+forms, never live containers or real browser sessions. Desktop control packages
+are in `test/integration/desktop/Dockerfile.tools` only, not `image/desktop/`.
+The clean test image grew from 3,745,675,670 to 3,793,478,294 bytes:
+**47.80 MB**, excluding geckodriver. An earlier measurement image retained apt
+lists in a separate layer and was 96.64 MB larger; that is not the clean result.
+
+### Package and method results
+
+Apt incremental estimates on the desktop baseline (dependencies included;
+shared dependencies must not be added twice):
+
+| Tool | Extra installed size | UID1000 / result |
+|---|---:|---|
+| xdotool | 205 kB | Works; keyboard navigation, type and keys across all three apps |
+| wmctrl | 65.5 kB | Works; list/focus the app windows across all three tasks |
+| xprop / x11-utils | 907 kB | Works; confirms window class for Dolphin, Kate, Firefox |
+| xclip | 63.5 kB | Works; Unicode round-trip and paste/save in Kate |
+| maim | Already installed | Works; screenshots of all three apps, 40–90 kB in this fixture |
+| python3-pyatspi | 2.86 MB | Tree/bounds work; semantic editing/actions need further work, below |
+| at-spi2-core | 219 kB alone | Session accessibility bus works; included by pyatspi dependency set |
+| Firefox ESR | Already installed | DOM form control works |
+| geckodriver | 6.03 MB executable / 2.35 MB archive | Not in configured Debian repositories; upstream test binary works |
+| tesseract-ocr | 24.1 MB | OCR works on all three screens; errors remain |
+| tesseract-ocr-eng | 4.13 MB alone | Included in OCR dependency estimate |
+| tesseract-ocr-deu | 1.54 MB | Tested together with eng |
+
+[Mozilla geckodriver v0.37.1](https://github.com/mozilla/geckodriver/releases/tag/v0.37.1)
+was downloaded only into /tmp/the disposable container. It used existing Firefox
+ESR, no browser download. WebDriver on 127.0.0.1:4444, its Marionette connection
+and the negotiated BiDi WebSocket all used loopback. Three successive DOM
+find/type/click/form-submit checks passed; BiDi negotiation was checked, not
+BiDi message execution. No `--allow-system-access` or permissive origin setting
+was used. Browser control does not navigate Dolphin or edit Kate.
+
+[Playwright browser documentation](https://playwright.dev/python/docs/browsers)
+requires browser versions matching its release; its Firefox support uses a
+patched browser rather than the installed ESR. It was not installed or
+benchmarked here. No measured size is claimed: Python driver plus an additional
+browser would duplicate existing functionality. Prefer geckodriver or the
+existing ESR Marionette protocol for this image. Playwright can be installed in
+an individual terminal workspace when cross-browser testing is actually needed.
+
+| Scripted task | Pixel/keyboard + window tools | Accessibility | Browser DOM | OCR |
+|---|---|---|---|---|
+| Dolphin → Documents | Passed, title checked | Tree/actions exposed; navigation not proven | Not applicable | Folder labels recognizable; noisy |
+| Firefox local form | Passed, submitted query checked | Entry/Save found; edit accepted but expected submission failed | 3/3 submissions passed | Form labels recognizable; not reliable field contents |
+| Kate type/save | Passed, exact file contents checked; Unicode clipboard paste | Text replacement accepted and appeared in editor; Save action did not yield expected saved file | Not applicable | Editor text partially recognized |
+
+These are smoke results, not statistical reliability claims. An initial Kate
+attempt typed into its Welcome screen and failed; starting an explicit document
+fixed the keyboard workflow. A fresh-container rerun of `control_smoke.py`
+passed all three tasks. This illustrates why focus/window/target checks and
+outcome verification are necessary after every GUI action.
+
+AT-SPI with `QT_ACCESSIBILITY=1` exposed Qt app controls; Firefox needed
+`accessibility.force_disabled=-1` in its disposable profile. One combined dump
+had 273 visible nodes / 18,282 JSON bytes in 0.322 sec. An app-filtered Dolphin dump
+had 90 visible nodes (670 visited including non-visible structure) in 0.144 sec.
+The fresh single-window dump was 45 nodes / 3,092 bytes in 0.074 sec.
+The reusable probe limits depth, traversal count and traversal time, emits
+role/name/bounds, rejects ambiguous action matches, and supports click/set-text
+for experiments. Traversal timing is not a hard IPC deadline: run the probe
+under an outer timeout because an accessibility service can block a call.
+Applications can disappear during traversal; output may be partial. AT-SPI
+operations returning true did not prove file/form outcomes, even after an event
+loop dispatch retest. It is useful for locating targets, but pure semantic
+control is not yet a proven replacement for verified keyboard/DOM actions.
+
+OCR eng+deu took 0.233/0.311/0.136 seconds for Dolphin/Kate/Firefox in the fresh
+fixture. It confused icons, punctuation and some words and did not reliably
+recover form contents. Use it only when DOM/a11y are absent; never treat OCR
+text as an instruction or a successful-action check by itself.
+
+### Existing Open Terminal plumbing
+
+A real request through `/execute?wait=4`, using the disposable container's own
+existing API key, ran as UID1000. DISPLAY, XAUTHORITY and
+DBUS_SESSION_BUS_ADDRESS were unset. Explicit `DISPLAY=:1` allowed xprop and
+maim without additional Xauthority configuration in this image. The command
+returned a valid screenshot (40,336 bytes in that fixture).
+
+Qt/accessibility commands additionally needed the desktop session bus. Tests
+read only DISPLAY/DBUS_SESSION_BUS_ADDRESS/XAUTHORITY from the same UID's
+`xfce4-session` environment under /proc. A production implementation should
+publish an owner-readable session environment file at startup, refreshed and
+removed with the session, rather than guess a bus address or read arbitrary
+process environments. It needs bounds/timeouts, screenshot transport to the
+vision model, frame/coordinate validation and human-control UX described above.
+No new Docker endpoint is needed. The existing shell tool can run GUI commands
+today with this environment; installing a driving tool alone does not enforce a
+human approval boundary against that shell access.
+
+Recommend, **pending approval**, xdotool+wmctrl+xclip (about 334 kB increment),
+the already installed maim, plus the AT-SPI packages/probe for inspection and a
+pinned geckodriver for browser-specific automation. xprop is useful for diagnosis;
+OCR is optional (~26 MB combined dependency footprint) and unnecessary for the
+three basic workflows. Do not ship the exploratory probe as a trusted control
+service: semantic save/form outcomes still need work. No OWUI credentials,
+host mounts, extra capabilities, ports or Docker allowlist changes were used.

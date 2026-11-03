@@ -58,3 +58,8 @@ not process telemetry or a new Docker endpoint.
 The terminal image includes small agent utilities (fd-find, rsync, bc, pipx) in
 `image/Dockerfile`. Inventory, measured growth and the unimplemented hybrid
 desktop-control/egress design are in `docs/workspace-tools.md`.
+
+Desktop control experiments remain test-only under `test/integration/desktop/`
+(Dockerfile.tools, control_smoke.py, browser_dom.py, a11y_probe.py). Their measured
+results and semantic-action limitations are in `docs/workspace-tools.md`; no
+production tools/endpoints are enabled by these fixtures.
