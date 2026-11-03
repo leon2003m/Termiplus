@@ -6,7 +6,7 @@
 #
 # Updating a tool: change version and checksum together. Checksums come from
 # the project's published checksum file (gitleaks, actionlint, trivy) or, where
-# none is published (hadolint), from the release asset itself.
+# none is published (hadolint, shellcheck), from the release asset itself.
 set -euo pipefail
 
 BIN="$HOME/.local/bin"
@@ -21,6 +21,9 @@ ACTIONLINT_VERSION=1.7.12
 ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 HADOLINT_VERSION=2.15.1
 HADOLINT_SHA256=c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+# 0.11 adds SC2329 (functions called indirectly) to the integration scripts.
+SHELLCHECK_VERSION=0.10.0
+SHELLCHECK_SHA256=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
 TRIVY_VERSION=0.75.0
 TRIVY_SHA256=c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
 
@@ -40,6 +43,9 @@ for tool in "$@"; do
     hadolint)
       fetch "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64" "$HADOLINT_SHA256" "$TMP/hadolint"
       install -m 0755 "$TMP/hadolint" "$BIN/hadolint" ;;
+    shellcheck)
+      fetch "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" "$TMP/shellcheck.txz"
+      tar -xJf "$TMP/shellcheck.txz" -C "$TMP" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" && install -m 0755 "$TMP/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "$BIN/shellcheck" ;;
     trivy)
       fetch "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" "$TRIVY_SHA256" "$TMP/trivy.tgz"
       tar -xzf "$TMP/trivy.tgz" -C "$TMP" trivy && install -m 0755 "$TMP/trivy" "$BIN/trivy" ;;
