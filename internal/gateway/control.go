@@ -160,6 +160,8 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 		}
 	case strings.HasPrefix(rest, forwardPrefix):
 		g.serveForward(w, r, userID, strings.TrimPrefix(rest, forwardPrefix))
+	case strings.HasPrefix(rest, "preview/"):
+		g.servePreview(w, r, userID, strings.TrimPrefix(rest, "preview/"))
 	case strings.HasPrefix(rest, streamPrefix):
 		g.serveStream(w, r, userID, strings.TrimPrefix(rest, streamPrefix))
 	case rest == "sessions" && r.Method == http.MethodGet:

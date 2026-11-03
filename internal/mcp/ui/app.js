@@ -131,10 +131,49 @@ async function loadSessions() {
     }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
     items.push(el("span", { class: "meta", text: meta }));
-    ul.append(el("li", {}, items));
+    const card = el("li", {}, items);
+    if (url) card.prepend(desktopPreview(s));
+    ul.append(card);
   }
+  refreshPreviews();
   $("sessions-section").hidden = false;
 }
+
+// Images are fetched only for running desktops while this tab is visible.
+// A failed/stopped preview loses its src so an old screen is never shown offline.
+function desktopPreview(session) {
+  const box = el("div", { class: "desktop-preview" });
+  const label = el("span", { text: session.running ? "Loading preview…" : "Offline" });
+  box.append(label);
+  if (session.running) {
+    const image = el("img", { alt: "Current desktop screen", hidden: "hidden", "data-preview": encodeURIComponent(session.session_id) });
+    image.addEventListener("load", () => { image.hidden = false; label.hidden = true; });
+    image.addEventListener("error", () => {
+      image.hidden = true;
+      image.removeAttribute("src");
+      label.textContent = "Preview unavailable";
+      label.hidden = false;
+    });
+    box.append(image);
+  }
+  return box;
+}
+
+function refreshPreviews() {
+  if (document.visibilityState !== "visible") return;
+  for (const image of document.querySelectorAll("img[data-preview]")) {
+    image.src = "api/desktops/" + image.dataset.preview + "/preview?t=" + Math.floor(Date.now() / 30000);
+  }
+}
+let refreshingSessions = false;
+async function refreshVisibleSessions() {
+  if (document.visibilityState !== "visible" || refreshingSessions || $("sessions-section").hidden) return;
+  refreshingSessions = true;
+  try { await loadSessions(); } catch (e) { status(e.message, true); }
+  finally { refreshingSessions = false; }
+}
+setInterval(refreshVisibleSessions, 30000);
+document.addEventListener("visibilitychange", refreshVisibleSessions);
 
 async function resetSession(s, button) {
   const what = s.persistent

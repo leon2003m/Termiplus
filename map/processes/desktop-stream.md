@@ -44,3 +44,12 @@ KasmVNC knows only basic auth, and the desktop serves arbitrary user-controlled 
 
 - Objects: [Share](../objects/control-plane/share.md), [Terminal container](../objects/workspaces/terminal-container.md), [Service keys](../objects/identity/service-keys.md)
 - Source: `internal/mcp/stream.go`, `internal/gateway/stream.go`
+
+## Console preview
+
+`internal/gateway/preview.go` captures a fixed maim/Pillow command through the
+existing Open Terminal API, with the per-container key. The control-key route
+checks owner and running state before its 30-second instance cache.
+`internal/mcp/preview.go` checks the owner's entitlement and validates the bounded
+PNG again. `internal/mcp/ui/app.js` refreshes running desktop thumbnails only
+while visible. No Docker socket allowlist change or KasmVNC owner rights.

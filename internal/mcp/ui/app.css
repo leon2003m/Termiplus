@@ -38,3 +38,7 @@ input.port { width: 6.5em; font: inherit; padding: 5px 8px; border: 1px solid va
 .home-head .name { font-weight: 600; flex: 1 1 200px; }
 .home-head .meta { color: var(--muted); font-size: 13px; width: 100%; }
 #share-link input.secret { margin-top: 4px; }
+
+.desktop-preview { width: min(320px, 100%); aspect-ratio: 8 / 5; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); display: grid; place-items: center; overflow: hidden; flex: 0 0 100%; }
+.desktop-preview img { width: 100%; height: 100%; object-fit: contain; }
+.desktop-preview [hidden] { display: none; }

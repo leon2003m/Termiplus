@@ -627,3 +627,18 @@ remove the other entry, then start it.
 Verified end-to-end against a real Docker daemon with gVisor (`runsc`) using an
 isolated throwaway stack: ephemeral and persistent creation, the mismatch and
 confirmation refusals, listing, confirmed destroy keeping the home volume.
+
+### Desktop previews
+
+The console fetches `GET /ui/api/desktops/<session>/preview` for running
+desktops while visible. The MCP server checks the owner's current entitlement
+and calls the control-key-protected `GET /control/v1/preview/<container>`.
+The gateway uses the existing container Open Terminal key to run one fixed
+maim/Pillow command through `/execute?wait=4`; no Docker exec endpoint, new
+port, KasmVNC owner permission or shared-preview access is introduced.
+The command's base64 output is part of Open Terminal's per-workspace process
+log, just like other command output. Treat those logs as private screen data.
+PNG bytes and decoded dimensions are validated (320×320 maximum, 256 KiB);
+requests time out after five seconds, cache for 30 seconds per running instance,
+and return private image responses with nosniff. Preview requests do not count
+as user activity, so an unattended temporary desktop can still expire.

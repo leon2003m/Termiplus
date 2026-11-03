@@ -67,17 +67,20 @@ const (
 )
 
 type instance struct {
-	name      string
-	userHash  string
-	userID    string // owner, from the request that created it or its label
-	ephemeral bool
-	idle      time.Duration
-	addr      string // host:port reachable from the gateway
-	key       string // per-container Open Terminal API key
-	ready     bool
-	lastUsed  time.Time
-	conns     int // open WebSocket sessions (terminal and desktop stream)
-	desktop   bool
+	previewMu   sync.Mutex
+	previewData []byte
+	previewAt   time.Time
+	name        string
+	userHash    string
+	userID      string // owner, from the request that created it or its label
+	ephemeral   bool
+	idle        time.Duration
+	addr        string // host:port reachable from the gateway
+	key         string // per-container Open Terminal API key
+	ready       bool
+	lastUsed    time.Time
+	conns       int // open WebSocket sessions (terminal and desktop stream)
+	desktop     bool
 	// controlSession is the session id of an ephemeral sandbox created through
 	// the control API, so it can be listed with a usable handle. In memory only
 	// (ephemerals are throwaway); never set for Open WebUI chat sandboxes.

@@ -165,6 +165,8 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		u.run(w, r, p, "share_desktop", args)
 	case strings.HasPrefix(rest, "shares/") && r.Method == http.MethodDelete:
 		u.run(w, r, p, "share_desktop", map[string]any{"action": "revoke", "share_id": strings.TrimPrefix(rest, "shares/")})
+	case strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/preview") && r.Method == http.MethodGet:
+		u.preview(w, r, p, strings.TrimSuffix(strings.TrimPrefix(rest, "desktops/"), "/preview"))
 	case strings.HasPrefix(rest, "desktops/") && r.Method == http.MethodGet:
 		u.desktop(w, r, p, strings.TrimPrefix(rest, "desktops/"))
 	case strings.HasPrefix(rest, "sessions/") && r.Method == http.MethodDelete:
