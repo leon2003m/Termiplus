@@ -67,3 +67,15 @@ func TestPersonPickerCanonicalNameAtCapacity(t *testing.T) {
 		t.Fatalf("canonical lookup: %d %s", code, body)
 	}
 }
+
+func TestPersonPickerSupportedUsernameLengths(t *testing.T) {
+	for _, name := range []string{"a", strings.Repeat("a", 255)} {
+		f := newUIFixture(t)
+		f.ui.srv.WithDirectory(&pickerDirectory{}, "")
+		f.backend.sessions["desktop"] = Session{ID: "desktop", UserID: "owui-alice", Workspace: "desk", Running: true}
+		code, body, _ := f.do(t, http.MethodGet, "/ui/api/desktops/desktop/people?q="+name, "kc-alice", "", "", nil)
+		if code != 200 || !strings.Contains(body, name) {
+			t.Fatalf("length %d: %d %s", len(name), code, body)
+		}
+	}
+}

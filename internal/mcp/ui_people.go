@@ -19,8 +19,8 @@ func (u *UI) people(w http.ResponseWriter, r *http.Request, p Principal, id stri
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(query) < 2 || len(query) > 128 || strings.ContainsAny(query, "\r\n\x00") {
-		uiError(w, http.StatusBadRequest, "Enter an exact user name (2–128 characters).")
+	if !usernamePattern.MatchString(query) {
+		uiError(w, http.StatusBadRequest, "Enter an exact user name (1–255 supported characters).")
 		return
 	}
 	now := time.Now()

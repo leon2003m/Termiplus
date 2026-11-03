@@ -286,7 +286,7 @@ async function shareDesktop(s, button) {
     el("option", { value: "anyone", text: "Anyone signed in with the link" }),
     el("option", { value: "person", text: "One person" }),
   ]);
-  const query = el("input", { id: "share-person", type: "search", autocomplete: "off", maxlength: "128", placeholder: "Exact user name" });
+  const query = el("input", { id: "share-person", type: "search", autocomplete: "off", maxlength: "255", placeholder: "Exact user name" });
   const find = el("button", { type: "button", text: "Find person" });
   const results = el("div", { class: "person-results", role: "status" });
   const picker = el("div", { hidden: "hidden" }, [el("label", { for: "share-person", text: "Find a person by user name" }), query, find, results]);
