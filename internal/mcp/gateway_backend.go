@@ -62,10 +62,12 @@ func (b *GatewayBackend) WithForwardBase(u string) *GatewayBackend {
 
 // gwWorkspace / gwSession mirror the gateway control API's JSON.
 type gwWorkspace struct {
-	Name       string `json:"name"`
-	Runtime    string `json:"runtime"`
-	Persistent bool   `json:"persistent"`
-	Desktop    bool   `json:"desktop"`
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Runtime     string `json:"runtime"`
+	Persistent  bool   `json:"persistent"`
+	Desktop     bool   `json:"desktop"`
 }
 
 type gwSession struct {
@@ -85,7 +87,11 @@ func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Wor
 	}
 	out := make([]Workspace, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, Workspace{Name: w.Name, Description: "runtime " + w.Runtime, Persistent: w.Persistent, Desktop: w.Desktop})
+		desc := w.Description
+		if desc == "" {
+			desc = "runtime " + w.Runtime
+		}
+		out = append(out, Workspace{Name: w.Name, Label: w.Label, Description: desc, Persistent: w.Persistent, Desktop: w.Desktop})
 	}
 	return out, nil
 }

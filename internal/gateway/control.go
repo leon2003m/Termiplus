@@ -37,10 +37,12 @@ const maxControlBody = 16 << 10
 const controlSessionPrefix = "mcp-"
 
 type workspaceInfo struct {
-	Name       string `json:"name"`
-	Runtime    string `json:"runtime"`
-	Persistent bool   `json:"persistent"`
-	Desktop    bool   `json:"desktop,omitempty"`
+	Name        string `json:"name"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Runtime     string `json:"runtime"`
+	Persistent  bool   `json:"persistent"`
+	Desktop     bool   `json:"desktop,omitempty"`
 }
 
 type sessionInfo struct {
@@ -192,7 +194,7 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 func (g *Gateway) workspaces() []workspaceInfo {
 	out := make([]workspaceInfo, 0, len(g.cfg.Policies))
 	for name, p := range g.cfg.Policies {
-		out = append(out, workspaceInfo{Name: name, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop})
+		out = append(out, workspaceInfo{Name: name, Label: p.Label, Description: p.Description, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

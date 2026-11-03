@@ -53,7 +53,23 @@ issuers are compared literally.
 Set `TERMINAL_IMAGE` to the desktop image (`image/desktop`) and add a policy with
 `"desktop": true` to `deploy/policies.json`. The socket proxy allows exactly one
 image; the desktop image runs Open Terminal like the terminal image and starts a
-desktop only for desktop policies.
+desktop only for desktop policies. For example:
+
+```json
+"desk": {
+  "label": "Desktop",
+  "description": "A graphical Linux desktop in your browser, with file manager and web browser. Same home folder as Terminal.",
+  "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 2, "pids": 1024,
+  "home": "default", "desktop": true
+}
+```
+
+The desktop is XFCE with a file manager (Thunar), Firefox ESR, a text editor,
+an image viewer and a dark theme. To change the wallpaper for everyone, replace
+`image/desktop/files/usr/share/backgrounds/termiplus/default.svg` (any SVG,
+PNG or JPEG under that name) and rebuild the image. Users can pick another one
+under Settings > Desktop; that choice and other settings are kept in
+`~/.config` in their home.
 
 ## 4. Start
 

@@ -1,0 +1,5 @@
+# termiplus desktop: default applications for Home, File System, links and
+# the panel launchers. Users can change them under Settings > Default Applications.
+WebBrowser=firefox
+FileManager=thunar
+TerminalEmulator=xfce4-terminal

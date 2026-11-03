@@ -146,6 +146,7 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 | Field | Meaning |
 |---|---|
 | `runtime`, `memory_mb`, `cpus`, `pids` | Required. Must stay within the proxy's caps |
+| `label`, `description` | Optional. Name and short help text shown in the console and by `list_workspaces` (at most 60 and 300 bytes, one line). Changing them does not recreate containers |
 | `storage` | `persistent` (default) or `ephemeral` |
 | `home` | Persistent only. Policies with the same `home` share the user's volume |
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |

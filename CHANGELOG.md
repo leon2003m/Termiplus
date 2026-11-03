@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- Workspaces can have a `label` and `description` in `policies.json`. The console and `list_workspaces` show them instead of the bare policy name; the default policies are now called Terminal, Temporary terminal and Terminal with Docker. Changing them does not recreate containers.
+- Desktop image: file manager, Firefox ESR, text editor, image viewer, app menu, a dark theme, default applications for Home, File System and links, and a wallpaper that can be replaced before building.
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
 
 ### Changed

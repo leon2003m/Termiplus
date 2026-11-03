@@ -83,12 +83,14 @@ async function loadWorkspaces() {
   for (const ws of list) {
     const button = el("button", { class: "primary", type: "button", text: "Start" });
     button.addEventListener("click", () => startWorkspace(ws, button));
-    const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "persistent" : "temporary"].join(", ");
-    ul.append(el("li", {}, [
-      el("span", { class: "name", text: ws.name }),
+    const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");
+    const items = [
+      el("span", { class: "name", text: ws.label || ws.name }),
       button,
-      el("span", { class: "meta", text: kind + (ws.description ? " · " + ws.description : "") }),
-    ]));
+      el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }),
+    ];
+    if (ws.description) items.push(el("span", { class: "help", text: ws.description }));
+    ul.append(el("li", {}, items));
   }
   $("workspaces-section").hidden = false;
 }

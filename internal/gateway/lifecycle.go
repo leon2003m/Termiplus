@@ -21,6 +21,12 @@ import (
 // Policy describes one kind of terminal environment. Users reach a policy via
 // the URL prefix /p/<name>; Open WebUI group access decides who sees which.
 type Policy struct {
+	// Label is the name shown to people (e.g. "Temporary terminal"). Optional;
+	// the policy name is shown without it.
+	Label string `json:"label,omitempty"`
+	// Description is a short help text shown under the label. Optional.
+	Description string `json:"description,omitempty"`
+
 	Runtime  string  `json:"runtime"`
 	MemoryMB int64   `json:"memory_mb"`
 	CPUs     float64 `json:"cpus"`
@@ -153,6 +159,9 @@ func (m *manager) imageFor(pol Policy) string {
 
 func (m *manager) configHash(pol Policy, policyName string) string {
 	secretFP := sha256.Sum256(m.keySecret)
+	// Display texts do not affect the container: changing them must not
+	// recreate anyone's workspace.
+	pol.Label, pol.Description = "", ""
 	// Policies without their own image hash exactly as before, so existing
 	// containers are not recreated by this field's introduction.
 	b, _ := json.Marshal([]any{m.imageFor(pol), m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})

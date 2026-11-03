@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/naming"
@@ -129,6 +131,12 @@ func New(cfg Config) (*Gateway, error) {
 		}
 		if p.Home != "" && !naming.PolicyName.MatchString(p.Home) {
 			return nil, fmt.Errorf("policy %s: invalid home %q", name, p.Home)
+		}
+		if err := checkDisplayText(p.Label, maxPolicyLabel); err != nil {
+			return nil, fmt.Errorf("policy %s: label %w", name, err)
+		}
+		if err := checkDisplayText(p.Description, maxPolicyDescription); err != nil {
+			return nil, fmt.Errorf("policy %s: description %w", name, err)
 		}
 		if p.Runtime == "" || p.MemoryMB <= 0 || p.CPUs <= 0 || p.Pids <= 0 {
 			return nil, fmt.Errorf("policy %s: runtime, memory_mb, cpus and pids are required", name)
@@ -416,4 +424,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func httpError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"detail": msg})
+}
+
+// Limits for a policy's display texts (bytes).
+const (
+	maxPolicyLabel       = 60
+	maxPolicyDescription = 300
+)
+
+// checkDisplayText accepts short, printable UTF-8 text for the console.
+func checkDisplayText(s string, limit int) error {
+	if len(s) > limit {
+		return fmt.Errorf("must be at most %d bytes", limit)
+	}
+	if !utf8.ValidString(s) {
+		return errors.New("must be valid UTF-8")
+	}
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return errors.New("must not contain control characters")
+		}
+	}
+	return nil
 }

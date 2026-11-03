@@ -53,7 +53,9 @@ var ErrUnauthenticated = errors.New("unauthenticated")
 
 // Workspace is a launchable profile/image the caller may request.
 type Workspace struct {
-	Name        string `json:"name"`
+	Name string `json:"name"`
+	// Label is the human-readable name; empty means use Name.
+	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Persistent reports whether this workspace can be launched with a
 	// persistent home (still subject to the caller's entitlement).
