@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- termiplus desktop: one bottom panel with the application menu, launchers
-     for terminal, files and browser, the open windows and a clock. No log-out
+     for terminal, files and browser (the apps menu is labelled "Apps"), the open windows and a clock. No log-out
      button: ending the session stops the workspace. -->
 <channel name="xfce4-panel" version="1.0">
   <property name="configver" type="int" value="2"/>
@@ -35,23 +35,47 @@
     </property>
   </property>
   <property name="plugins" type="empty">
-    <property name="plugin-1" type="string" value="whiskermenu"/>
+    <property name="plugin-1" type="string" value="whiskermenu">
+      <property name="button-title" type="string" value="Apps"/>
+      <property name="show-button-title" type="bool" value="true"/>
+      <property name="button-icon" type="string" value="view-app-grid"/>
+      <property name="show-generic-names" type="bool" value="true"/>
+      <property name="favorites" type="array">
+        <value type="string" value="firefox-esr.desktop"/>
+        <value type="string" value="thunar.desktop"/>
+        <value type="string" value="org.xfce.mousepad.desktop"/>
+        <value type="string" value="org.xfce.ristretto.desktop"/>
+        <value type="string" value="xfce4-terminal.desktop"/>
+        <value type="string" value="termiplus-background.desktop"/>
+        <value type="string" value="xfce-settings-manager.desktop"/>
+      </property>
+      <property name="show-command-lockscreen" type="bool" value="false"/>
+      <property name="show-command-logout" type="bool" value="false"/>
+      <property name="show-command-switchuser" type="bool" value="false"/>
+      <property name="show-command-restart" type="bool" value="false"/>
+      <property name="show-command-shutdown" type="bool" value="false"/>
+      <property name="show-command-suspend" type="bool" value="false"/>
+      <property name="show-command-hibernate" type="bool" value="false"/>
+      <property name="show-command-menueditor" type="bool" value="false"/>
+      <property name="show-command-profile" type="bool" value="false"/>
+      <property name="show-command-settings" type="bool" value="true"/>
+    </property>
     <property name="plugin-2" type="string" value="separator">
       <property name="style" type="uint" value="0"/>
     </property>
     <property name="plugin-3" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="xfce4-terminal-emulator.desktop"/>
+        <value type="string" value="xfce4-terminal.desktop"/>
       </property>
     </property>
     <property name="plugin-4" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="xfce4-file-manager.desktop"/>
+        <value type="string" value="thunar.desktop"/>
       </property>
     </property>
     <property name="plugin-5" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="xfce4-web-browser.desktop"/>
+        <value type="string" value="firefox-esr.desktop"/>
       </property>
     </property>
     <property name="plugin-6" type="string" value="separator">
@@ -73,6 +97,7 @@
       <property name="mode" type="uint" value="2"/>
       <property name="digital-layout" type="uint" value="3"/>
       <property name="digital-time-format" type="string" value="%H:%M"/>
+      <property name="digital-time-font" type="string" value="Inter Medium 10"/>
     </property>
   </property>
 </channel>

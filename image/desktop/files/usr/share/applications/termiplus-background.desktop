@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Change background
+GenericName=Change background
+Comment=Pick another desktop wallpaper
+Exec=xfdesktop-settings
+Icon=preferences-desktop-wallpaper
+Categories=Settings;DesktopSettings;XFCE;
+OnlyShowIn=XFCE;

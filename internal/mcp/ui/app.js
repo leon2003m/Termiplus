@@ -46,13 +46,14 @@ function safeURL(u) {
 }
 
 async function startWorkspace(ws, button) {
+  const title = ws.label || ws.name;
   const what = ws.persistent ? "a persistent session (your home is kept)" : "a temporary session";
-  if (!window.confirm("Start " + what + " of \"" + ws.name + "\"?")) return;
+  if (!window.confirm("Start " + what + " of \"" + title + "\"?")) return;
   button.disabled = true;
-  status("Starting " + ws.name + " …");
+  status("Starting " + title + " …");
   try {
     await api("sessions", { method: "POST", body: JSON.stringify({ workspace: ws.name, persistent: ws.persistent }) });
-    status("Started " + ws.name + ".");
+    status("Started " + title + ".");
     await loadSessions();
   } catch (e) {
     status(e.message, true);
@@ -81,16 +82,14 @@ async function loadWorkspaces() {
   const ul = $("workspaces");
   ul.replaceChildren();
   for (const ws of list) {
-    const button = el("button", { class: "primary", type: "button", text: "Start" });
+    const title = ws.label || ws.name;
+    const button = el("button", { class: "primary", type: "button", text: "Start", "aria-label": "Start " + title });
     button.addEventListener("click", () => startWorkspace(ws, button));
     const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");
-    const items = [
-      el("span", { class: "name", text: ws.label || ws.name }),
-      button,
-      el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }),
-    ];
-    if (ws.description) items.push(el("span", { class: "help", text: ws.description }));
-    ul.append(el("li", {}, items));
+    const text = [el("span", { class: "name", text: title })];
+    if (ws.description) text.push(el("span", { class: "help", text: ws.description }));
+    text.push(el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }));
+    ul.append(el("li", { class: "workspace" }, [el("div", { class: "ws-text" }, text), button]));
   }
   $("workspaces-section").hidden = false;
 }

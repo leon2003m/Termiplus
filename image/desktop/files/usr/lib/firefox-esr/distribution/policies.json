@@ -5,6 +5,9 @@
     "DontCheckDefaultBrowser": true,
     "DisablePocket": true,
     "OverrideFirstRunPage": "",
-    "OverridePostUpdatePage": ""
+    "OverridePostUpdatePage": "",
+    "Preferences": {
+      "browser.tabs.inTitlebar": { "Value": 1, "Status": "default" }
+    }
   }
 }

@@ -13,7 +13,9 @@ ul { list-style: none; padding: 0; margin: 0; }
 li { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 li .name { font-weight: 600; flex: 1 1 200px; overflow-wrap: anywhere; }
 li .meta { color: var(--muted); font-size: 13px; width: 100%; }
-li .help { color: var(--muted); font-size: 12px; width: 100%; margin-top: -4px; }
+li.workspace { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; }
+.ws-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ws-text .help { font-size: 14px; line-height: 1.45; }
 button, a.button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; text-decoration: none; }
 button.primary, a.button { border-color: var(--accent); color: var(--accent); }
 button.danger { border-color: var(--danger); color: var(--danger); }
