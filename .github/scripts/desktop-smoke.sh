@@ -55,6 +55,8 @@ leaked="$(docker exec "$P" sh -c 'for p in $(pgrep -f /opt/open-terminal/bin/ope
 ot="$(docker exec "$P" pgrep -fc /opt/open-terminal/bin/open-terminal || true)"
 check "desktop: Open Terminal is running" 1 "$([ "${ot:-0}" -ge 1 ] && echo 1 || echo 0)"
 check "desktop: Open Terminal does not get the desktop password" 0 "$leaked"
+check "desktop: Firefox policies are in place" 0 "$(docker exec "$P" test -r /usr/lib/firefox-esr/distribution/policies.json; echo $?)"
+check "desktop: uBlock Origin is installed" 0 "$(docker exec "$P" sh -c 'test -d /usr/share/mozilla/extensions/*/uBlock0@raymondhill.net'; echo $?)"
 
 for _ in $(seq 1 60); do [ "$(code "http://$TP/health")" = 200 ] && break; sleep 1; done
 check "plain: Open Terminal health" 200 "$(code "http://$TP/health")"
