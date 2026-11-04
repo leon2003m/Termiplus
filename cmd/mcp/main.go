@@ -44,6 +44,16 @@ func main() {
 		log.Fatal("CONTROL_API_KEY is required (or MCP_STUB_BACKEND=1 for local development)")
 	}
 
+	// Which groups grant the persist and admin roles. Unset: the groups
+	// termiplus-persist / termiplus-admin, matched exactly as forwarded.
+	var roles *mcp.RoleMap
+	if p, a := splitRoles(config.Get("MCP_PERSIST_ROLES", "")), splitRoles(config.Get("MCP_ADMIN_ROLES", "")); len(p)+len(a) > 0 {
+		var err error
+		if roles, err = mcp.NewRoleMap(p, a); err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	var auth mcp.Authenticator
 	authDesc := ""
 	switch mode := config.Get("MCP_AUTH", ""); mode {
@@ -60,7 +70,7 @@ func main() {
 		if len(owuiKey) < 32 {
 			log.Fatal("MCP_OWUI_PLUGIN_KEY must be at least 32 characters")
 		}
-		auth, authDesc = mcp.ProxyHeaderAuthenticator{OWUIKey: owuiKey}, "identity from the OIDC proxy, sessions keyed by the OIDC subject"
+		auth, authDesc = mcp.ProxyHeaderAuthenticator{OWUIKey: owuiKey, Roles: roles}, "identity from the OIDC proxy, sessions keyed by the OIDC subject"
 		if owuiKey != "" {
 			authDesc = "identity from the OIDC proxy, sessions keyed by the Open WebUI user id"
 		}
@@ -75,7 +85,8 @@ func main() {
 		log.Fatalf("MCP_AUTH must be \"proxy\" (behind oauth2-proxy) or \"dev\", got %q", mode)
 	}
 
-	srv := mcp.NewServer(auth, backend, version)
+	srv := mcp.NewServer(auth, backend, version).WithRoles(roles)
+	log.Printf("roles: %s", roles)
 	entDesc := "all workspaces open to every signed-in user (no MCP_ENTITLEMENTS_FILE)"
 	if f := config.Get("MCP_ENTITLEMENTS_FILE", ""); f != "" {
 		if _, err := srv.WithEntitlementsFile(f); err != nil {

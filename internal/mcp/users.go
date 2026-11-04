@@ -167,7 +167,7 @@ func (s *Server) manageUser(ctx context.Context, p Principal, args map[string]an
 		if !member {
 			return map[string]any{"username": u.Username, "group": g.Name, "changed": false}, nil
 		}
-		if g.Name == RoleAdmin {
+		if s.roles.isAdminGroup(g.Name) {
 			// Never leave the deployment without an enabled admin.
 			members, err := s.dir.Members(ctx, g.ID)
 			if err != nil {

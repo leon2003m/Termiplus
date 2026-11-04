@@ -33,6 +33,7 @@ type Server struct {
 	desktopBase string    // browser-facing desktop origin, for share links
 	shares      *ShareStore
 	departed    *departed
+	roles       *RoleMap // nil: exact group names (WithRoles)
 }
 
 // NewServer builds the server with its fixed tool surface.
@@ -43,6 +44,23 @@ func NewServer(auth Authenticator, backend Backend, version string) *Server {
 		s.tools = append(s.tools, extra...)
 	}
 	return s
+}
+
+// WithRoles maps the organisation's groups onto termiplus's roles for the
+// management UI, desktop and port-forward handlers. The MCP endpoint's own
+// Authenticator must be given the same RoleMap.
+func (s *Server) WithRoles(m *RoleMap) *Server {
+	s.roles = m
+	return s
+}
+
+// identity is the authenticator of the browser-facing handlers: identity from
+// the sign-in proxy only, with this server's role mapping.
+func (s *Server) identity() ProxyHeaderAuthenticator {
+	if s == nil {
+		return ProxyHeaderAuthenticator{}
+	}
+	return ProxyHeaderAuthenticator{Roles: s.roles}
 }
 
 // WithEntitlements restricts which workspaces callers may see and launch.
@@ -436,7 +454,7 @@ func (s *Server) buildTools() []tool {
 				}
 				if argBool(args, "persistent") {
 					if !p.HasRole(RolePersist) {
-						return false, fmt.Errorf("persistent sessions require the %s role", RolePersist)
+						return false, fmt.Errorf("persistent sessions require the %s role", s.roles.persistGroups())
 					}
 					return true, nil // entitled, but still needs human confirmation
 				}

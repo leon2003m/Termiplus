@@ -119,6 +119,23 @@ Both layers are required for a consequential action:
    - `termiplus-persist` → may create **persistent** sessions (else ephemeral only).
    - `termiplus-admin` → may use the network-policy and user/group admin tools.
    - a resource-tier role/group → memory/CPU/session-count caps.
+
+   **Your own group or role names.** `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES`
+   (comma-separated) name the groups that grant these two roles instead, e.g.
+   `MCP_PERSIST_ROLES=ki-nutzer` and `MCP_ADMIN_ROLES=ki-admin`. A user has the
+   role when any of their groups is listed; `termiplus-persist` /
+   `termiplus-admin` then only count if you list them too. An unset variable
+   keeps the default name for that role. When either variable is set, every
+   forwarded group name is normalised first, for these roles and for workspace
+   entitlements: one leading `role:` (oauth2-proxy's `keycloak-oidc` provider
+   adds it to realm roles) and then one leading `/` (Keycloak's "Full group
+   path") are stripped, so `ki-nutzer`, `/ki-nutzer` and `role:ki-nutzer` are
+   the same. Subgroups are not flattened: `/org/ki-nutzer` stays
+   `org/ki-nutzer` and matches only if listed as such. With neither variable
+   set, names are matched exactly as forwarded, as before. The startup log
+   prints the mapping in use (`roles: ...`). `manage_user` and `manage_group`
+   still only manage top-level `termiplus-*` groups; members of your own groups
+   are managed in your directory.
 2. **Human-in-the-loop (consent), in OWUI.** **Every** destructive or
    security-sensitive action pauses on an OWUI `__event_call__` **confirmation
    modal** and only proceeds on an explicit human *yes*. The agent can *propose*;
