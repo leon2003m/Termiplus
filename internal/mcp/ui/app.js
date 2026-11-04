@@ -125,7 +125,9 @@ async function loadWorkspaces() {
     const title = ws.label || ws.name;
     const button = el("button", { class: "primary", type: "button", text: "Start", "aria-label": "Start " + title });
     button.addEventListener("click", () => startWorkspace(ws, button));
-    const purpose = ws.desktop ? "A Linux desktop for graphical apps." : ws.persistent
+    const purpose = ws.desktop ? "A Linux desktop for graphical apps." : ws.connection_name === "Terminal with Docker"
+      ? "A Linux shell that keeps your home folder and can also run Docker containers."
+      : ws.persistent
       ? "A Linux shell that keeps your home folder between sessions."
       : "A fresh Linux shell with nothing from your home folder. Deleted after " + (ws.idle_seconds ? Math.ceil(ws.idle_seconds / 60) + " minutes" : "the configured idle period") + " without use; useful for trying things or letting an AI run commands without touching your files.";
     const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");

@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 - Preserve XFCE desktop trash operations with Dolphin as the folder opener.
+- Give the "Terminal with Docker" workspace its own fallback text in the console instead of repeating the plain terminal text.
 
 
 ### Added
