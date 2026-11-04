@@ -224,12 +224,9 @@ func New(cfg Config) (*Gateway, error) {
 	return g, nil
 }
 
-// specPolicies picks, for each runtime, one policy whose container answers the
-// user-less spec requests of every policy with that runtime. Without this each
-// policy started its own full terminal container just for three read-only
-// GETs. Spec answers are shared per runtime, not globally, because /system
-// describes the kernel, which differs between gVisor and Sysbox. Preference:
-// "default", then persistent policies, then by name.
+// specPolicies shares discovery only across equal runtime, image, egress and
+// desktop/browser feature flags. Otherwise discovery could advertise another
+// policy's capabilities. Prefer default, then persistent policies, then name.
 func specPolicies(policies map[string]Policy) map[string]string {
 	rank := func(name string) string {
 		switch {
@@ -240,15 +237,20 @@ func specPolicies(policies map[string]Policy) map[string]string {
 		}
 		return "2" + name
 	}
-	best := map[string]string{} // runtime -> policy name
+	type specKey struct {
+		runtime, image, network string
+		desktop                 bool
+	}
+	key := func(p Policy) specKey { return specKey{p.Runtime, p.Image, p.Egress, p.Desktop} }
+	best := map[specKey]string{}
 	for name, p := range policies {
-		if cur, ok := best[p.Runtime]; !ok || rank(name) < rank(cur) {
-			best[p.Runtime] = name
+		if cur, ok := best[key(p)]; !ok || rank(name) < rank(cur) {
+			best[key(p)] = name
 		}
 	}
 	out := make(map[string]string, len(policies))
 	for name, p := range policies {
-		out[name] = best[p.Runtime]
+		out[name] = best[key(p)]
 	}
 	return out
 }

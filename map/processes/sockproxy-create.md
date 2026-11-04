@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/workspaces/policy.md, ../objects/sandbox/sockproxy-rules.md]
 produces: [../objects/workspaces/terminal-container.md, ../objects/workspaces/home-volume.md]
 ---
@@ -49,3 +49,7 @@ The gateway is internet-facing (through Open WebUI) and parses user traffic. If 
 
 - Objects: [Sockproxy rules](../objects/sandbox/sockproxy-rules.md), [Terminal container](../objects/workspaces/terminal-container.md), [Home volume](../objects/workspaces/home-volume.md), [DNS forwarder](../objects/sandbox/dns-forwarder.md)
 - Source: `internal/sockproxy/validate.go`, `internal/sockproxy/proxy.go`
+
+## Native integration update (2026-11-04)
+
+Native desktop flags replace old desktop-password env values within the existing allowlist. Container hardening and Docker endpoint permissions are unchanged. Source: internal/gateway/lifecycle.go and image/desktop/Dockerfile.

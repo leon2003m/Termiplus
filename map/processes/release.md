@@ -16,7 +16,7 @@ The maintainer pushes `vX.Y.Z` or `vX.Y.Z-rc.N` on a commit already on `main`. `
 
 ## Why this shape
 
-Signing and attestations go to public transparency logs and cannot be taken back, so nothing publishes before a human approves. Only the maintainer tags (rule in [AGENTS.md](../../AGENTS.md)): agents never create, move or delete tags. An `-rc.N` tag is a pre-release and does not move `latest`. Desktop is amd64 only because KasmVNC ships an amd64 `.deb`; the rc.1 arm64 build failed on this.
+Signing and attestations go to public transparency logs and cannot be taken back, so nothing publishes before a human approves. Only the maintainer tags (rule in [AGENTS.md](../../AGENTS.md)): agents never create, move or delete tags. An `-rc.N` tag is a pre-release and does not move `latest`. The desktop release matrix currently remains amd64 only. Its image now uses the native Open Terminal desktop dependencies; additional architectures need a verified native image build before enabling publication.
 
 ## Steps
 

@@ -3,13 +3,13 @@ type: object
 cluster: workspaces
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/naming/naming.go
 ---
 
 # Terminal container
 
-The Docker container that runs Open Terminal (and, for desktop policies, KasmVNC) for one user. MCP calls it a **session**. Persistent: `ot-u-<hash>-<policy>`, one per user and policy. Ephemeral: `ot-e-<hash>-<chat>-<policy>`, one per chat.
+The Docker container that runs Open Terminal (including native Desktop/Browser for desktop policies) for one user. MCP calls it a **session**. Persistent: `ot-u-<hash>-<policy>`, one per user and policy. Ephemeral: `ot-e-<hash>-<chat>-<policy>`, one per chat.
 
 ## Why this shape
 
@@ -26,7 +26,7 @@ Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Contai
 
 ## Connected to
 
-- **owns:** its Open Terminal port (8000) and desktop port. Both are reachable only from the gateway on `ot-sandbox`.
+- **owns:** its Open Terminal port (8000). It is reachable only from the gateway on `ot-sandbox`.
 - **owned-by:** the gateway lifecycle manager, created through the sockproxy
 - **joins:** [Policy](policy.md), [Home volume](home-volume.md) (persistent only), [Principal](../identity/principal.md) (user hash), [Firewall chain](../sandbox/firewall-chain.md)
 - **looks-like-but-is-not:** an Open WebUI chat session, and the [archive helper](archive-helper.md) (`ot-a-`, never started)
@@ -59,11 +59,10 @@ The terminal image includes small agent utilities (fd-find, rsync, bc, pipx) in
 `image/Dockerfile`. Inventory, measured growth and the unimplemented hybrid
 desktop-control/egress design are in `docs/workspace-tools.md`.
 
-Desktop control experiments remain test-only under `test/integration/desktop/`
-(Dockerfile.tools, control_smoke.py, browser_dom.py, a11y_probe.py). Their measured
-results and semantic-action limitations are in `docs/workspace-tools.md`; no
-production tools/endpoints are enabled by these fixtures.
+The former custom desktop/WebDriver/accessibility experiments are removed;
+use native Open Terminal Desktop and Browser tools. Native image validation
+lives in `.github/scripts/desktop-smoke.sh` and `native-smoke.py`.
 
-The test-only AT-SPI probe marks incomplete tree inspection and refuses all
-actions after a traversal limit or error. Stdlib regressions in
-`test/integration/desktop/test_a11y_probe.py` cover these refusal paths.
+## Native integration update (2026-11-04)
+
+Native Desktop and Browser live in Open Terminal on port 8000, with TigerVNC reachable only through a local Unix socket. Session metadata carries desktop: true, not stream/password/forward URLs. Source: internal/gateway/control.go:sessionInfo, lifecycle.go, image/desktop/Dockerfile.

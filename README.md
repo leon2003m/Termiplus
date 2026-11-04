@@ -45,8 +45,8 @@ deploy/                     docker-compose.yml, policies.json, daemon.json, fire
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
                             termiplus-portlock.service,
                             docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
-                            docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP),
-                            docker-compose.mcp-users.yml (opt-in: group membership via MCP),
+                            docker-compose.mcp-netpolicy.yml (opt-in: human console network policy),
+                            docker-compose.mcp-users.yml (opt-in: identity directory backend),
                             docker-compose.offline.yml (opt-in: offline workspaces)
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
@@ -130,6 +130,20 @@ Open WebUI's admin terminal connection already sends who the user is:
 The gateway verifies the connection key, then calls the user's container with that container's own key (HMAC of `KEY_SECRET` and the container name). For the WebSocket it reads the auth message, checks it, and resends it upstream with the container key. No container is started before authentication succeeds.
 
 Open WebUI also sends a few requests without a user (connection check, OpenAPI spec, system prompt). Those go to a "spec" container shared by all policies with the same runtime, and only `GET /openapi.json`, `/api/config` and `/system` are allowed. `/health` is answered by the gateway. `/api/v1/*` returns 404, so Open WebUI treats the gateway as a normal terminal, not as an orchestrator. That is why plain Bearer auth is enough.
+
+## Native Desktop and Browser
+
+Use Open WebUI **0.13+** and the bundled Open Terminal **0.16.0** image. Native
+terminal connections provide Desktop, Browser, files, Git, events and local app
+previews. Termiplus supplies isolation, user/chat routing, homes and lifecycle.
+Select the desktop policy's connection in the chat; human and assistant then use
+the same native display and tools. MCP provisioning does not switch connections.
+
+The human console retains backups, lifecycle, access and expiring image-only
+screen shares. AI tools cannot administer network policy/users/groups or delete,
+restore or prune snapshots. The legacy Kasm player and separate port-forwarding
+service are removed. See [native integration](docs/native-integration.md),
+[deployment](docs/deploy-alpha.md) and [MCP](docs/mcp.md).
 
 ## Policies and storage profiles
 

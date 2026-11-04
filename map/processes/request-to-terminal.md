@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/workspaces/policy.md, ../objects/identity/service-keys.md]
 produces: [../objects/workspaces/terminal-container.md, ../objects/workspaces/home-volume.md]
 ---
@@ -50,3 +50,7 @@ Open WebUI thinks it talks to *one* Open Terminal. The gateway must therefore be
 
 - Objects: [Policy](../objects/workspaces/policy.md), [Terminal container](../objects/workspaces/terminal-container.md), [Home volume](../objects/workspaces/home-volume.md), [Service keys](../objects/identity/service-keys.md)
 - Source: `internal/gateway/gateway.go`, `internal/gateway/lifecycle.go`, `internal/gateway/ws.go`
+
+## Native integration update (2026-11-04)
+
+Native HTTP and Desktop/PTY/events/process sockets preserve user and chat. Optional first-frame chat_id must agree with an existing header. Browser view ws/stream/vnc instead use header bearer authentication, checked before provisioning. Discovery is shared only across equal runtime, image, egress and Desktop feature flags. Source: internal/gateway/gateway.go:specPolicies, internal/gateway/ws.go, internal/gateway/native_test.go.

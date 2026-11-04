@@ -24,7 +24,7 @@ names in each citation are the stable anchor.
 
 1. **gateway** (`cmd/gateway`, `internal/gateway`) is what Open WebUI talks to as a terminal: `/p/<policy>/...` with the gateway API key. It starts one container per user and policy (or per chat) and proxies to it.
 2. **sockproxy** (`cmd/sockproxy`, `internal/sockproxy`) is the only holder of the Docker socket. It allows a handful of endpoints and rebuilds every create request. The gateway never reaches Docker directly.
-3. **mcp** (`cmd/mcp`, `internal/mcp`) is the alpha control plane: MCP tools for chat, a management console, desktop streams and port forwards. It calls the gateway's `/control/v1/` API; it never touches Docker.
+3. **mcp** (`cmd/mcp`, `internal/mcp`) is the alpha control plane: limited MCP lifecycle/storage tools for chat, a human management console and expiring image-only screen shares. It calls the gateway's `/control/v1/` API; it never touches Docker.
 4. **netpolicy** (`internal/netpolicy`) plus `deploy/firewall.sh` and `deploy/dns-forwarder` decide what a terminal may reach. Public egress is allowed, internal is denied except admin-set entries.
 5. **deploy/** is compose files (base plus overlays), host firewall and systemd units. **image/** is the terminal and desktop images.
 
@@ -44,3 +44,14 @@ names in each citation are the stable anchor.
 | **policy** (sandbox network) | `netpolicy.Policy`: DNS entries and egress allows, not a terminal Policy | [Network policy](objects/sandbox/network-policy.md) |
 | **key** | six different secrets (gateway, control, admin, proxy token, key secret, plugin key); never interchangeable | [Service keys](objects/identity/service-keys.md) |
 | **share** | an expiring view-only link to someone's desktop, not a file share | [Share](objects/control-plane/share.md) |
+
+## Native workspace integration (2026-11-04)
+
+Open WebUI 0.13 + Open Terminal 0.16 own interactive Desktop, Browser, Git,
+files, terminals, events and app previews. Termiplus owns container isolation,
+user/policy/chat routing, homes, backups, entitlements and human administration.
+See [native Desktop](processes/desktop-stream.md),
+[native app preview](processes/port-forward.md),
+[model tool boundary](objects/control-plane/mcp-tools.md) and
+[migration](../docs/native-integration.md). No AI administration or snapshot
+pruning is exposed. Shared viewing is image-only at five-second intervals.

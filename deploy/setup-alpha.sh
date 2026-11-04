@@ -6,7 +6,6 @@
 #   KEYCLOAK_PUBLIC_URL=https://sso.example.com \
 #   DESKTOP_PUBLIC_URL=https://desk.example.com \
 #   DESKTOP_STREAM_URL=https://desktops.example.com \
-#   FORWARD_PUBLIC_URL=https://fwd.example.com \
 #   deploy/setup-alpha.sh
 #
 # Creates every missing secret in deploy/secrets/ (existing files are never
@@ -22,8 +21,7 @@ SECRETS="$DEPLOY/secrets"
 : "${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL (https://... in front of Keycloak)}"
 : "${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL (https://... in front of desk-auth)}"
 : "${DESKTOP_STREAM_URL:?set DESKTOP_STREAM_URL (https://... in front of desk-stream-auth, its own origin)}"
-: "${FORWARD_PUBLIC_URL:?set FORWARD_PUBLIC_URL (https://... in front of fwd-auth, its own origin)}"
-for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL" "$DESKTOP_STREAM_URL" "$FORWARD_PUBLIC_URL"; do
+for u in "$WEBUI_URL" "$KEYCLOAK_PUBLIC_URL" "$DESKTOP_PUBLIC_URL" "$DESKTOP_STREAM_URL"; do
   case "$u" in
     https://*) ;;
     *) echo "setup-alpha: $u must be an https:// URL (cookies are Secure)" >&2; exit 1 ;;
@@ -61,15 +59,13 @@ secret mcp_kc_admin_client_secret 32
 secret desk_oidc_client_secret 32
 secret desk_oidc_cookie_secret 16
 secret dstream_oidc_cookie_secret 16
-secret fwd_oidc_client_secret 32
-secret fwd_oidc_cookie_secret 16
 secret owui_oidc_client_secret 32
 secret owui_oauth_session_key 32
 secret keycloak_db_password 32
 secret keycloak_admin_password 24
 
 # The services read these as non-root users.
-chmod 0644 "$SECRETS"/control_api_key "$SECRETS"/mcp_* "$SECRETS"/desk_* "$SECRETS"/dstream_* "$SECRETS"/fwd_* "$SECRETS"/keycloak_db_password
+chmod 0644 "$SECRETS"/control_api_key "$SECRETS"/mcp_* "$SECRETS"/desk_* "$SECRETS"/dstream_* "$SECRETS"/keycloak_db_password
 
 if [ -s "$SECRETS/keycloak.env" ]; then
   echo "keep     secrets/keycloak.env"
@@ -91,8 +87,6 @@ values = {
     "__WEBUI_URL__": "$WEBUI_URL",
     "__DESKTOP_PUBLIC_URL__": "$DESKTOP_PUBLIC_URL",
     "__DESKTOP_STREAM_URL__": "$DESKTOP_STREAM_URL",
-    "__FORWARD_PUBLIC_URL__": "$FORWARD_PUBLIC_URL",
-    "__FWD_CLIENT_SECRET__": open("$SECRETS/fwd_oidc_client_secret").read(),
     "__OWUI_CLIENT_SECRET__": open("$SECRETS/owui_oidc_client_secret").read(),
     "__MCP_CLIENT_SECRET__": open("$SECRETS/mcp_oidc_client_secret").read(),
     "__MCP_ADMIN_CLIENT_SECRET__": open("$SECRETS/mcp_kc_admin_client_secret").read(),
@@ -122,7 +116,7 @@ if [ ! -d "$DEPLOY/backups" ]; then
 fi
 # The MCP server refuses to start without an entitlements file (MCP_AUTH=proxy).
 # Start closed: no workspace for anyone until an admin grants them in the
-# console (Admin -> Entitlements) or with set_entitlements.
+# console (Admin -> Entitlements).
 if [ ! -e "$DEPLOY/mcp-data/entitlements.json" ]; then
   if printf '{\n  "default": "deny",\n  "workspaces": {}\n}\n' >"$DEPLOY/mcp-data/entitlements.json" 2>/dev/null; then
     echo "created  mcp-data/entitlements.json (deny all; grant workspaces in the console)"
@@ -143,7 +137,6 @@ fi
   echo "KEYCLOAK_PUBLIC_URL=$KEYCLOAK_PUBLIC_URL"
   echo "DESKTOP_PUBLIC_URL=$DESKTOP_PUBLIC_URL"
   echo "DESKTOP_STREAM_URL=$DESKTOP_STREAM_URL"
-  echo "FORWARD_PUBLIC_URL=$FORWARD_PUBLIC_URL"
 } >"$ENVFILE"
 [ "$ENVFILE" = /dev/stdout ] || echo "wrote    deploy/.env"
 
@@ -153,11 +146,10 @@ Next steps
 ==========
 1. TLS reverse proxy: $KEYCLOAK_PUBLIC_URL -> 127.0.0.1:8180 (Keycloak),
    $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth, console),
-   $DESKTOP_STREAM_URL -> 127.0.0.1:4183 (desk-stream-auth, desktops),
-   $FORWARD_PUBLIC_URL -> 127.0.0.1:4182 (fwd-auth). Open WebUI and the
-   oauth2-proxies must reach $ISSUER under that same URL.
+   $DESKTOP_STREAM_URL -> 127.0.0.1:4183 (desk-stream-auth, screen shares).
+   Open WebUI and the oauth2-proxies must reach $ISSUER under that same URL.
 2. Start (TERMINAL_IMAGE = the desktop image if you want desktops; the
-   mcp-users overlay lets admins manage group membership from chat):
+   mcp-users overlay enables human administration of group membership):
      docker compose -f docker-compose.yml -f docker-compose.mcp.yml \\
        -f docker-compose.desktop.yml -f docker-compose.keycloak.yml \\
        -f docker-compose.mcp-users.yml up -d

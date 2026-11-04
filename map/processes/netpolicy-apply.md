@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/sandbox/network-policy.md, ../objects/identity/service-keys.md]
 produces: [../objects/sandbox/dns-forwarder.md, ../objects/sandbox/firewall-chain.md]
 ---
@@ -12,7 +12,7 @@ An admin's network policy (DNS entries and internal egress allows) becomes live 
 
 ## Input → Movement → Output
 
-An admin sends a policy, either with `PUT /admin/netpolicy` and the admin key or through the MCP tool `set_network_policy`. The gateway validates it against the deny list. It then writes three files atomically: `policy.json`, the dnsmasq hosts file and `egress.rules`. dnsmasq picks up the hosts file through inotify. A systemd `.path` unit sees `egress.rules` change and reruns `deploy/firewall.sh`.
+An admin sends a policy, either with `PUT /admin/netpolicy` and the admin key or through the human console. The gateway validates it against the deny list. It then writes three files atomically: `policy.json`, the dnsmasq hosts file and `egress.rules`. dnsmasq picks up the hosts file through inotify. A systemd `.path` unit sees `egress.rules` change and reruns `deploy/firewall.sh`.
 
 ## Why this shape
 
@@ -20,7 +20,7 @@ The gateway runs unprivileged and never touches iptables. It only renders files.
 
 ## Steps
 
-1. MCP path, if used: `set_network_policy`, admin only, with confirmation: `internal/mcp/server.go:524`. It forwards to the gateway: `internal/mcp/gateway_backend.go:138`.
+1. The human console invokes the internal `set_network_policy` handler after admin-role and CSRF checks. Model-facing MCP discovery and calls reject this tool, including for administrators: `internal/mcp/server.go`, `internal/mcp/ui.go`. The backend forwards the authorized console action to the gateway: `internal/mcp/gateway_backend.go`.
 2. `serveAdmin` returns 404 when no admin key or policy store is configured. It routes `/admin/netpolicy`: `internal/gateway/admin.go:19-24`, `:32`, `:49`. The key is checked at `checkAdminKey`, `admin.go:97`.
 3. `putNetPolicy` takes a size-limited body, decodes it strictly and rejects trailing data: `admin.go:65`.
 4. `Store.Put` → `write` → `Validate`, which checks the `DenyList` plus any extra deny: `internal/netpolicy/store.go:85`, `:93`, `netpolicy.go:72`, `:147`.
@@ -38,7 +38,7 @@ The gateway runs unprivileged and never touches iptables. It only renders files.
 
 | Surface | Role |
 |---|---|
-| admin (curl or MCP chat) | sends the policy |
+| admin (curl or human console) | sends the policy |
 | gateway `/admin` | validates, renders, writes |
 | dns-forwarder | serves DNS entries |
 | host systemd `.path` + `firewall.sh` | applies egress |
@@ -47,3 +47,7 @@ The gateway runs unprivileged and never touches iptables. It only renders files.
 
 - Objects: [Network policy](../objects/sandbox/network-policy.md), [Firewall chain](../objects/sandbox/firewall-chain.md), [DNS forwarder](../objects/sandbox/dns-forwarder.md)
 - Source: `internal/gateway/admin.go`, `internal/netpolicy/`, `deploy/firewall.sh`
+
+## Native integration update (2026-11-04)
+
+Network policy is a human-only console/admin action; modelTool rejects get/set_network_policy even for admins. Source: internal/mcp/server.go and ui.go.

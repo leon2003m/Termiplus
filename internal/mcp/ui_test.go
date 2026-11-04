@@ -84,13 +84,18 @@ func TestUIStaticAndHeaders(t *testing.T) {
 	if csp := h.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Fatalf("CSP: %q", csp)
 	}
-	for _, f2 := range []string{"/ui/app.js", "/ui/desktop.js"} {
+	for _, f2 := range []string{"/ui/app.js", "/ui/app.css"} {
 		if code, _, _ := f.do(t, http.MethodGet, f2, "", "", "", nil); code != http.StatusOK {
 			t.Fatalf("%s: %d", f2, code)
 		}
 	}
 	if code, _, _ := f.do(t, http.MethodGet, "/ui/app.js", "", "", "", nil); code != http.StatusOK {
 		t.Fatalf("app.js: %d", code)
+	}
+	for _, old := range []string{"/ui/desktop.html", "/ui/desktop.js", "/ui/desktops/any"} {
+		if code, _, _ := f.do(t, http.MethodGet, old, "kc-alice", "", "", nil); code != http.StatusNotFound {
+			t.Fatalf("legacy interactive desktop %s still exposed: %d", old, code)
+		}
 	}
 	if code, _, _ := f.do(t, http.MethodGet, "/other", "", "", "", nil); code != http.StatusNotFound {
 		t.Fatalf("outside /ui/: %d", code)

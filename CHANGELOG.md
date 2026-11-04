@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+- Integrate Open WebUI 0.13 native workspaces with Open Terminal 0.16; route
+  native Desktop, Browser, events, files, Git and app-preview protocols per user/chat.
+- Replace KasmVNC and the owner desktop player with the native Desktop; remove
+  custom port forwarding, its OIDC service and the `open_port` tool.
+- Remove administration from model tools, including direct MCP calls by admins.
+  Models may list/create snapshots but cannot delete, restore or prune backups.
+- Keep expiring/revocable view-only shares as native screen images refreshed
+  every five seconds, without keyboard, mouse, clipboard or audio access.
+
+
+
 ### Fixed
 - Preserve XFCE desktop trash operations with Dolphin as the folder opener.
 - Give the "Terminal with Docker" workspace its own fallback text in the console instead of repeating the plain terminal text.

@@ -1,64 +1,40 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/identity/principal.md, ../objects/identity/identity-store.md, ../objects/control-plane/share.md]
 produces: []
 ---
 
-# desktop-stream
+# Native Desktop and screen shares
 
-A signed-in browser gets the KasmVNC desktop of its own desktop container, or a view-only one through a share link. The browser never sees a VNC password.
+The owner uses Open WebUI's native Desktop tab and tools on the selected
+terminal connection. HTTP `/desktop/*` uses the gateway bearer and user/chat
+headers; Desktop stream/audio use first-frame authentication. The gateway
+substitutes the derived container key and relays frames. Browser capability
+WebSockets instead authenticate with the gateway bearer in the upgrade headers,
+on the three narrowly matched native view endpoints. Other sockets retain
+first-frame auth. Source: `internal/gateway/ws.go:serveWebSocket`,
+`internal/gateway/gateway.go:ServeHTTP`, `internal/gateway/native_test.go`.
 
-## Input → Movement → Output
+The image uses Open Terminal 0.16, XFCE and TigerVNC's Unix socket. No second
+Kasm server, VNC password, owner stream listener, player or port 6901 exists.
+Source: `image/Dockerfile`, `image/desktop/Dockerfile`.
 
-The browser opens `<desktop origin>/stream/<session>/...` (or `/share/<token>/...`). It is signed in by `desk-stream-auth` (oauth2-proxy). The MCP desktop handler maps the OIDC subject to the Open WebUI user, checks the session is entitled, and calls the gateway's `/control/v1/stream/<session>/...` with the control key and the owner's `X-User-Id`. The gateway finds that user's running desktop, fills in KasmVNC basic auth (owner or `viewer`) and proxies.
+Signed-in recipients may open `/share/<token>/` on the separate share origin.
+`internal/mcp/stream.go:DesktopHandler` authenticates the OIDC subject, checks
+expiry and optional named recipient, and serves its own HTML plus normalized
+PNG only. The image comes from `/control/v1/screen/<session>` as the owner;
+`internal/gateway/preview.go:serveScreen` checks ownership and running state.
+Images refresh every five seconds. Input, clipboard, audio and all WebSocket
+upgrades are refused. Revoke/expiry cancels active reads; reads have time and
+byte/dimension bounds. This is periodic viewing, not full-motion streaming.
 
-## Why this shape
+Console previews use the same native `/desktop/screenshot` with `X-User-Id`,
+320-pixel normalization and the existing 30-second cache. They do not start a
+stopped container. `internal/preview/image.go` rejects invalid/oversized images
+and re-encodes pixels. See [Share](../objects/control-plane/share.md).
 
-KasmVNC knows only basic auth, and the desktop serves arbitrary user-controlled content. So the desktops live on their own origin (never the console's). The gateway injects the per-container password, so it never reaches a browser. Cookies, `Set-Cookie`, service workers and `Clear-Site-Data` are dropped, so one desktop cannot plant state for the origin. Cross-origin WebSocket upgrades are refused. Unknown, stopped and foreign sessions all return the same 404. The gateway never *starts* a container for a stream request.
-
-## Steps
-
-1. `DesktopHandler`: refuse `Service-Worker`, route `/stream/` and `/share/`: `internal/mcp/stream.go:64-80`.
-2. Authenticate the proxy headers, look up the Open WebUI id (unlinked → 403), check entitlement: `stream.go:86-108`.
-3. Share path: look up the token hash, check expiry and the optional named viewer, set `view`: `stream.go:114`, `internal/mcp/shares.go:58`.
-4. `proxy`: same-origin check on upgrades, strip the identity headers, set `X-User-Id` = owner, `view_only` if view, drop `untrustedResponseHeaders`: `stream.go:84`, `:142-190`.
-5. Gateway `serveStream`: `streamTarget` (running desktop of that user, else 404), then basic auth as `user` or `viewer`: `internal/gateway/stream.go:41-58`, `:97`.
-
-## If you change this
-
-- **Hits:** `deploy/docker-compose.desktop.yml` (origins, `desk-stream-auth`), `image/desktop/start-desktop.sh` (the two passwords), `internal/gateway/stream_test.go`, `test/integration/oidc/desktop.sh`. Browser isolation is a security boundary.
-- **Does not hit:** non-desktop policies
-
-## Surfaces
-
-| Surface | Role |
-|---|---|
-| browser | views |
-| desk-stream-auth | signs in |
-| MCP desktop listener (`STREAM_LISTEN_ADDR`) | maps and checks |
-| gateway control API | proxies with VNC credentials |
-
-## See
-
-- Objects: [Share](../objects/control-plane/share.md), [Terminal container](../objects/workspaces/terminal-container.md), [Service keys](../objects/identity/service-keys.md)
-- Source: `internal/mcp/stream.go`, `internal/gateway/stream.go`
-
-## Console preview
-
-`internal/gateway/preview.go` captures a fixed maim/Pillow command through the
-existing Open Terminal API, with the per-container key. The control-key route
-checks owner and running state before its 30-second instance cache.
-`internal/mcp/preview.go` checks the owner's entitlement and validates the bounded
-PNG again. `internal/mcp/ui/app.js` refreshes running desktop thumbnails only
-while visible. No Docker socket allowlist change or KasmVNC owner rights.
-
-Desktop image defaults in `image/desktop/files/` select Dolphin, Breeze/dark Qt,
-Papirus-Dark and an XFCE dock. `image/desktop/theme.py` recolours Debian's Arc
-resource bundle at build time. `image/desktop/start-desktop.sh` still starts
-XFCE/KasmVNC; no Plasma session or new container permissions are involved.
-
-XFCE trash keeps Thunar and local GIO VFS as its backend. The image removes
-Thunar’s competing FileManager1 service, and start-xfce activates Dolphin’s
-standard folder interface before xfdesktop starts the trash backend.
+Changes affect the desktop overlay, image smoke tests, MCP/gateway share tests
+and OIDC fixtures. They must preserve tenant routing and read-only recipient
+access. Native image tests and real Open WebUI testing are separate gates.

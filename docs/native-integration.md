@@ -42,3 +42,22 @@ a replacement. A guessed roadmap is not a basis for deleting working behavior.
 
 Upstream source may be read to understand the protocol. Implement termiplus
 changes independently; do not copy Open WebUI code.
+
+## Validation status (2026-11-04)
+
+- Alpha checkpoint: `808cc87`; integration work is on `feat/native-workspace-integration`.
+- `make check` passes, including race detection and all 30 plugin tests.
+- Native gateway tests cover first-frame and Browser header authentication,
+  chat scoping, per-user routing, capability discovery and denied legacy routes.
+- The actual Open Terminal 0.16.0 terminal image builds. Its authenticated file
+  API, capability discovery and disabled desktop policy pass a container test.
+- The desktop image build stopped during package installation because the host
+  filesystem ran out of space. Only this test's containers/images were removed.
+  The graphical image smoke test, Chromium sandbox compatibility and real
+  Open WebUI Desktop/Browser interaction remain unverified. The new smoke test
+  requires Chromium to start with its sandbox; it does not permit `--no-sandbox`.
+- Updated OIDC/deployment integration scripts have syntax/lint coverage here;
+  the real provider and host-firewall scenarios were not rerun.
+
+No deployment, push or release is part of this migration commit. Existing
+workspace containers, homes, backup data and deployed credentials are retained.

@@ -3,52 +3,28 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/shares.go
 ---
 
 # Share
 
-An expiring, **view-only** link to someone's desktop session (KasmVNC's viewer user: no keyboard or mouse). It is not a file share. In code: `mcp.Share`, `ShareStore` (`MCP_SHARES_FILE`).
+An owner-issued, expiring and revocable **view-only** screen link. It is not a
+file share or an interactive desktop connection. `mcp.Share` and `ShareStore`
+keep hashed random tokens, default TTL one hour, maximum 24 hours, and at most
+10 active shares per owner. Optional `ForSubject` limits a link to one signed-in
+OIDC subject. `MCP_SHARES_FILE` persists the store.
 
-## Why this shape
+`share_desktop` and the console create/list/revoke links. The separate listener
+(`STREAM_LISTEN_ADDR`, legacy name) serves only `/share/`. Recipients get a
+normalized native desktop PNG every five seconds, never arbitrary container
+HTML, VNC bytes, audio, input or clipboard. They still sign in through
+`desk-stream-auth`. Expiry/revoke cancels in-flight reads and wins over late
+responses. Stopped/foreign desktop containers are not started for a share.
 
-Showing a colleague your screen must not hand over control or your session. So the link carries a random token and the store keeps only its hash. Viewers still have to sign in, so a leaked link alone is not enough. A share can also be limited to one named user. TTL and count are capped.
-
-## Shape
-
-- TTL: default 1 h, max 24 h. At most 10 active shares per owner. Path `/share/<token>`.
-- Fields: public `share_id` (first 12 hex characters of the token hash), owner (Open WebUI id), session, workspace, created, expires, optional for-subject/for-name.
-- Created and revoked with `share_desktop` (confirmed). Served by the desktop listener, which asks the gateway stream for the view-only user.
-
-Citations: `internal/mcp/shares.go:19-24` (doc), `:26-31` (limits), `:34` (Share), `:58` (ShareStore), `:330` (tool), `internal/mcp/stream.go:114` (serveShare), `:142` (proxy, `view`), `internal/gateway/stream.go:13-22`
-
-## Connected to
-
-- **owns:** the share file
-- **owned-by:** the MCP server (needs `UI_LISTEN_ADDR` and the stream listener)
-- **joins:** [Terminal container](../workspaces/terminal-container.md) (desktop policies only), [IdentityStore](../identity/identity-store.md), [MCP tools](mcp-tools.md)
-- **looks-like-but-is-not:** a port forward, or a home download
-
-## If you change this
-
-- **Hits:** the stream proxy view flag, the gateway's view-only header, the console share UI, `internal/mcp/shares_test.go`
-- **Does not hit:** terminal (non-desktop) sessions
-
-## Surfaces
-
-| Surface | Role |
-|---|---|
-| owner | creates and revokes |
-| signed-in viewer | watches |
-
-## See
-
-- Source: `internal/mcp/shares.go`, `internal/mcp/stream.go`
-- Process: [desktop-stream](../../processes/desktop-stream.md)
-
-Console sharing uses native modal dialogs, duration presets/custom minutes and
-an exact-name directory picker (`internal/mcp/ui/app.js:shareDesktop`,
-`internal/mcp/ui_people.go:people`). The picker requires current session ownership
-and entitlement, limits lookups and returns only the matching enabled username;
-it does not enumerate users. Copy/expiry UI does not alter share authorization.
+The source path is `internal/mcp/shares.go`, `internal/mcp/stream.go`,
+`internal/gateway/preview.go:serveScreen`, `internal/preview/image.go`.
+The console's named-recipient picker requires ownership and entitlement and
+only returns exact enabled usernames; it never enumerates the directory.
+Protocol/ownership tests live in `internal/gateway/mcp_homes_e2e_test.go`.
+See [native desktop](../../processes/desktop-stream.md).

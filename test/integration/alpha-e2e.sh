@@ -9,10 +9,10 @@
 # Brings up base + mcp + desktop + keycloak overlays exactly as shipped (with
 # secrets and realm from deploy/setup-alpha.sh), puts Caddy with an internal CA
 # in front as the TLS reverse proxy (sso.test, desk.test console, stream.test
-# desktops on their own origin, fwd.test port forwards), creates test users
+# screen shares on their own origin), creates test users
 # in Keycloak, then plays Open WebUI (plugin calls with a real access token and
 # the plugin key) and a browser (sign-in through Keycloak, console, desktop
-# stream through desk-stream-auth, gateway and KasmVNC in a real sandbox).
+# shares through desk-stream-auth and the native desktop in a real sandbox).
 # Refuses to run next to an existing deployment.
 
 # Helpers are called through check and the EXIT trap.
@@ -93,7 +93,7 @@ for s in proxy_token gateway_api_key key_secret; do
 done
 chmod 0644 "$WORK"/deploy/secrets/*
 WEBUI_URL=https://chat.test KEYCLOAK_PUBLIC_URL=https://sso.test DESKTOP_PUBLIC_URL=https://desk.test \
-  DESKTOP_STREAM_URL=https://stream.test FORWARD_PUBLIC_URL=https://fwd.test "$WORK/deploy/setup-alpha.sh" >/dev/null
+  DESKTOP_STREAM_URL=https://stream.test "$WORK/deploy/setup-alpha.sh" >/dev/null
 check "setup-alpha.sh starts closed (entitlements deny all)" \
   "$(has "$(cat "$WORK/deploy/mcp-data/entitlements.json")" '"default": "deny"')" "$(cat "$WORK/deploy/mcp-data/entitlements.json" 2>&1)"
 # Test-only: every workspace open, so the scenarios below need no admin step
@@ -128,9 +128,6 @@ services:
   desk-stream-auth:
     environment: { SSL_CERT_FILE: /etc/a2e/root.crt }
     volumes: ["$WORK/edge-root.crt:/etc/a2e/root.crt:ro"]
-  fwd-auth:
-    environment: { SSL_CERT_FILE: /etc/a2e/root.crt }
-    volumes: ["$WORK/edge-root.crt:/etc/a2e/root.crt:ro"]
 YAML
 
 if ! docker network inspect owui >/dev/null 2>&1; then
@@ -153,12 +150,8 @@ stream.test {
   tls internal
   reverse_proxy desk-stream-auth:4180
 }
-fwd.test {
-  tls internal
-  reverse_proxy fwd-auth:4180
-}
 CADDY
-docker run -d --name tp-a2e-edge --network owui --network-alias sso.test --network-alias desk.test --network-alias stream.test --network-alias fwd.test \
+docker run -d --name tp-a2e-edge --network owui --network-alias sso.test --network-alias desk.test --network-alias stream.test \
   -p "127.0.0.1:$EDGE_PORT:443" -v "$WORK/Caddyfile:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE" >/dev/null
 for _ in $(seq 1 30); do
   docker cp tp-a2e-edge:/data/caddy/pki/authorities/local/root.crt "$WORK/edge-root.crt" 2>/dev/null && break
@@ -170,7 +163,7 @@ chmod 0644 "$WORK/edge-root.crt"
 browser() {
   curl -s -m 20 --cacert "$WORK/edge-root.crt" \
     --connect-to "sso.test:443:127.0.0.1:$EDGE_PORT" --connect-to "desk.test:443:127.0.0.1:$EDGE_PORT" \
-    --connect-to "stream.test:443:127.0.0.1:$EDGE_PORT" --connect-to "fwd.test:443:127.0.0.1:$EDGE_PORT" "$@"
+    --connect-to "stream.test:443:127.0.0.1:$EDGE_PORT" "$@"
 }
 for _ in $(seq 1 60); do
   browser -f https://sso.test/realms/termiplus/.well-known/openid-configuration >/dev/null && break
@@ -235,9 +228,7 @@ check "persistent desk needs confirmation" "$(is "$out" "ERROR -32010")" "$out"
 out="$(mcp "$TB" owui-bob request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
 check "bob (no persist group) is forbidden" "$(is "$out" "ERROR -32003")" "$out"
 out="$(mcp "$TA" owui-alice request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
-check "alice gets a desktop session on the desktops' origin" "$(has "$out" '"stream_url":"https://stream.test/stream/')" "$out"
-STREAM_URL="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["stream_url"])' "$out" 2>/dev/null || true)"
-STREAM_PW="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["stream_password"])' "$out" 2>/dev/null || true)"
+check "alice gets a native desktop session" "$(has "$out" '"desktop":true')" "$out"
 SID="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["session_id"])' "$out" 2>/dev/null || true)"
 rt="$(docker inspect -f '{{.HostConfig.Runtime}}' "$SID" 2>/dev/null || true)"
 check "the desktop runs under $RUNTIME" "$(is "$rt" "$RUNTIME")" "$rt"
@@ -256,7 +247,7 @@ m = re.search(r"<form[^>]*id=\"kc-form-login\"[^>]*action=\"([^\"]+)\"", sys.std
 print(html.unescape(m.group(1)) if m else "")' <<<"$form")"
   [ -n "$action" ] || return 1
   browser -L -c "$1" -b "$1" -o /dev/null --data-urlencode "username=$2" --data-urlencode "password=$2-pw-a2e" "$action"
-  grep -qE '_termiplus_(desk|dstream|fwd)' "$1"
+  grep -qE '_termiplus_(desk|dstream)' "$1"
 }
 JA="$WORK/jar-alice"
 if login "$JA" alice; then pass "alice signs in through Keycloak (TLS, PKCE)"; else fail "alice browser sign-in"; fi
@@ -264,71 +255,44 @@ out="$(browser -b "$JA" https://desk.test/ui/api/me)"
 check "console: alice is linked to owui-alice" "$(has "$out" '"linked":true')" "$out"
 out="$(browser -b "$JA" https://desk.test/ui/api/sessions)"
 check "console: lists alice's desktop" "$(has "$out" "$SID")" "$out"
-code="$(browser -o /dev/null -w '%{http_code}' -u "user:$STREAM_PW" "$STREAM_URL")"
-check "stream without sign-in goes to the IdP" "$(is "$code" 302)" "$code"
-code="$(browser -b "$JA" -o /dev/null -w '%{http_code}' "$STREAM_URL")"
-check "the console's sign-in does not open desktops (other origin)" "$(is "$code" 302)" "$code"
-code="$(browser -b "$JA" -o /dev/null -w '%{http_code}' https://desk.test/stream/"$SID"/)"
-check "the console origin does not serve desktops" "$(lacks "$code" 200)" "$code"
-JAS="$WORK/jar-alice-stream"
-if login "$JAS" alice "$STREAM_URL"; then pass "alice signs in on the desktops' origin"; else fail "alice stream sign-in"; fi
-loc="$(browser -b "$JAS" -o /dev/null -w '%{redirect_url}' "$STREAM_URL")"
-check "the desktop page gets KasmVNC's WebSocket path" "$(has "$loc" "?path=stream%2F$SID%2Fwebsockify")" "$loc"
-# The gateway fills in KasmVNC's password: the sign-in is the only login.
-for _ in $(seq 1 60); do
-  code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' "$loc")"
-  [ "$code" = 200 ] && break
-  sleep 2
-done
-check "signed in, no desktop password needed: the desktop page loads" "$(is "$code" 200)" "$code"
-ws() { # origin -> status line
-  browser --http1.1 -b "$JAS" -u "user:$STREAM_PW" -i -o - -m 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-    -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: binary' \
-    -H "Origin: $1" "${STREAM_URL}websockify" | head -1 | tr -d '\r' || true
+log "native desktop and app preview through the terminal connection"
+GWKEY="$(cat "$WORK/deploy/secrets/gateway_api_key")"
+native() {
+  docker exec tp-a2e-client curl -s -m 120 -H "Authorization: Bearer $GWKEY" \
+    -H "X-User-Id: $1" -H 'X-Session-Id: saved-chat' "http://gateway:8080/p/desk/$2" "${@:3}"
 }
-out="$(ws https://stream.test)"
-check "desktop WebSocket through TLS, desk-stream-auth and the gateway" "$(has "$out" " 101 ")" "$out"
-out="$(ws https://evil.test)"
-check "cross-site desktop WebSocket is refused" "$(has "$out" " 403 ")" "$out"
-out="$(ws https://desk.test)"
-check "desktop WebSocket from the console's origin is refused" "$(has "$out" " 403 ")" "$out"
-code="$(browser -b "$JAS" -u "user:$STREAM_PW" -o /dev/null -w '%{http_code}' -H 'Service-Worker: script' "${STREAM_URL}sw.js")"
-check "service-worker scripts are refused on the desktops' origin" "$(is "$code" 403)" "$code"
-JBS="$WORK/jar-bob-stream"
-login "$JBS" bob "$STREAM_URL" || fail "bob stream sign-in"
-code="$(browser -b "$JBS" -o /dev/null -w '%{http_code}' "$loc")"
-check "bob cannot open alice's desktop" "$(lacks "$code" 200)" "$code"
-code="$(browser -b "$JBS" -o /dev/null -w '%{http_code}' -u "user:$STREAM_PW" "$loc")"
-check "bob cannot open alice's desktop even with its password" "$(lacks "$code" 200)" "$code"
-out="$(browser --http1.1 -b "$JBS" -i -o - -m 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: binary' \
-  -H 'Origin: https://stream.test' "${STREAM_URL}websockify" | head -1 | tr -d '\r' || true)"
-check "bob gets no WebSocket to alice's desktop" "$(lacks "$out" " 101 ")" "$out"
+code="$(native owui-alice desktop/screenshot -o /tmp/native-desktop.png -w '%{http_code}')"
+check "native Desktop screenshot works in the sandbox" "$(is "$code" 200)" "$code"
+out="$(native owui-alice files/cwd)"
+check "the same native connection exposes files" "$(has "$out" cwd)" "$out"
+# The app must descend from Open Terminal so /ports discovers it.
+out="$(native owui-alice 'execute?wait=0' -H 'Content-Type: application/json' -d '{"command":"python3 -m http.server 3017 --bind 127.0.0.1"}')"
+check "native execute starts a local app" "$(has "$out" id)" "$out"
+code="$(native owui-alice proxy/3017/ -o /dev/null -w '%{http_code}')"
+check "native app preview replaces port forwarding" "$(is "$code" 200)" "$code"
 
-log "port forwarding (own origin, owner only)"
-docker exec -u 1000 -d "$SID" sh -c 'mkdir -p /tmp/app && cd /tmp/app && echo hi-from-app > index.html && exec python3 -m http.server 3000'
-FWD_URL="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("forward_url",""))' "$(mcp "$TA" owui-alice list_sessions '{}' | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)[0]))')")"
-check "the session handle carries forward_url" "$(is "$FWD_URL" "https://fwd.test/$SID/")" "$FWD_URL"
-JAF="$WORK/jar-alice-fwd"
-if login "$JAF" alice "${FWD_URL}3000/"; then pass "alice signs in on the forward origin"; else fail "alice forward sign-in"; fi
-out=""
-for _ in $(seq 1 20); do
-  out="$(browser -b "$JAF" "${FWD_URL}3000/index.html")"
-  [ "$out" = hi-from-app ] && break
-  sleep 1
+log "image-only signed-in screen shares"
+shared="$(browser -b "$JA" -X POST -H 'X-Termiplus-UI: 1' -H 'Origin: https://desk.test' -H 'Content-Type: application/json' \
+  -d "{\"session_id\":\"$SID\",\"minutes\":10}" https://desk.test/ui/api/shares)"
+SHARE_URL="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["url"])' "$shared")"
+SHARE_ID="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["share_id"])' "$shared")"
+code="$(browser -o /dev/null -w '%{http_code}' "$SHARE_URL")"
+check "share without sign-in goes to the IdP" "$(is "$code" 302)" "$code"
+JAS="$WORK/jar-alice-share"
+login "$JAS" alice "$SHARE_URL" || fail "alice share sign-in"
+code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' "${SHARE_URL}screen.png")"
+check "signed-in share relays native screen pixels" "$(is "$code" 200)" "$code"
+for path in websockify desktop/action clipboard; do
+  code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' "${SHARE_URL}$path")"
+  check "share does not expose $path" "$(is "$code" 404)" "$code"
 done
-check "alice opens her dev server on port 3000" "$(is "$out" hi-from-app)" "$out"
-code="$(browser -b "$JAF" -o /dev/null -w '%{http_code}' "${FWD_URL}8000/")"
-check "Open Terminal's API port is not forwarded" "$(is "$code" 403)" "$code"
-code="$(browser -b "$JAF" -o /dev/null -w '%{http_code}' "${FWD_URL}6901/")"
-check "the desktop port is not forwarded" "$(is "$code" 403)" "$code"
-code="$(browser -b "$JA" -o /dev/null -w '%{http_code}' "${FWD_URL}3000/")"
-check "the console cookie does not open forwards (other origin)" "$(is "$code" 302)" "$code"
-JBF="$WORK/jar-bob-fwd"
-mcp "$TB" owui-bob list_sessions '{}' >/dev/null
-login "$JBF" bob "${FWD_URL}3000/" || fail "bob forward sign-in"
-code="$(browser -b "$JBF" -o /dev/null -w '%{http_code}' "${FWD_URL}3000/")"
-check "bob cannot open alice's port" "$(is "$code" 404)" "$code"
+code="$(browser -b "$JAS" -X POST -o /dev/null -w '%{http_code}' "${SHARE_URL}screen.png")"
+check "share cannot submit input" "$(is "$code" 403)" "$code"
+browser -b "$JA" -X DELETE -H 'X-Termiplus-UI: 1' -H 'Origin: https://desk.test' "https://desk.test/ui/api/shares/$SHARE_ID" >/dev/null
+code="$(browser -b "$JAS" -o /dev/null -w '%{http_code}' "${SHARE_URL}screen.png")"
+check "revoked share cannot retrieve more pixels" "$(is "$code" 404)" "$code"
+code="$(browser -b "$JA" -o /dev/null -w '%{http_code}' "https://desk.test/stream/$SID/")"
+check "legacy owner stream route is absent" "$(is "$code" 404)" "$code"
 
 log "admin console"
 mcp "$(token root)" owui-root list_sessions '{}' >/dev/null

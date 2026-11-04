@@ -1,46 +1,28 @@
-# Open WebUI plugin: termiplus workspaces
+# Open WebUI workspace tool
 
-`termiplus_workspaces.py` is a native Open WebUI **Tool** that lets the
-assistant list, start and remove the signed-in user's termiplus sessions
-through the MCP control plane (`docs/mcp.md`).
+Requires Open WebUI **0.13+**, OIDC sign-in and the Termiplus MCP overlay.
+Open Terminal **0.16.0** supplies desktop/browser interaction through the native
+terminal connection. This tool manages only Termiplus workspace lifecycle,
+list/create snapshots and expiring screen-share links. It exposes no network,
+user/group, departed-user, entitlement or backup-deletion administration.
 
-## What it guarantees
+Install `termiplus_workspaces.py` (version 0.6.0) under Workspace → Tools. Set
+`mcp_url` (default `http://mcp-auth:4180/`), `plugin_key` from
+`deploy/secrets/mcp_owui_plugin_key`, and optional `ui_url` pointing to the human
+console. Open WebUI must forward the signed-in OIDC token and supply the user id;
+set `OAUTH_SESSION_TOKEN_ENCRYPTION_KEY` for its stored OAuth session.
 
-- **No auth of its own.** It forwards the user's SSO access token
-  (`__oauth_token__`) unchanged. oauth2-proxy in front of the MCP server
-  verifies it.
-- **Agent proposes, human disposes.** The model only sees four fixed functions
-  and cannot set the confirmation flag. When the server answers "confirmation
-  required" (persistent sessions, removing a session), the plugin shows an Open
-  WebUI dialog and repeats the call only after an explicit **yes**. Any other
-  answer, or no dialog at all, cancels.
-- With `plugin_key` set it also sends the Open WebUI user id, so sessions use
-  the same homes as that user's Open WebUI terminals. Without a user id it
-  sends nothing.
-- **Desktop passwords stay with the user.** For a desktop workspace the plugin
-  removes the stream password from the tool result and shows the link and
-  password in an inline embed, which Open WebUI renders for the user but does
-  not send to the model.
-- RBAC stays on the server: without the `termiplus-persist` group a persistent
-  session is refused even if the user confirms.
+Select the desired native terminal connection **in the chat** and open Desktop
+or Browser there. The assistant uses that connection's native tools. Calling
+`request_session` does not select or attach a connection; ephemeral sessions
+created by it are separate from a chat's automatic native session.
 
-## Install
+Destructive lifecycle/share operations use the human confirmation dialog;
+anything other than an explicit affirmative answer cancels. Server-side roles,
+entitlements and ownership still apply. Snapshot creation cannot implicitly
+prune old snapshots, and direct MCP calls cannot bypass the admin-tool exclusion.
+Legacy desktop passwords/stream URLs are removed from tool results.
 
-Requirements: Open WebUI **>= 0.8.6** signed in through OIDC (Keycloak), with
-`OAUTH_SESSION_TOKEN_ENCRYPTION_KEY` set, and the MCP overlay
-(`deploy/docker-compose.mcp.yml`) running on the Open WebUI network.
-
-1. Admin Panel → Workspace → Tools → **+**, paste `termiplus_workspaces.py`, save.
-2. In the tool's **Valves**, set `plugin_key` to the content of
-   `deploy/secrets/mcp_owui_plugin_key` (sessions then belong to the Open WebUI
-   user and share homes with their Open WebUI terminals), and `mcp_url` if it
-   differs from the default `http://mcp-auth:4180/`. Optionally set `ui_url`
-   to the management console (`${DESKTOP_PUBLIC_URL}/ui/`) so the assistant
-   can show the user a link to it.
-3. Enable the tool for the models that should manage workspaces.
-
-## Tests
-
-`make test-plugin` (part of `make check` and CI) runs the plugin against the
-real `mcp` binary (stub backend, dev token): dialogs, declined and unclear
-answers, injected confirmation flags, role checks and token rejection.
+`make test-plugin` runs the plugin against the real MCP binary with a stub
+backend: authentication, identity headers, dialogs, cancellation, and admin/model
+separation. See [control plane](../../docs/mcp.md) for the complete contract.

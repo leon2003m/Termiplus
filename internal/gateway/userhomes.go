@@ -83,7 +83,7 @@ func (g *Gateway) reset(ctx context.Context, userID, name string) (*sessionInfo,
 	if err != nil {
 		return nil, err
 	}
-	s := g.mgr.withStream(sessionInfo{ID: inst.name, Workspace: ws, Persistent: true, Running: true, TerminalPath: "/p/" + ws + "/"}, pol)
+	s := g.mgr.withActivity(sessionInfo{ID: inst.name, Workspace: ws, Persistent: true, Running: true, TerminalPath: "/p/" + ws + "/"}, pol)
 	return &s, nil
 }
 

@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Dolphin
-Icon=system-file-manager
-Exec=dolphin %U
-NoDisplay=true
-MimeType=inode/directory;

@@ -1,24 +1,14 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"termiplus/internal/preview"
 )
-
-// This is a fixed command, never assembled from a user, policy, path or query.
-// maim captures X as the existing desktop user; Pillow bounds the image before
-// base64 transport through Open Terminal. timeout also bounds a detached command
-// if the HTTP caller leaves. The container is untrusted despite these limits.
-const screenshotCommand = `DISPLAY=:1 /usr/bin/timeout -k 1 4 /usr/bin/python3 -c 'import base64,io,subprocess,sys; from PIL import Image; p=subprocess.run(["/usr/bin/maim"],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=3,check=True); im=Image.open(io.BytesIO(p.stdout)); im.thumbnail((320,320)); b=io.BytesIO(); im.convert("RGB").save(b,format="PNG"); data=b.getvalue(); sys.exit(1) if len(data)>262144 else print(base64.b64encode(data).decode())'`
 
 var previewClient = &http.Client{
 	Transport:     newUpstreamTransport(5 * time.Second),
@@ -67,47 +57,65 @@ func (g *Gateway) servePreview(w http.ResponseWriter, r *http.Request, user, nam
 }
 
 func (g *Gateway) capturePreview(ctx context.Context, inst *instance) ([]byte, error) {
-	body, _ := json.Marshal(map[string]string{"command": screenshotCommand, "cwd": "/home/user"})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+g.mgr.addrFor(inst.name, g.mgr.port)+"/execute?wait=4", bytes.NewReader(body))
+	data, err := g.captureScreen(ctx, inst)
+	if err != nil {
+		return nil, err
+	}
+	return preview.Thumbnail(data)
+}
+
+// captureScreen uses the same native desktop identity as the owner's Open WebUI
+// connection. Never follow redirects from the untrusted workspace.
+func (g *Gateway) captureScreen(ctx context.Context, inst *instance) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+g.mgr.addrFor(inst.name, g.mgr.port)+"/desktop/screenshot", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+g.mgr.containerKey(inst.name))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", inst.userID)
 	resp, err := previewClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	const maxReply = 2 * preview.MaxBytes
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxReply+1))
-	if err != nil || len(raw) > maxReply || resp.StatusCode != 200 {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, preview.MaxScreenBytes+1))
+	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("invalid screenshot response")
 	}
-	var result struct {
-		Status    string `json:"status"`
-		ExitCode  *int   `json:"exit_code"`
-		Truncated bool   `json:"truncated"`
-		Output    []struct {
-			Type string `json:"type"`
-			Data string `json:"data"`
-		} `json:"output"`
+	return preview.Screen(data)
+}
+
+// serveScreen is the only share capability: a bounded image, never arbitrary
+// paths, input, clipboard, audio, an upstream HTML page or a VNC connection.
+func (g *Gateway) serveScreen(w http.ResponseWriter, r *http.Request, user, name string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET")
+		return
 	}
-	if json.Unmarshal(raw, &result) != nil || result.Status != "done" || result.ExitCode == nil || *result.ExitCode != 0 || result.Truncated {
-		return nil, fmt.Errorf("screenshot command failed")
+	inst := g.mgr.streamTarget(name, user)
+	if inst == nil {
+		httpError(w, 404, "offline")
+		return
 	}
-	var text strings.Builder
-	for _, out := range result.Output {
-		if out.Type == "stdout" || out.Type == "output" {
-			text.WriteString(out.Data)
-		}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	ct, err := g.mgr.docker.Inspect(ctx, name)
+	if err != nil || !ct.State.Running {
+		httpError(w, 404, "offline")
+		return
 	}
-	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(text.String()))
+	if !g.mgr.tryTouch(inst, maxProxiedConns) {
+		httpError(w, 429, "too many screen requests")
+		return
+	}
+	defer g.mgr.touch(inst, -1)
+	data, err := g.captureScreen(ctx, inst)
 	if err != nil {
-		return nil, fmt.Errorf("screenshot encoding: %w", err)
+		httpError(w, 502, "screen unavailable")
+		return
 	}
-	if err := preview.Validate(data); err != nil {
-		return nil, err
-	}
-	return data, nil
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data)
 }

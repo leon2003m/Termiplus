@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/identity/directory.md, ../objects/identity/identity-store.md, ../objects/workspaces/home-volume.md]
 produces: [../objects/control-plane/departed.md, ../objects/storage/backup.md, ../objects/control-plane/audit-log.md]
 ---
@@ -42,9 +42,13 @@ Deletion is irreversible and Keycloak can be briefly wrong, so departure only st
 | Keycloak admin API | source of truth for users (read) |
 | gateway control API | archives, removes, restores |
 | sockproxy | allows or refuses home removal |
-| admin console / chat | `manage_departed` |
+| admin console | `manage_departed` |
 
 ## See
 
 - Objects: [Departed](../objects/control-plane/departed.md), [Backup](../objects/storage/backup.md), [Directory](../objects/identity/directory.md)
 - Source: `internal/mcp/departed.go`, `internal/gateway/userhomes.go`
+
+## Native integration update (2026-11-04)
+
+The background watcher is retained. Manual departure actions are human-only, never chat tools; /ui/api/admin/departed checks role and CSRF. Source: internal/mcp/ui.go and server.go.

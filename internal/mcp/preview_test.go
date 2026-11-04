@@ -26,7 +26,7 @@ func TestPreviewOwnerAndEntitlement(t *testing.T) {
 	_ = png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 320, 200)))
 	b := &previewStub{StubBackend: f.backend, data: imageBytes.Bytes()}
 	f.ui.srv.backend = b
-	b.sessions["desktop"] = Session{ID: "desktop", UserID: "owui-alice", Workspace: "desk", Running: true, StreamURL: "https://desk.example/stream/desktop/"}
+	b.sessions["desktop"] = Session{ID: "desktop", UserID: "owui-alice", Workspace: "desk", Running: true, Desktop: true}
 	for _, sub := range []string{"", "kc-bob"} {
 		code, _, _ := f.do(t, http.MethodGet, "/ui/api/desktops/desktop/preview", sub, "", "", nil)
 		if code != 401 && code != 404 {

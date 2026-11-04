@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// The desktop and forward proxies relay responses that originate in users'
-// containers (through the gateway, which bounds them too). They use their own
-// transports: a small response-header limit instead of Go's 10 MiB default, a
+// The share viewer fetches bounded images from the gateway using a dedicated
+// transport: a small response-header limit instead of Go's 10 MiB default, a
 // deadline for the headers, and never an HTTP proxy from the environment.
 func newRelayTransport(responseHeaderTimeout time.Duration) *http.Transport {
 	return &http.Transport{
@@ -20,8 +19,3 @@ func newRelayTransport(responseHeaderTimeout time.Duration) *http.Transport {
 		IdleConnTimeout:        90 * time.Second,
 	}
 }
-
-var (
-	streamTransport  = newRelayTransport(60 * time.Second)
-	forwardTransport = newRelayTransport(6 * time.Minute)
-)

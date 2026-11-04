@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -170,19 +171,47 @@ func TestMCPNetworkPolicyNotConfigured(t *testing.T) {
 	}
 }
 
-// Admin tools through the real gateway admin API: set, then read back.
+// Administration is denied to models, including admin chats; the human console
+// still reaches the real gateway with its independent role and CSRF checks.
 func TestMCPNetworkPolicyThroughGateway(t *testing.T) {
 	opt, _ := withAdmin(t)
 	h := newHarness(t, opt)
 	auth := mcp.NewStaticAuthenticator(map[string]mcp.Principal{"root-tok": {UserID: "root", Roles: []string{mcp.RoleAdmin}}})
 	c := &mcpChain{h: h, srv: mcp.NewServer(auth, mcp.NewGatewayBackend(h.gw.URL, "", "", testAdminKey), "test")}
+	pol := `{"dns_entries":[{"name":"db.internal","ip":"10.0.0.5"}],"egress_allow":[]}`
+	out := c.call(t, "root-tok", "set_network_policy", map[string]any{"policy": map[string]any{}, "_confirmed": true})
+	if out.Error == nil || out.Error.Code != -32003 {
+		t.Fatalf("model admin access: %+v", out)
+	}
+	if code, body := c.console(t, "root", "PUT", "admin/netpolicy", pol, true); code != 200 {
+		t.Fatalf("human set: %d %s", code, body)
+	}
+	if code, body := c.console(t, "root", "GET", "admin/netpolicy", "", true); code != 200 || !strings.Contains(body, "db.internal") {
+		t.Fatalf("human get: %d %s", code, body)
+	}
+}
 
-	pol := map[string]any{"dns_entries": []any{map[string]any{"name": "db.internal", "ip": "10.0.0.5"}}, "egress_allow": []any{}}
-	if out := c.call(t, "root-tok", "set_network_policy", map[string]any{"policy": pol, "_confirmed": true}); out.Error != nil || out.Result.IsError {
-		t.Fatalf("set: %+v", out)
+// console exercises the actual HTTP console with a trusted OIDC proxy identity.
+func (c *mcpChain) console(t *testing.T, user, method, path, body string, admin bool) (int, string) {
+	t.Helper()
+	ids, err := mcp.OpenIdentityStore(filepath.Join(t.TempDir(), "console-identities.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	out := c.call(t, "root-tok", "get_network_policy", nil)
-	if out.Error != nil || out.Result.IsError || !strings.Contains(out.Result.Content[0].Text, "db.internal") {
-		t.Fatalf("get: %+v", out)
+	if err := ids.Record(user, user); err != nil {
+		t.Fatal(err)
 	}
+	c.srv.WithUIBase("https://desk.example")
+	r := httptest.NewRequest(method, "https://desk.example/ui/api/"+path, strings.NewReader(body))
+	r.Header.Set("X-Forwarded-User", user)
+	roles := mcp.RolePersist
+	if admin {
+		roles += "," + mcp.RoleAdmin
+	}
+	r.Header.Set("X-Forwarded-Groups", roles)
+	r.Header.Set("X-Termiplus-UI", "1")
+	r.Header.Set("Origin", "https://desk.example")
+	w := httptest.NewRecorder()
+	mcp.NewUI(c.srv, ids).ServeHTTP(w, r)
+	return w.Code, w.Body.String()
 }

@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"image"
 	"image/png"
@@ -30,15 +29,10 @@ func TestDesktopPreview(t *testing.T) {
 	data := frame.Bytes()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/execute" || r.Header.Get("Authorization") != "Bearer "+h.g.mgr.containerKey(inst.name) {
+		if r.URL.Path != "/desktop/screenshot" || r.Header.Get("Authorization") != "Bearer "+h.g.mgr.containerKey(inst.name) {
 			t.Error("wrong execution target/auth")
 		}
-		var request map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&request)
-		if request["command"] != screenshotCommand {
-			t.Error("non-fixed command")
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "done", "exit_code": 0, "output": []map[string]string{{"type": "output", "data": base64.StdEncoding.EncodeToString(data)}}})
+		_, _ = w.Write(data)
 	}))
 	defer server.Close()
 	orig := h.g.mgr.addrFor

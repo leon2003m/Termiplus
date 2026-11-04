@@ -3,7 +3,7 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/audit.go
 ---
 
@@ -44,3 +44,7 @@ Citations: `internal/mcp/audit.go:1-30` (doc), `:32` (AuditEntry), `:43` (AuditL
 ## See
 
 - Source: `internal/mcp/audit.go`
+
+## Native integration update (2026-11-04)
+
+Administrative audit queries are human-only. Model tool discovery/calls never expose get_audit_log. Source: internal/mcp/server.go:modelTool; console retains invoke auditing.

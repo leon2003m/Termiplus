@@ -58,7 +58,7 @@ func fakeTerminal(t *testing.T, apiKey string) *httptest.Server {
 		}
 		_, _ = io.WriteString(w, `{"openapi":"3.1.0"}`)
 	})
-	mux.HandleFunc("/api/terminals/", func(w http.ResponseWriter, r *http.Request) {
+	wsHandler := func(w http.ResponseWriter, r *http.Request) {
 		conn, brw, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			return
@@ -85,7 +85,11 @@ func fakeTerminal(t *testing.T, apiKey string) *httptest.Server {
 			out := []byte(r.Header.Get("X-User-Id") + ":" + string(data))
 			conn.Write(append([]byte{0x82, byte(len(out))}, out...))
 		}
-	})
+	}
+	for _, path := range []string{"/api/terminals/", "/desktop/stream", "/desktop/audio", "/events", "/execute", "/execute/proc/status"} {
+		mux.HandleFunc(path, wsHandler)
+	}
+
 	return httptest.NewServer(mux)
 }
 

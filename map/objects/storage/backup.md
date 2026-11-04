@@ -3,7 +3,7 @@ type: object
 cluster: storage
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/gateway/backups.go
 ---
 
@@ -48,3 +48,7 @@ Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:46` (
 
 - Source: `internal/gateway/backups.go`, `internal/gateway/userhomes.go`
 - Process: [user-departure](../../processes/user-departure.md)
+
+## Native integration update (2026-11-04)
+
+Snapshot pruning, deletion and restoration are human-only. Model creation strips _confirmed and cannot set prune=1; capacity fails without removing older backups. Source: internal/mcp/server.go:callTool; internal/gateway/mcp_homes_e2e_test.go:TestMCPSnapshots.

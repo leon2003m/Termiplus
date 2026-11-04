@@ -160,7 +160,7 @@ func TestManageToolsAdminOnly(t *testing.T) {
 		{"manage_user", map[string]any{"action": "add_to_group", "username": "dave", "group": "termiplus-admin", "_confirmed": true}},
 	} {
 		for _, tok := range []string{"user-tok", "persist-tok"} {
-			if resp := toolCall(t, s, tok, c.tool, c.args); resp.Error == nil || resp.Error.Code != codeForbidden {
+			if resp := consoleToolCall(t, s, tok, c.tool, c.args); resp.Error == nil || resp.Error.Code != codeForbidden {
 				t.Errorf("%s %v as %s: want forbidden, got %+v", c.tool, c.args, tok, resp.Error)
 			}
 		}
@@ -173,18 +173,18 @@ func TestManageToolsAdminOnly(t *testing.T) {
 func TestManageGroupListsOnlyPrefixedGroups(t *testing.T) {
 	s, _ := newUserAdminServer(t)
 	var out struct{ Groups []string }
-	result(t, toolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "list"}), &out)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "list"}), &out)
 	if strings.Join(out.Groups, ",") != "termiplus-admin,termiplus-persist,termiplus-users" {
 		t.Fatalf("groups: %v", out.Groups)
 	}
-	text, isErr := toolText(t, toolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "members", "group": "realm-admins"}))
+	text, isErr := toolText(t, consoleToolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "members", "group": "realm-admins"}))
 	if !isErr || !strings.Contains(text, "not managed") {
 		t.Fatalf("foreign group must be refused: %s", text)
 	}
 	var m struct {
 		Members []struct{ Username string }
 	}
-	result(t, toolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "members", "group": "termiplus-admin"}), &m)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "members", "group": "termiplus-admin"}), &m)
 	if len(m.Members) != 1 || m.Members[0].Username != "carol" {
 		t.Fatalf("members: %+v", m.Members)
 	}
@@ -193,7 +193,7 @@ func TestManageGroupListsOnlyPrefixedGroups(t *testing.T) {
 func TestManageUserChangesNeedConfirmation(t *testing.T) {
 	s, kc := newUserAdminServer(t)
 	add := map[string]any{"action": "add_to_group", "username": "dave", "group": "termiplus-persist"}
-	if resp := toolCall(t, s, "admin-tok", "manage_user", add); resp.Error == nil || resp.Error.Code != codeConfirmRequired {
+	if resp := consoleToolCall(t, s, "admin-tok", "manage_user", add); resp.Error == nil || resp.Error.Code != codeConfirmRequired {
 		t.Fatalf("want confirmation required, got %+v", resp.Error)
 	}
 	if len(kc.writes) != 0 {
@@ -201,22 +201,22 @@ func TestManageUserChangesNeedConfirmation(t *testing.T) {
 	}
 	// show needs no confirmation
 	var shown struct{ Groups []string }
-	result(t, toolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "show", "username": "dave"}), &shown)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "show", "username": "dave"}), &shown)
 	if len(shown.Groups) != 0 {
 		t.Fatalf("dave starts without groups: %v", shown.Groups)
 	}
 
 	add["_confirmed"] = true
 	var res struct{ Changed bool }
-	result(t, toolCall(t, s, "admin-tok", "manage_user", add), &res)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_user", add), &res)
 	if !res.Changed || !kc.member["g-persist"]["u-dave"] {
 		t.Fatal("dave should now be in termiplus-persist")
 	}
-	result(t, toolCall(t, s, "admin-tok", "manage_user", add), &res)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_user", add), &res)
 	if res.Changed || len(kc.writes) != 1 {
 		t.Fatalf("adding again must be a no-op: %v", kc.writes)
 	}
-	result(t, toolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "remove_from_group", "username": "DAVE", "group": "termiplus-persist", "_confirmed": true}), &res)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "remove_from_group", "username": "DAVE", "group": "termiplus-persist", "_confirmed": true}), &res)
 	if !res.Changed || kc.member["g-persist"]["u-dave"] {
 		t.Fatal("dave should be out of termiplus-persist again")
 	}
@@ -238,12 +238,12 @@ func TestManageUserRefusals(t *testing.T) {
 	kc.member["g-admin"]["u-erin"] = true
 	for _, c := range cases {
 		c.args["_confirmed"] = true
-		text, isErr := toolText(t, toolCall(t, s, "admin-tok", "manage_user", c.args))
+		text, isErr := toolText(t, consoleToolCall(t, s, "admin-tok", "manage_user", c.args))
 		if !isErr || !strings.Contains(text, c.want) {
 			t.Errorf("%v: want error containing %q, got %q", c.args, c.want, text)
 		}
 	}
-	if resp := toolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "delete", "username": "dave"}); resp.Error == nil {
+	if resp := consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "delete", "username": "dave"}); resp.Error == nil {
 		t.Error("unknown action must be refused")
 	}
 	if len(kc.writes) != 0 {
@@ -252,7 +252,7 @@ func TestManageUserRefusals(t *testing.T) {
 	// With a second enabled admin, carol can step down.
 	kc.member["g-admin"]["u-dave"] = true
 	var res struct{ Changed bool }
-	result(t, toolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "remove_from_group", "username": "carol", "group": "termiplus-admin", "_confirmed": true}), &res)
+	result(t, consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "remove_from_group", "username": "carol", "group": "termiplus-admin", "_confirmed": true}), &res)
 	if !res.Changed {
 		t.Fatal("removal with another admin left should work")
 	}
@@ -260,7 +260,7 @@ func TestManageUserRefusals(t *testing.T) {
 
 func TestManageToolsWithoutDirectory(t *testing.T) {
 	s := newTestServer()
-	text, isErr := toolText(t, toolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "list"}))
+	text, isErr := toolText(t, consoleToolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "list"}))
 	if !isErr || !strings.Contains(text, "not configured") {
 		t.Fatalf("got %q", text)
 	}
@@ -269,14 +269,14 @@ func TestManageToolsWithoutDirectory(t *testing.T) {
 func TestKeycloakTokenIsCachedAndErrorsSurface(t *testing.T) {
 	s, kc := newUserAdminServer(t)
 	for i := 0; i < 3; i++ {
-		toolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "list"})
+		consoleToolCall(t, s, "admin-tok", "manage_group", map[string]any{"action": "list"})
 	}
 	if kc.tokens != 1 {
 		t.Fatalf("service token should be cached, fetched %d times", kc.tokens)
 	}
 	s2, kc2 := newUserAdminServer(t)
 	kc2.badCred = true
-	text, isErr := toolText(t, toolCall(t, s2, "admin-tok", "manage_group", map[string]any{"action": "list"}))
+	text, isErr := toolText(t, consoleToolCall(t, s2, "admin-tok", "manage_group", map[string]any{"action": "list"}))
 	if !isErr || !strings.Contains(text, "keycloak token: status 401") || strings.Contains(text, "kc-secret") {
 		t.Fatalf("got %q", text)
 	}

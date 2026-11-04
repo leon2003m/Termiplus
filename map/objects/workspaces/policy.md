@@ -3,7 +3,7 @@ type: object
 cluster: workspaces
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/gateway/lifecycle.go
 ---
 
@@ -21,7 +21,7 @@ Open WebUI only knows "a terminal connection with a URL". Putting runtime, limit
 - `storage`: `persistent` (default: one container per user plus a home volume) | `ephemeral` (one container per chat, no volume, deleted when idle)
 - `home`: groups policies that share one home volume (default: the policy name; ignored for ephemeral)
 - `idle_timeout`, `max_per_user` (ephemeral cap, default 3; the least recently used idle sandbox is evicted)
-- `desktop`: KasmVNC XFCE next to Open Terminal (needs the desktop image)
+- `desktop`: native Open Terminal Desktop/Browser with XFCE (needs the desktop image)
 - `label`, `description`: display name and one-line help shown by the console and `list_workspaces` (at most 60 and 300 bytes, printable, checked at start). Not hashed.
 - `image`: another image built on the terminal image. It must be in the sockproxy's `EXTRA_IMAGES`.
 - `egress`: `internet` (default) | `offline`. Offline terminals join `OFFLINE_NETWORK` (ot-offline, internal-only) with no resolver; without that network the gateway refuses to start. A container found on the wrong network is recreated (`manager.networkFor`, adoption check in `ensure`).
@@ -53,3 +53,7 @@ Citations: `internal/gateway/lifecycle.go:23-60` (Policy), `internal/gateway/lif
 
 - Source: `internal/gateway/lifecycle.go`, `deploy/policies.json`
 - The live host keeps a local uncommitted edit of `deploy/policies.json`; see [effects](../../effects/CONTEXT.md).
+
+## Native integration update (2026-11-04)
+
+Desktop now enables native OPEN_TERMINAL_ENABLE_DESKTOP and OPEN_TERMINAL_ENABLE_BROWSER. Plain policies explicitly disable both. Discovery separates runtime, image, egress and feature flags; no added Docker capability, endpoint, mount or network. Source: internal/gateway/lifecycle.go and gateway.go:specPolicies.

@@ -6,7 +6,7 @@
 ARG BASE=debian:trixie-slim
 FROM ${BASE}
 
-ARG OPEN_TERMINAL_VERSION=0.14.0
+ARG OPEN_TERMINAL_VERSION=0.16.0
 ARG VERSION=dev
 ARG REVISION=unknown
 ARG DEBIAN_FRONTEND=noninteractive
@@ -65,6 +65,8 @@ ENV HOME=/home/user \
     USER=user \
     SHELL=/usr/local/libexec/termiplus/bash \
     OPEN_TERMINAL_EXECUTE_TIMEOUT=60 \
+    OPEN_TERMINAL_ENABLE_DESKTOP=false \
+    OPEN_TERMINAL_ENABLE_BROWSER=false \
     OPEN_TERMINAL_EXECUTE_DESCRIPTION="Debian container of your own; nothing here affects the host. sudo works without a password (e.g. sudo apt-get update && sudo apt-get install -y PACKAGE). Waits up to 60 s and returns the output; if status is still running, use get_process_status."
 EXPOSE 8000
 

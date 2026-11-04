@@ -133,7 +133,7 @@ async function loadWorkspaces() {
     const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");
     const text = [el("span", { class: "name", text: title })];
     text.push(el("span", { class: "help", text: purpose }));
-    if (!ws.desktop) text.push(el("span", { class: "meta", text: "Open WebUI connection: " + (ws.connection_name || (ws.persistent ? "Terminal" : "Temporary terminal")) }));
+    text.push(el("span", { class: "meta", text: "Open WebUI connection: " + (ws.connection_name || ws.label || ws.name) }));
     if (ws.description) text.push(el("span", { class: "help", text: ws.description }));
     text.push(el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }));
     ul.append(el("li", { class: "workspace" }, [el("div", { class: "ws-text" }, text), button]));
@@ -150,30 +150,12 @@ async function loadSessions() {
     const remove = el("button", { class: "danger", type: "button", text: "Remove" });
     remove.addEventListener("click", () => removeSession(s, remove));
     const items = [el("span", { class: "name", text: s.label || s.session_id }), remove];
-    const url = s.stream_url && safeURL(s.stream_url);
-    if (url) {
-      items.splice(1, 0, el("a", { class: "button", href: url, target: "_blank", rel: "noopener noreferrer", text: "Open desktop" }));
-    }
-    const fwd = s.forward_url && safeURL(s.forward_url);
-    if (fwd && s.running) {
-      const port = el("input", { class: "port", type: "number", min: "1", max: "65535", placeholder: "port", "aria-label": "Port to open" });
-      const open = el("button", { type: "button", text: "Open port" });
-      open.addEventListener("click", () => {
-        const n = Number(port.value);
-        if (!Number.isInteger(n) || n < 1 || n > 65535) {
-          status("Enter a port between 1 and 65535.", true);
-          return;
-        }
-        window.open(fwd + n + "/", "_blank", "noopener,noreferrer");
-      });
-      const help = el("details", { class: "port-help" }, [el("summary", { text: "What does Open port do?" }),
-        el("p", { text: "Open a web app running inside this workspace on that port at a private browser link. Only you can open this port link. Desktop sharing shares the screen, not port access." })]);
-      items.splice(items.length - 1, 0, port, open, help);
-    }
+    const desktop = s.desktop === true;
+    items.push(el("span", { class: "help", text: "Use the " + s.workspace + " connection in Open WebUI. Desktop, browser, files and app previews are available there." }));
     const reset = el("button", { type: "button", text: "Reset" });
     reset.addEventListener("click", () => resetSession(s, reset));
     items.splice(items.length - 1, 0, reset);
-    if (url && sharesEnabled) {
+    if (desktop && sharesEnabled) {
       const share = el("button", { type: "button", text: "Share (view only)" });
       share.addEventListener("click", () => shareDesktop(s, share));
       items.splice(items.length - 1, 0, share);
@@ -181,7 +163,7 @@ async function loadSessions() {
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
     items.push(el("span", { class: "meta", text: meta }));
     const card = el("li", { "data-session": s.session_id }, items);
-    if (url) card.prepend(desktopPreview(s));
+    if (desktop) card.prepend(desktopPreview(s));
     else card.prepend(terminalPreview(s));
     ul.append(card);
   }
@@ -318,7 +300,7 @@ async function shareDesktop(s, button) {
     finally { find.disabled = false; }
   });
   const choice = await ask("Share desktop", [
-    el("p", { text: "Viewers can watch this desktop; they cannot type or click." }),
+    el("p", { text: "Viewers see a screen image updated every five seconds. Keyboard, mouse, clipboard and audio are not shared." }),
     el("label", { for: "share-duration", text: "Expires after" }), duration, customLabel,
     el("label", { for: "share-audience", text: "Who can watch" }), audience, picker,
   ], "Create link", () => {

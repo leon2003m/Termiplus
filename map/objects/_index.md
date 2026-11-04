@@ -30,7 +30,7 @@ One line per noun. Read the line; open the card only if you need it. `stub` = no
 - [Share](control-plane/share.md) · verified · expiring view-only desktop link; token hash stored, viewers sign in
 - [Departed](control-plane/departed.md) · verified · users disabled/deleted in Keycloak; archived after a delay, restored on return
 - [Audit log](control-plane/audit-log.md) · verified · JSONL of changing tool calls (ok / error / denied)
-- Stream and forward listeners · stub · desktop and port-forward proxies of the MCP server → `internal/mcp/stream.go`, `internal/mcp/forward.go`, `internal/gateway/stream.go`, `internal/gateway/forward.go`
+- Native desktop and screen shares · migrated · owner interaction goes through Open WebUI; expiring view-only image shares remain → `internal/mcp/stream.go`, `internal/gateway/stream.go`, [desktop process](../processes/desktop-stream.md)
 - Management console · stub · `UI_LISTEN_ADDR`, same `invoke` as chat → `internal/mcp/ui.go`, `internal/mcp/ui/`
 - StubBackend, `MCP_AUTH=dev` · stub · **leftover**: tests and local trials only → `internal/mcp/backend.go`, `cmd/mcp/main.go`
 

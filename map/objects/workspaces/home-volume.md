@@ -3,7 +3,7 @@ type: object
 cluster: workspaces
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/naming/naming.go
 ---
 
@@ -47,3 +47,7 @@ Citations: `internal/naming/naming.go:55`, `internal/gateway/lifecycle.go:483-49
 ## See
 
 - Source: `internal/gateway/homes.go`, `internal/gateway/userhomes.go`
+
+## Native integration update (2026-11-04)
+
+Native terminal/desktop policies can still share a home profile; interactive display identity comes from the selected policy connection, not home sharing alone. Source: internal/gateway/lifecycle.go, internal/mcp/gateway_backend.go.

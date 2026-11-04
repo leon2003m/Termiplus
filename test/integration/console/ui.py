@@ -21,8 +21,8 @@ workspaces = [dict(name='shell', label='Terminal', persistent=True, idle_seconds
     dict(name='docker', label='Terminal with Docker', connection_name='Terminal with Docker', persistent=True, idle_seconds=900),
     dict(name='desktop', label='Desktop', desktop=True, persistent=True)]
 sessions = [dict(session_id='terminal',workspace='temp',persistent=False,running=True,
-    started_at=NOW,last_activity=NOW,idle_expires_at=EXPIRY,forward_url='http://localhost/private/'),
-    dict(session_id='desktop',workspace='desktop',persistent=True,running=True,stream_url='http://localhost/desktop/')]
+    started_at=NOW,last_activity=NOW,idle_expires_at=EXPIRY),
+    dict(session_id='desktop',workspace='desktop',persistent=True,running=True,desktop=True)]
 posted = []
 
 class Handler(http.server.BaseHTTPRequestHandler):

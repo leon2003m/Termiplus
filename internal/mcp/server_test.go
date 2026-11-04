@@ -47,6 +47,26 @@ func toolCall(t *testing.T, s *Server, token, name string, args map[string]any) 
 	return call(t, s, token, "tools/call", map[string]any{"name": name, "arguments": args})
 }
 
+// consoleToolCall exercises the human console's internal dispatcher. Wire-level
+// model isolation is tested separately below, including administrator callers.
+func consoleToolCall(t *testing.T, s *Server, token, name string, args map[string]any) rpcResp {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	p, err := s.auth.Authenticate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	wire, _ := json.Marshal(args)
+	_ = json.Unmarshal(wire, &args)
+	out, rpcErr := s.invoke(req.Context(), p, name, args)
+	raw, _ := json.Marshal(out)
+	return rpcResp{Result: raw, Error: rpcErr}
+}
+
 // result decodes a successful tool call's JSON payload into v.
 func result(t *testing.T, resp rpcResp, v any) {
 	t.Helper()
@@ -110,12 +130,12 @@ func TestToolsListNoFsOrExec(t *testing.T) {
 	for _, tl := range out.Tools {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"list_workspaces", "request_session", "list_sessions", "destroy_session", "set_network_policy"} {
+	for _, want := range []string{"list_workspaces", "request_session", "list_sessions", "destroy_session"} {
 		if !names[want] {
 			t.Errorf("missing tool %q", want)
 		}
 	}
-	for _, forbidden := range []string{"read_file", "write_file", "list_dir", "exec"} {
+	for _, forbidden := range []string{"read_file", "write_file", "list_dir", "exec", "set_network_policy", "get_network_policy", "manage_user", "manage_group", "manage_departed", "set_entitlements", "get_entitlements", "get_audit_log"} {
 		if names[forbidden] {
 			t.Errorf("control plane must not expose %q", forbidden)
 		}
@@ -210,17 +230,43 @@ func TestSessionsAreScopedToUser(t *testing.T) {
 
 func TestNetworkPolicyNeedsAdmin(t *testing.T) {
 	s := newTestServer()
-	resp := toolCall(t, s, "user-tok", "set_network_policy", map[string]any{"policy": map[string]any{}})
+	resp := consoleToolCall(t, s, "user-tok", "set_network_policy", map[string]any{"policy": map[string]any{}})
 	if resp.Error == nil || resp.Error.Code != codeForbidden {
 		t.Fatalf("want forbidden without admin, got %+v", resp.Error)
 	}
-	resp = toolCall(t, s, "admin-tok", "set_network_policy", map[string]any{"policy": map[string]any{}})
+	resp = consoleToolCall(t, s, "admin-tok", "set_network_policy", map[string]any{"policy": map[string]any{}})
 	if resp.Error == nil || resp.Error.Code != codeConfirmRequired {
 		t.Fatalf("admin still needs confirmation, got %+v", resp.Error)
 	}
 	var out map[string]any
-	result(t, toolCall(t, s, "admin-tok", "set_network_policy", map[string]any{"policy": map[string]any{}, "_confirmed": true}), &out)
+	result(t, consoleToolCall(t, s, "admin-tok", "set_network_policy", map[string]any{"policy": map[string]any{}, "_confirmed": true}), &out)
 	if out["applied"] != true {
 		t.Fatalf("expected applied, got %v", out)
 	}
+}
+
+func TestModelCannotInvokeConsoleToolsEvenAsAdmin(t *testing.T) {
+	s, _ := newAuditedServer(t)
+	for _, name := range []string{"set_network_policy", "get_network_policy", "manage_user", "manage_group", "manage_departed", "get_audit_log", "set_entitlements", "get_entitlements"} {
+		resp := toolCall(t, s, "admin-tok", name, map[string]any{"_confirmed": true, "_model": false})
+		if resp.Error == nil || resp.Error.Code != codeForbidden {
+			t.Fatalf("%s exposed to model: %+v", name, resp)
+		}
+	}
+	for _, action := range []string{"delete", "restore"} {
+		resp := toolCall(t, s, "admin-tok", "manage_snapshots", map[string]any{"action": action, "workspace": "desk", "_confirmed": true, "_model": false})
+		if resp.Error == nil || resp.Error.Code != codeForbidden {
+			t.Fatalf("snapshot %s exposed to model: %+v", action, resp)
+		}
+	}
+	entries := auditEntries(t, s, nil)
+	if len(entries) == 0 {
+		t.Fatal("model denials were not audited")
+	}
+	for _, entry := range entries {
+		if entry.Outcome != "denied" {
+			t.Fatalf("unexpected model audit outcome: %+v", entry)
+		}
+	}
+
 }

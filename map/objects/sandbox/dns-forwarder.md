@@ -3,7 +3,7 @@ type: object
 cluster: sandbox
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: deploy/dns-forwarder/entrypoint.sh
 ---
 
@@ -51,3 +51,7 @@ Citations: `deploy/dns-forwarder/entrypoint.sh:1-33`, `deploy/docker-compose.net
 ## See
 
 - Source: `deploy/dns-forwarder/`
+
+## Native integration update (2026-11-04)
+
+Native Browser runs inside the same policy container and remains subject to existing DNS/egress rules. No browser-specific firewall allowance is added. Source: internal/gateway/lifecycle.go.

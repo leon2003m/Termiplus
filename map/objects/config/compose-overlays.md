@@ -3,7 +3,7 @@ type: object
 cluster: config
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: deploy/docker-compose.yml
 ---
 
@@ -23,7 +23,7 @@ The 0.x core (gateway plus sockproxy) must keep working for people who want only
 | `docker-compose.separate-vm.yml` | gateway without `owui`, published on `GATEWAY_BIND` (default `127.0.0.1:8080`) | base |
 | `docker-compose.netpolicy.yml` | `dns-forwarder`, admin netpolicy API | base; host `firewall.sh` |
 | `docker-compose.mcp.yml` | `mcp`, `mcp-auth` (oauth2-proxy), gateway control key, `BACKUP_DIR` | base, an OIDC IdP |
-| `docker-compose.desktop.yml` | `desk-auth`, `desk-stream-auth`, `fwd-auth`; console, stream and forward listeners | mcp |
+| `docker-compose.desktop.yml` | `desk-auth`, `desk-stream-auth`, `fwd-auth`; console and share listener | mcp |
 | `docker-compose.keycloak.yml` | `keycloak`, `keycloak-db` | `setup-alpha.sh` once |
 | `docker-compose.mcp-users.yml` | mcp ↔ Keycloak admin (`manage_user`, `manage_group`, departed) | mcp, keycloak |
 | `docker-compose.mcp-netpolicy.yml` | mcp ↔ admin netpolicy API | netpolicy, mcp |
@@ -58,3 +58,7 @@ Citations: `deploy/docker-compose.yml:1-20`, `:26`, `:55`, `:77`, `:87-102`, `de
 
 - Source: `deploy/`
 - Effects: [effects/CONTEXT.md](../../effects/CONTEXT.md)
+
+## Native integration update (2026-11-04)
+
+The desktop overlay now exposes only the human console and image-only share viewer. fwd-auth, the forwarding network/secrets/listener and owner /stream upstream are removed. STREAM_* and DESKTOP_STREAM_URL names remain for share configuration compatibility. Source: deploy/docker-compose.desktop.yml and cmd/mcp/main.go.

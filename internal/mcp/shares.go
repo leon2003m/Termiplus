@@ -17,10 +17,10 @@ import (
 )
 
 // Shared desktops: the owner of a desktop session creates a link that lets
-// other signed-in users watch it (view only: KasmVNC's "viewer" user, no
-// keyboard or mouse) until it expires or is revoked. The link carries a
+// other signed-in users watch native screenshots (no keyboard, mouse,
+// clipboard or audio) until it expires or is revoked. The link carries a
 // random token; the store keeps only its hash. A share can be limited to one
-// user of the identity provider. Viewers still sign in (desk-auth), so a
+// user of the identity provider. Viewers still sign in (desk-stream-auth), so a
 // leaked link alone is not enough.
 
 const (
@@ -277,7 +277,7 @@ func (s *Server) shareDesktop(ctx context.Context, p Principal, args map[string]
 	if sess == nil {
 		return nil, fmt.Errorf("no session %q of yours", id)
 	}
-	if sess.StreamURL == "" {
+	if !sess.Desktop {
 		return nil, fmt.Errorf("session %q has no desktop to share", id)
 	}
 	ttl := shareDefaultTTL
@@ -311,7 +311,7 @@ func (s *Server) shareDesktop(ctx context.Context, p Principal, args map[string]
 		"url":      s.desktopBase + sharePathPrefix + token + "/",
 		"expires":  sh.Expires,
 		"who":      who,
-		"note":     "view only: viewers see the screen (and clipboard contents) but cannot type or click; revoke with share_desktop action revoke",
+		"note":     "view only: screen images update every five seconds; no input, clipboard or audio; revoke with share_desktop action revoke",
 	}, nil
 }
 

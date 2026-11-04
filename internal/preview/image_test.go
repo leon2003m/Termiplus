@@ -27,3 +27,44 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeScreenAndThumbnail(t *testing.T) {
+	for _, size := range []image.Point{{1280, 800}, {800, 1280}, {1, 2048}, {2049, 1}} {
+		var encoded bytes.Buffer
+		if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, size.X, size.Y))); err != nil {
+			t.Fatal(err)
+		}
+		normalized, err := Screen(append(encoded.Bytes(), []byte("<script>bad</script>")...))
+		if size.X > 2048 {
+			if err == nil {
+				t.Fatal("oversized dimensions accepted")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(normalized, []byte("<script>")) {
+			t.Fatal("trailing data retained")
+		}
+		thumb, err := Thumbnail(normalized)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := Validate(thumb); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _ := png.DecodeConfig(bytes.NewReader(thumb))
+		if size.X == 1280 && (cfg.Width != 320 || cfg.Height != 200) {
+			t.Fatalf("wrong aspect ratio: %v", cfg)
+		}
+	}
+	for _, invalid := range [][]byte{[]byte("<html>"), bytes.Repeat([]byte{0}, MaxScreenBytes+1), nil} {
+		if _, err := Screen(invalid); err == nil {
+			t.Fatal("invalid screen accepted")
+		}
+		if _, err := Thumbnail(invalid); err == nil {
+			t.Fatal("invalid thumbnail accepted")
+		}
+	}
+}

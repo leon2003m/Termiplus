@@ -3,7 +3,7 @@ type: object
 cluster: identity
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/directory.go
 ---
 
@@ -13,7 +13,7 @@ The user directory behind the OIDC provider, as far as the admin tools need it. 
 
 ## Why this shape
 
-Admins manage access from chat (`manage_user`, `manage_group`) without a Keycloak console. The directory only reads users and groups and changes group membership. It **never creates users or touches credentials**, so a compromised MCP server cannot mint accounts.
+User/group membership is administered by humans in the Keycloak console. The directory only reads users and groups and changes group membership. It **never creates users or touches credentials**, so a compromised MCP server cannot mint accounts.
 
 ## Shape
 
@@ -45,3 +45,7 @@ Citations: `internal/mcp/directory.go:14-50`, `cmd/mcp/main.go:91-97`, `deploy/k
 ## See
 
 - Source: `internal/mcp/directory.go`, `internal/mcp/users.go`
+
+## Native integration update (2026-11-04)
+
+User/group tools are excluded from model discovery and direct calls. Human membership administration uses the identity-provider console. The directory remains for internal role checks, exact-name recipient lookup and departure watching. Source: internal/mcp/server.go:modelTool and cmd/mcp/main.go.

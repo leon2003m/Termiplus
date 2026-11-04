@@ -63,7 +63,7 @@ jobs:
           exit "$rc"
       - name: shellcheck
         if: success() || failure()
-        run: shellcheck --format=gcc deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/alpha-e2e.sh test/integration/oidc/run.sh test/integration/oidc/desktop.sh image/desktop/start-desktop.sh image/desktop/files/usr/local/bin/thunar image/desktop/files/usr/local/libexec/termiplus/start-xfce .github/scripts/*.sh
+        run: shellcheck --format=gcc deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/alpha-e2e.sh test/integration/oidc/run.sh test/integration/oidc/desktop.sh .github/scripts/*.sh
       - name: hadolint
         if: success() || failure()
         run: hadolint --format tty Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
@@ -151,7 +151,7 @@ jobs:
 
   desktop:
     # The desktop image builds on the terminal image, so both are built here
-    # with the local Docker daemon, then smoke-tested with a real KasmVNC.
+    # with the local Docker daemon, then smoke-tested with native Open Terminal.
     name: desktop image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -167,7 +167,7 @@ jobs:
         run: |
           docker build -q -t termiplus-terminal:ci image
           docker build -q --build-arg BASE=termiplus-terminal:ci -t termiplus-desktop:ci image/desktop
-      - name: Smoke test (Open Terminal, KasmVNC, gateway stream route)
+      - name: Smoke test (native Desktop, Browser and authentication)
         run: .github/scripts/desktop-smoke.sh termiplus-desktop:ci
 
   oidc-integration:
