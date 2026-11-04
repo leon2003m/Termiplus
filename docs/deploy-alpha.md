@@ -77,7 +77,8 @@ digits only, so call it e.g. `tempdesk`:
 }
 ```
 
-The desktop is XFCE with a file manager (Thunar), Firefox ESR with uBlock Origin, Kate,
+The desktop is XFCE with a file manager (Dolphin), Firefox ESR with uBlock Origin
+and geckodriver (WebDriver for scripted browser control on 127.0.0.1), Kate,
 an image viewer and a dark theme. To change the wallpaper for everyone, replace
 `image/desktop/files/usr/share/backgrounds/termiplus/default.svg` (any SVG,
 PNG or JPEG under that name) and rebuild the image. Users can pick another one

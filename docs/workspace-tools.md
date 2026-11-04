@@ -239,8 +239,9 @@ today with this environment; installing a driving tool alone does not enforce a
 human approval boundary against that shell access.
 
 Recommend, **pending approval**, xdotool+wmctrl+xclip (about 334 kB increment),
-the already installed maim, plus the AT-SPI packages/probe for inspection and a
-pinned geckodriver for browser-specific automation. xprop is useful for diagnosis;
+the already installed maim, plus the AT-SPI packages/probe for inspection.
+geckodriver 0.37.1 is now shipped in the desktop image (approved 2026-11-04,
+installed from the upstream release with a pinned SHA-256). xprop is useful for diagnosis;
 OCR is optional (~26 MB combined dependency footprint) and unnecessary for the
 three basic workflows. Do not ship the exploratory probe as a trusted control
 service: semantic save/form outcomes still need work. No OWUI credentials,

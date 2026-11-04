@@ -10,6 +10,11 @@ FROM ${BASE}
 ARG KASMVNC_VERSION=1.5.0
 ARG KASMVNC_SHA256=80b241de7dfe53bba2b7e1cc5ac8c5246d72271efa16be2d4f76607f30fab1c4
 ARG DEBIAN_FRONTEND=noninteractive
+# geckodriver (MPL-2.0) lets an agent in the workspace drive Firefox ESR over
+# WebDriver on 127.0.0.1. Not packaged in Debian; checked against the digest
+# GitHub publishes for the release asset.
+ARG GECKODRIVER_VERSION=0.37.1
+ARG GECKODRIVER_SHA256=e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e
 
 LABEL org.opencontainers.image.title="termiplus-desktop" \
       org.opencontainers.image.description="EXPERIMENTAL termiplus desktop workspace (XFCE + KasmVNC), run under gVisor or Sysbox"
@@ -26,6 +31,13 @@ RUN curl -fsSL -o /tmp/kasmvnc.deb \
         firefox-esr webext-ublock-origin-firefox arc-theme papirus-icon-theme fonts-inter fonts-noto-color-emoji fonts-noto-cjk librsvg2-common \
     && rm -rf /var/lib/apt/lists/* /tmp/kasmvnc.deb \
     && usermod -aG ssl-cert user
+RUN curl -fsSL -o /tmp/geckodriver.tar.gz \
+        "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz" \
+    && echo "${GECKODRIVER_SHA256}  /tmp/geckodriver.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/geckodriver.tar.gz -C /usr/local/bin geckodriver \
+    && chown 0:0 /usr/local/bin/geckodriver && chmod 755 /usr/local/bin/geckodriver \
+    && rm /tmp/geckodriver.tar.gz \
+    && geckodriver --version | head -n 1
 
 # Desktop defaults: theme, icons, fonts, panel, default applications, Firefox
 # policies and the wallpaper (files/). They apply until a user changes them in
