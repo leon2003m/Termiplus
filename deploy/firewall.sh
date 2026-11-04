@@ -24,12 +24,23 @@
 # (DNS_UPSTREAM from the environment or deploy/.env) and nothing else, and its
 # address is pinned to its MAC like the gateway's. Without the forwarder none
 # of these rules exist.
+#
+# Offline network (offline overlay, "egress": "offline" policies): if the
+# ot-offline bridge exists, everything entering or leaving it is dropped, both
+# routed and to the host, IPv4 and IPv6. The only exception is the gateway
+# (172.30.1.2, MAC-pinned like on the sandbox bridge) opening connections to
+# offline terminals, plus the replies on those connections. The bridge is a
+# Docker internal network with enable_icc:false, so it has no route out even
+# without these rules; they are the second layer.
 set -eu
 
 SANDBOX=172.30.0.0/24
 GATEWAY=172.30.0.2
 FORWARDER=${FORWARDER_IP:-172.30.0.3}
 BRIDGE=ot-sandbox
+OFFLINE_BRIDGE=ot-offline
+OFFLINE_SUBNET=172.30.1.0/24
+OFFLINE_GATEWAY=172.30.1.2
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 EGRESS_RULES=${EGRESS_RULES_FILE:-"$SCRIPT_DIR/netpolicy/egress.rules"}
@@ -60,7 +71,7 @@ apply_egress_allow() {
         ;;
     esac
     case "$cidr" in
-      127.* | 169.254.* | 172.30.0.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*)
+      127.* | 169.254.* | 172.30.0.* | 172.30.1.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*)
         echo "firewall: refusing never-allowed destination '$cidr'" >&2
         continue
         ;;
@@ -105,9 +116,10 @@ ensure_bridge_netfilter
 # (IPv4 or ARP) claiming the gateway's IP from any other MAC, before iptables
 # sees it. Needs ebtables and the gateway container running; fails closed
 # (installs nothing) if either is missing, since the ACCEPT would be unsafe (#13).
-# mac_of prints the MAC of the container holding IP on the bridge, or nothing.
+# mac_of prints the MAC of the container holding IP on the bridge (or on the
+# network named by the second argument), or nothing.
 mac_of() {
-  docker network inspect "$BRIDGE" \
+  docker network inspect "${2:-$BRIDGE}" \
     --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
     | awk -v ip="$1" '{split($1, a, "/"); if (a[1] == ip) print $2}'
 }
@@ -117,6 +129,9 @@ pin_ip() {
   ebtables -t filter -A TERMIPLUS-AS -p IPv4 --ip-source "$1" -s ! "$2" -j DROP
   ebtables -t filter -A TERMIPLUS-AS -p ARP --arp-ip-src "$1" -s ! "$2" -j DROP
 }
+
+# offline_present: the offline overlay's bridge exists on this host.
+offline_present() { ip link show "$OFFLINE_BRIDGE" >/dev/null 2>&1; }
 
 # --if-needed (for the termiplus-firewall-watch timer): only (re)apply when the
 # rules are missing or a pinned MAC no longer matches the running gateway or
@@ -131,6 +146,14 @@ rules_current() {
     [ -z "$m" ] && continue
     echo "$pinned" | grep -F -- "--ip-src $ip " | grep -qiF -- "$m" || return 1
   done
+  if offline_present; then
+    iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
+    iptables -C TERMIPLUS-IN -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
+    m=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
+    if [ -n "$m" ]; then
+      echo "$pinned" | grep -F -- "--ip-src $OFFLINE_GATEWAY " | grep -qiF -- "$m" || return 1
+    fi
+  fi
 }
 if [ "${1:-}" = --if-needed ]; then
   if [ -z "$(mac_of "$GATEWAY")" ]; then
@@ -160,6 +183,17 @@ ensure_gateway_antispoof() {
   if [ -n "$forwarder_mac" ]; then
     pin_ip "$FORWARDER" "$forwarder_mac"
   fi
+  # The gateway's address on the offline bridge, same reason. Without it the
+  # gateway gets no allow there and offline terminals are unreachable (closed).
+  offline_gateway_mac=""
+  if offline_present; then
+    offline_gateway_mac=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
+    if [ -n "$offline_gateway_mac" ]; then
+      pin_ip "$OFFLINE_GATEWAY" "$offline_gateway_mac"
+    else
+      echo "firewall: no gateway on $OFFLINE_BRIDGE - offline terminals stay unreachable" >&2
+    fi
+  fi
   ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || ebtables -t filter -I FORWARD 1 -j TERMIPLUS-AS
 }
 ensure_gateway_antispoof
@@ -169,13 +203,23 @@ ensure_gateway_antispoof
 upstream_ok() {
   echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
   case "$1" in
-    127.* | 169.254.* | 172.30.0.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*) return 1 ;;
+    127.* | 169.254.* | 172.30.0.* | 172.30.1.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*) return 1 ;;
   esac
 }
 upstreams() { echo "$DNS_UPSTREAM" | tr -s ', ' '\n' | grep -v '^$' || true; }
 
 # Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
 iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
+# Offline bridge first, by interface, so no rule below (all keyed on the
+# sandbox subnet or on admin allowances) can ever let its traffic through.
+if offline_present; then
+  if [ -n "${offline_gateway_mac:-}" ]; then
+    iptables -A TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_GATEWAY" -d "$OFFLINE_SUBNET" -j ACCEPT
+    iptables -A TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_SUBNET" -d "$OFFLINE_GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  fi
+  iptables -A TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP
+  iptables -A TERMIPLUS -o "$OFFLINE_BRIDGE" -j DROP
+fi
 # The gateway->terminal allow is ACCEPT, not RETURN: ACCEPT terminates
 # traversal so Docker's enable_icc:false inter-container DROP (which runs in
 # FORWARD after DOCKER-USER) does not drop this required flow. Do not install a
@@ -228,6 +272,11 @@ iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || iptables -I DOCKER-USER 1 -j
 # Docker's embedded resolver (127.0.0.11) lives inside each container's
 # network namespace and is not affected by this rule.
 iptables -N TERMIPLUS-IN 2>/dev/null || iptables -F TERMIPLUS-IN
+# Nothing on the offline bridge may talk to the host, not even on connections
+# that look established (checked before the ESTABLISHED,RELATED return).
+if offline_present; then
+  iptables -A TERMIPLUS-IN -i "$OFFLINE_BRIDGE" -j DROP
+fi
 iptables -A TERMIPLUS-IN -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 # An upstream resolver on this host itself: only the forwarder may ask it.
 if [ -n "${forwarder_mac:-}" ]; then
@@ -248,5 +297,10 @@ iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || iptables -I INPUT 1 -j TERMIPLU
 # A blanket drop is correct here because terminals have no legitimate IPv6.
 ip6tables -C FORWARD -i "$BRIDGE" -j DROP 2>/dev/null || ip6tables -I FORWARD 1 -i "$BRIDGE" -j DROP
 ip6tables -C INPUT -i "$BRIDGE" -j DROP 2>/dev/null || ip6tables -I INPUT 1 -i "$BRIDGE" -j DROP
+if offline_present; then
+  ip6tables -C FORWARD -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || ip6tables -I FORWARD 1 -i "$OFFLINE_BRIDGE" -j DROP
+  ip6tables -C FORWARD -o "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || ip6tables -I FORWARD 1 -o "$OFFLINE_BRIDGE" -j DROP
+  ip6tables -C INPUT -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || ip6tables -I INPUT 1 -i "$OFFLINE_BRIDGE" -j DROP
+fi
 
 echo "termiplus firewall rules applied"

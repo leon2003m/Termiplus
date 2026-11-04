@@ -17,7 +17,7 @@ Whoever can create containers on Docker is root on the host. So the gateway gets
 
 ## Shape
 
-- Rules: `Image`, `ExtraImages`, `Runtimes` (`ALLOWED_RUNTIMES`, e.g. runsc and sysbox-runc), `Network`, `MaxMemory`, `MaxNanoCPUs`, `MaxPids`, `AllowedDNS` (exactly the forwarder, or no DNS at all), `HomeVolumeSize`, `RootfsSize`.
+- Rules: `Image`, `ExtraImages`, `Runtimes` (`ALLOWED_RUNTIMES`, e.g. runsc and sysbox-runc), `Network`, `OfflineNetwork` (`OFFLINE_NETWORK`: the one other network allowed, for offline policies; Dns is refused there), `MaxMemory`, `MaxNanoCPUs`, `MaxPids`, `AllowedDNS` (exactly the forwarder, or no DNS at all), `HomeVolumeSize`, `RootfsSize`.
 - Endpoints: `_ping` and `version`; list (managed containers only); create; volume create, inspect and delete (delete only with `AllowHomeRemove`); image inspect (allowed images, ID only); and per-container ops. Container references are resolved to a managed container with a terminal name first, then forwarded by full ID. Everything else: "endpoint not allowed".
 - Create: the name must match a terminal, ephemeral or archive pattern. Ephemeral containers get no mounts. Others get exactly one writable volume at `/home/user` with the same user hash. Env and labels go through an allowlist. Output: `Privileged:false`, `MemorySwap=Memory`, `RestartPolicy:no`, `AutoRemove` for ephemeral, capped json-file logs.
 - Volume create: no driver options (`o=bind` would be a host mount); terminal volume names only.

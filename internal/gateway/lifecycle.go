@@ -49,15 +49,26 @@ type Policy struct {
 	// EXTRA_IMAGES. It must be built on the termiplus terminal image (Open
 	// Terminal on the same port, the same start script).
 	Image string `json:"image,omitempty"`
+	// Egress is "internet" (default): the sandbox network, public internet
+	// allowed, internal ranges denied by deploy/firewall.sh. "offline": the
+	// workspace joins OFFLINE_NETWORK, a Docker internal network with no route
+	// out and no DNS; only the gateway reaches it. The gateway refuses to start
+	// with an offline policy when OFFLINE_NETWORK is not configured.
+	Egress string `json:"egress,omitempty"`
 
 	idle time.Duration
 }
 
 func (p Policy) ephemeral() bool { return p.Storage == storageEphemeral }
 
+func (p Policy) offline() bool { return p.Egress == egressOffline }
+
 const (
 	storagePersistent = "persistent"
 	storageEphemeral  = "ephemeral"
+
+	egressInternet = "internet"
+	egressOffline  = "offline"
 )
 
 type instance struct {
@@ -90,6 +101,9 @@ type manager struct {
 	policies     map[string]Policy
 	addrFor      func(name string, port int) string // overridable in tests
 	forwarderDNS string                             // resolver to pin terminals to, or ""
+	// offlineNetwork is the Docker internal network for "egress": "offline"
+	// policies, or "" when none is configured (then no policy may be offline).
+	offlineNetwork string
 
 	stats counters
 
@@ -143,6 +157,14 @@ func (m *manager) containerKey(name string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// networkFor returns the Docker network a policy's containers join.
+func (m *manager) networkFor(pol Policy) string {
+	if pol.offline() {
+		return m.offlineNetwork
+	}
+	return m.network
+}
+
 // imageFor returns the image a policy's containers run.
 func (m *manager) imageFor(pol Policy) string {
 	if pol.Image != "" {
@@ -155,7 +177,7 @@ func (m *manager) configHash(pol Policy, policyName string) string {
 	secretFP := sha256.Sum256(m.keySecret)
 	// Policies without their own image hash exactly as before, so existing
 	// containers are not recreated by this field's introduction.
-	b, _ := json.Marshal([]any{m.imageFor(pol), m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
+	b, _ := json.Marshal([]any{m.imageFor(pol), m.networkFor(pol), m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }
@@ -202,8 +224,12 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 			// 64-bit hash collision or tampering: refuse rather than mix users.
 			return nil, fmt.Errorf("container %s belongs to another user", name)
 		}
-		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) {
-			log.Printf("recreating %q: config changed or stopped sandbox", name)
+		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) ||
+			ct.HostConfig.NetworkMode != m.networkFor(pol) {
+			// The network is checked against the container itself, not only its
+			// config label, so a workspace is never adopted onto a network with
+			// more egress than its policy allows.
+			log.Printf("recreating %q: config or network changed, or stopped sandbox", name)
 			if err := m.docker.Remove(ctx, name); err != nil {
 				return nil, err
 			}
@@ -452,7 +478,7 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	labels[naming.LabelConfig] = cfg
 	hostConfig := map[string]any{
 		"Runtime":     pol.Runtime,
-		"NetworkMode": m.network,
+		"NetworkMode": m.networkFor(pol),
 		"Memory":      pol.MemoryMB << 20,
 		"NanoCpus":    int64(pol.CPUs * 1e9),
 		"PidsLimit":   pol.Pids,
@@ -462,7 +488,8 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	// socket proxy independently accepts only this one address, so a tampered
 	// gateway cannot point a terminal at any other resolver.
 	env := []string{"OPEN_TERMINAL_API_KEY=" + m.containerKey(name)}
-	if m.forwarderDNS != "" {
+	// Offline workspaces get no resolver: the forwarder is not on their network.
+	if m.forwarderDNS != "" && !pol.offline() {
 		hostConfig["Dns"] = []string{m.forwarderDNS}
 		// Docker still writes its embedded resolver into resolv.conf, which
 		// gVisor cannot reach (#3); the image's start script uses this instead.

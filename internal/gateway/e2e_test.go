@@ -274,8 +274,9 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 2 && parts[1] == "json":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id": c.id, "Name": "/" + c.name, "Image": c.image,
-				"State":  map[string]any{"Running": c.running},
-				"Config": map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"State":      map[string]any{"Running": c.running},
+				"Config":     map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"HostConfig": c.body["HostConfig"],
 			})
 		case len(parts) == 2 && parts[1] == "archive":
 			d.archive(w, r, c)

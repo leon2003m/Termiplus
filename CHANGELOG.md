@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format is based on 
 ### Added
 
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
+- Offline workspaces: a policy with `"egress": "offline"` puts its terminals on an internal-only Docker network (`deploy/docker-compose.offline.yml`, `OFFLINE_NETWORK`) with no DNS, no internet, no LAN and no terminal-to-terminal traffic; only the gateway can reach them. `firewall.sh` adds host rules for that bridge. Without the overlay, the gateway refuses offline policies instead of falling back to the internet.
 
 ### Changed
 

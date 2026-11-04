@@ -73,8 +73,10 @@ func main() {
 		NetPolicy:    store,
 		ControlKey:   config.Secret("CONTROL_API_KEY", false),
 		ForwarderDNS: config.Get("ALLOWED_DNS", ""),
-		BackupDir:    config.Get("BACKUP_DIR", ""),
-		SnapshotKeep: config.SmallInt("SNAPSHOT_KEEP", 5, 0, 10000),
+		// Docker internal network for "egress": "offline" policies (optional).
+		OfflineNetwork: config.Get("OFFLINE_NETWORK", ""),
+		BackupDir:      config.Get("BACKUP_DIR", ""),
+		SnapshotKeep:   config.SmallInt("SNAPSHOT_KEEP", 5, 0, 10000),
 		// Upper bound for one home export (download or backup).
 		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
 		ExportMaxBytes:    exportMaxBytes(),
