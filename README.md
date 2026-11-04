@@ -252,7 +252,7 @@ An optional, opt-in feature lets an operator set, at runtime and without a redep
 - **custom DNS entries** (internal names, split-horizon) resolvable inside terminals, and
 - **per-destination internal egress**: allow a terminal to reach one internal service (e.g. a database at `10.0.0.5:5432`).
 
-The egress model is unchanged for the internet and tightened for everything else: **public egress stays allowed by default; private/internal destinations are denied by default** and opened only by an explicit entry. A **fixed deny-list can never be opened** by any entry — loopback, link-local including the metadata address `169.254.169.254`, the CGNAT range, and the sandbox subnet itself (other terminals, the gateway, the forwarder, the host bridge).
+The egress model is unchanged for the internet and tightened for everything else: **public egress stays allowed by default; private/internal destinations are denied by default** and opened only by an explicit entry. A **fixed deny-list can never be opened** by any entry — loopback, link-local including the metadata address `169.254.169.254`, the CGNAT range, the sandbox subnet itself (other terminals, the gateway, the forwarder, the host bridge) and the offline subnet `172.30.1.0/24`.
 
 How it fits together:
 

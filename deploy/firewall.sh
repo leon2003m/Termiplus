@@ -141,6 +141,7 @@ rules_current() {
   iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || return 1
   iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || return 1
   pinned=$(ebtables -t filter -L TERMIPLUS-AS 2>/dev/null) || return 1
+  ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || return 1
   for ip in "$GATEWAY" "$FORWARDER"; do
     m=$(mac_of "$ip")
     [ -z "$m" ] && continue
@@ -156,6 +157,8 @@ rules_current() {
     m=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
     if [ -n "$m" ]; then
       echo "$pinned" | grep -F -- "--ip-src $OFFLINE_GATEWAY " | grep -qiF -- "$m" || return 1
+      iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_GATEWAY" -d "$OFFLINE_SUBNET" -j ACCEPT 2>/dev/null || return 1
+      iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_SUBNET" -d "$OFFLINE_GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || return 1
     fi
   fi
 }

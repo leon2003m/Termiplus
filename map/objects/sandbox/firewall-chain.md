@@ -25,11 +25,11 @@ A terminal has root inside its sandbox. So isolation cannot depend on anything i
 ## Shape
 
 - Variables: `SANDBOX`, `GATEWAY=.2`, `FORWARDER=.3`, `BRIDGE=ot-sandbox`, `OFFLINE_BRIDGE=ot-offline`, `OFFLINE_SUBNET`, `OFFLINE_GATEWAY=172.30.1.2`, `EGRESS_RULES`, `DNS_UPSTREAM` (from the environment or `deploy/.env`).
-- `--if-needed` re-applies only when rules are missing or out of date (`rules_current`).
+- `--if-needed` re-applies only when rules are missing or out of date (`rules_current`: chain jumps, the ebtables attachment, pinned MACs and every offline rule).
 - Bridge netfilter must be on (`deploy/sysctl.d/90-termiplus-bridge.conf`, `ensure_bridge_netfilter`).
 - systemd: `termiplus-firewall.service` (on Docker start), `.path` (on `egress.rules` change), `termiplus-firewall-watch.timer` (every 20 s, `--if-needed`).
 
-Citations: `deploy/firewall.sh:1-26` (intent), `:35-39`, `:47` (apply_egress_allow), `:84` (ensure_bridge_netfilter), `:116` (pin_ip), `:125` (rules_current), `:145` (ensure_gateway_antispoof), `:178-225` (TERMIPLUS), `:230-243` (TERMIPLUS-IN), `deploy/docker-compose.yml:81`, `:87-101`
+Citations: `deploy/firewall.sh:1-26` (intent), `:35-39`, `:58` (apply_egress_allow), `:95` (ensure_bridge_netfilter), `:128` (pin_ip), `:140` (rules_current), `:175` (ensure_gateway_antispoof), `:219-280` (TERMIPLUS), `:281-299` (TERMIPLUS-IN), `deploy/docker-compose.yml:81`, `:87-101`
 
 ## Connected to
 
