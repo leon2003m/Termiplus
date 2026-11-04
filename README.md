@@ -43,9 +43,11 @@ image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
+                            termiplus-portlock.service,
                             docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
                             docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP),
-                            docker-compose.mcp-users.yml (opt-in: group membership via MCP)
+                            docker-compose.mcp-users.yml (opt-in: group membership via MCP),
+                            docker-compose.offline.yml (opt-in: offline workspaces)
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
 
@@ -90,12 +92,17 @@ cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
   docker compose -f docker-compose.yml -f docker-compose.separate-vm.yml up -d --build
 
 # 6. Egress rules. They must be reapplied after every reboot, Docker restart and
-#    recreated gateway (its MAC is pinned). The watch timer checks every 20 s and
+#    restarted gateway (its MAC and bridge port are pinned). The watch timer checks every 20 s and
 #    reapplies only when something is missing or stale (adjust ExecStart if the
 #    repo is not in /opt/termiplus):
 sudo ./firewall.sh
 sudo cp termiplus-firewall-watch.service termiplus-firewall-watch.timer /etc/systemd/system/
 sudo systemctl enable --now termiplus-firewall-watch.timer
+#    Terminal ports: lock each new terminal's bridge port to its own MAC as soon
+#    as it starts, so a terminal cannot forge another's MAC (needs Linux and
+#    iproute2 >= 6.2):
+sudo cp termiplus-portlock.service /etc/systemd/system/
+sudo systemctl enable --now termiplus-portlock.service
 ```
 
 7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
@@ -152,6 +159,7 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
 | `image` | Optional. Runs this policy on another image than `TERMINAL_IMAGE`, e.g. a Python or Node image. The socket proxy must list it in `EXTRA_IMAGES` |
+| `egress` | `internet` (default) or `offline`: no internet, no LAN, no DNS. Needs the offline overlay, see *Offline workspaces* |
 
 **Persistent.** One container per user and policy (`ot-u-<user>-<policy>`) with a volume (`ot-home-<user>-<home>`) at `/home/user`. Idle containers are stopped, not deleted, and start again on the next request. Changing the image reference, a policy or `KEY_SECRET` recreates the container on its next use; the volume stays. A new image under the same tag (after a pull or rebuild) is picked up when a stopped workspace starts again: it is recreated on the new image with the same volume. A running workspace is never recreated for that. Anything installed outside `/home/user` is lost on recreation.
 
@@ -167,6 +175,16 @@ Each policy may name its own `image`, for example a data-science image next to t
 ```
 
 List every such image in the socket proxy's `EXTRA_IMAGES` (comma-separated, exact references, ideally pinned by digest); the proxy refuses any other. Build them `FROM` the termiplus terminal image (`image/Dockerfile`) so Open Terminal, the start script and the user stay the same. Policies with the same `home` share the user's files across images. Changing a policy's image recreates its containers on their next use; the home stays. Policies without `image` keep using `TERMINAL_IMAGE` and are not recreated by this feature.
+
+### Offline workspaces
+
+A policy with `"egress": "offline"` runs its terminals on a second network, `ot-offline`, that has no route out at all: no internet, no LAN, no DNS, no host services. Only the gateway can reach them, so Open WebUI, the file browser and the console keep working. Useful for untrusted code or data that must not leave the machine. Docker's embedded resolver (127.0.0.11) does not forward outside names on an internal network: a lookup there returns SERVFAIL, so DNS cannot be used as a side channel either.
+
+```json
+"offline": { "runtime": "runsc", "memory_mb": 2048, "cpus": 2, "pids": 512, "egress": "offline" }
+```
+
+Add `deploy/docker-compose.offline.yml` (after `docker-compose.separate-vm.yml` if you use it) and re-run `deploy/firewall.sh`. The network is a Docker internal network with `enable_icc:false`; `firewall.sh` drops everything on its bridge except gateway → terminal, with the gateway's address pinned to its MAC and its bridge port. Root inside a sandbox can forge its IP or MAC but cannot move its container to another bridge. Without the overlay, a policy with `"egress": "offline"` stops the gateway from starting; it never falls back to the internet. Switching a policy between `internet` and `offline` recreates its containers on their next use (the home stays), and a container found on the wrong network, or on any extra one, is recreated instead of reused; a running one that gains an extra network (`docker network connect` on the host) is removed within a minute. Installing packages in an offline workspace does not work; build them into an image (`image`) instead.
 
 ### Disk quota for home volumes
 
@@ -241,7 +259,7 @@ An optional, opt-in feature lets an operator set, at runtime and without a redep
 - **custom DNS entries** (internal names, split-horizon) resolvable inside terminals, and
 - **per-destination internal egress**: allow a terminal to reach one internal service (e.g. a database at `10.0.0.5:5432`).
 
-The egress model is unchanged for the internet and tightened for everything else: **public egress stays allowed by default; private/internal destinations are denied by default** and opened only by an explicit entry. A **fixed deny-list can never be opened** by any entry — loopback, link-local including the metadata address `169.254.169.254`, the CGNAT range, and the sandbox subnet itself (other terminals, the gateway, the forwarder, the host bridge).
+The egress model is unchanged for the internet and tightened for everything else: **public egress stays allowed by default; private/internal destinations are denied by default** and opened only by an explicit entry. A **fixed deny-list can never be opened** by any entry — loopback, link-local including the metadata address `169.254.169.254`, the CGNAT range, the sandbox subnet itself (other terminals, the gateway, the forwarder, the host bridge) and the offline subnet `172.30.1.0/24`.
 
 How it fits together:
 
@@ -329,6 +347,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `START_TIMEOUT` | gateway | `90s` |
 | `TERMINAL_PORT` | gateway | `8000` |
 | `ALLOWED_DNS` | both | empty; the forwarder address terminals are pinned to (set by the netpolicy overlay) |
+| `OFFLINE_NETWORK` | both | empty; the internal-only network for `"egress": "offline"` policies (set by the offline overlay to `ot-offline`) |
 | `ADMIN_API_KEY` / `_FILE` | gateway | empty (admin API off); min. 32 chars, must differ from `GATEWAY_API_KEY` |
 | `NETPOLICY_FILE`, `NETPOLICY_DNSMASQ_FILE`, `NETPOLICY_EGRESS_FILE` | gateway | under `/data/netpolicy/` |
 | `DNS_UPSTREAM` | dns-forwarder | required with the overlay; your resolver(s), comma-separated, never public |

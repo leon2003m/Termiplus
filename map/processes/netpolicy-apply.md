@@ -26,8 +26,8 @@ The gateway runs unprivileged and never touches iptables. It only renders files.
 4. `Store.Put` → `write` → `Validate`, which checks the `DenyList` plus any extra deny: `internal/netpolicy/store.go:85`, `:93`, `netpolicy.go:72`, `:147`.
 5. Render, then write the three files atomically: `render.go:18` (`DnsmasqHosts`), `:41` (`EgressRules`), `store.go:142` (`writeFilesAtomic`).
 6. The forwarder reloads the hosts dir via inotify; no signal is needed: `deploy/dns-forwarder/entrypoint.sh:7-9`, `:20`.
-7. `termiplus-firewall.path` (`PathChanged=…/egress.rules`) starts `termiplus-firewall.service` → `deploy/firewall.sh`. `apply_egress_allow` rechecks each line after the deny list: `deploy/firewall.sh:15-19`, `:47`, `:220`.
-8. Separately, the watch timer (every 20 s) reruns `firewall.sh --if-needed`. It acts only when the chains or pinned MACs are missing: `deploy/termiplus-firewall-watch.timer`, `firewall.sh:121-140`.
+7. `termiplus-firewall.path` (`PathChanged=…/egress.rules`) starts `termiplus-firewall.service` → `deploy/firewall.sh`. `apply_egress_allow` rechecks each line after the deny list: `deploy/firewall.sh:16-20`, `:56`, `:68-97`, `:540`.
+8. Separately, the watch timer (every 20 s) reruns `firewall.sh --if-needed`. It acts only when the chains or pinned MACs are missing: `deploy/termiplus-firewall-watch.timer`, `firewall.sh:363-410`.
 
 ## If you change this
 

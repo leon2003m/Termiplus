@@ -28,6 +28,7 @@ The 0.x core (gateway plus sockproxy) must keep working for people who want only
 | `docker-compose.mcp-users.yml` | mcp ↔ Keycloak admin (`manage_user`, `manage_group`, departed) | mcp, keycloak |
 | `docker-compose.mcp-netpolicy.yml` | mcp ↔ admin netpolicy API | netpolicy, mcp |
 | `docker-compose.mqtt.yml` | gateway metrics to an MQTT broker | base |
+| `docker-compose.offline.yml` | network `ot-offline` (internal, icc off), gateway at 172.30.1.2, `OFFLINE_NETWORK` for gateway and sockproxy | base; host `firewall.sh`; after separate-vm |
 
 Policy data lives in `deploy/policies.json` ([Policy](../workspaces/policy.md)). Secrets live in `deploy/secrets/` (gitignored). Host pieces (`firewall.sh`, systemd units, `daemon.json`, `sysctl.d/`) are installed outside compose.
 

@@ -20,13 +20,16 @@ func main() {
 	config.HealthcheckIfRequested(config.Get("LISTEN_ADDR", ":2375"), "/healthz")
 
 	rules := sockproxy.Rules{
-		Image:       config.Must("TERMINAL_IMAGE"),
-		Runtimes:    map[string]bool{},
-		Network:     config.Get("SANDBOX_NETWORK", "ot-sandbox"),
-		MaxMemory:   config.IntIn("MAX_MEMORY_MB", 8192, 1, 1<<24) << 20,
-		MaxNanoCPUs: config.IntIn("MAX_CPUS", 4, 1, 4096) * 1e9,
-		MaxPids:     config.IntIn("MAX_PIDS", 2048, 1, 1<<22),
-		AllowedDNS:  config.Get("ALLOWED_DNS", ""),
+		Image:    config.Must("TERMINAL_IMAGE"),
+		Runtimes: map[string]bool{},
+		Network:  config.Get("SANDBOX_NETWORK", "ot-sandbox"),
+		// Internal-only network for "egress": "offline" policies; empty
+		// keeps every terminal on SANDBOX_NETWORK.
+		OfflineNetwork: config.Get("OFFLINE_NETWORK", ""),
+		MaxMemory:      config.IntIn("MAX_MEMORY_MB", 8192, 1, 1<<24) << 20,
+		MaxNanoCPUs:    config.IntIn("MAX_CPUS", 4, 1, 4096) * 1e9,
+		MaxPids:        config.IntIn("MAX_PIDS", 2048, 1, 1<<22),
+		AllowedDNS:     config.Get("ALLOWED_DNS", ""),
 	}
 	// A terminal may be pinned to exactly this resolver (the internal
 	// forwarder) and no other. Empty disables the feature; any other value or
@@ -65,6 +68,9 @@ func main() {
 		}
 		rules.RootfsSize = size
 	}
+	if rules.OfflineNetwork != "" && rules.OfflineNetwork == rules.Network {
+		log.Fatal("OFFLINE_NETWORK must differ from SANDBOX_NETWORK")
+	}
 	// Lets the gateway delete home volumes (archiving departed users). Off by
 	// default, so homes are never deleted through the proxy.
 	rules.AllowHomeRemove = os.Getenv("ALLOW_HOME_REMOVE") == "1"
@@ -83,7 +89,7 @@ func main() {
 	// closed and rejects tokens shorter than 32 characters.
 	p := sockproxy.New(rules, config.Get("DOCKER_SOCKET", "/var/run/docker.sock"), config.Secret("PROXY_TOKEN", true))
 	addr := config.Get("LISTEN_ADDR", ":2375")
-	log.Printf("termiplus sockproxy %s listening on %s, images=%v runtimes=%v network=%s home-volume-size=%s rootfs-size=%s home-remove=%v", version, addr, append([]string{rules.Image}, rules.ExtraImages...), keys(rules.Runtimes), rules.Network, orNone(rules.HomeVolumeSize), orNone(rules.RootfsSize), rules.AllowHomeRemove)
+	log.Printf("termiplus sockproxy %s listening on %s, images=%v runtimes=%v network=%s offline-network=%s home-volume-size=%s rootfs-size=%s home-remove=%v", version, addr, append([]string{rules.Image}, rules.ExtraImages...), keys(rules.Runtimes), rules.Network, orNone(rules.OfflineNetwork), orNone(rules.HomeVolumeSize), orNone(rules.RootfsSize), rules.AllowHomeRemove)
 	srv := &http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
 }

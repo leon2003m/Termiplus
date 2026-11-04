@@ -24,9 +24,10 @@ Open WebUI only knows "a terminal connection with a URL". Putting runtime, limit
 - `desktop`: KasmVNC XFCE next to Open Terminal (needs the desktop image)
 - `label`, `description`: display name and one-line help shown by the console and `list_workspaces` (at most 60 and 300 bytes, printable, checked at start). Not hashed.
 - `image`: another image built on the terminal image. It must be in the sockproxy's `EXTRA_IMAGES`.
+- `egress`: `internet` (default) | `offline`. Offline terminals join `OFFLINE_NETWORK` (ot-offline, internal-only) with no resolver; without that network the gateway refuses to start. A container found on the wrong network is recreated (`manager.networkFor`, adoption check in `ensure`).
 - Name: `[a-z0-9]{1,24}` (`naming.go:31-44`)
 
-Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lifecycle.go:154-158` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
+Citations: `internal/gateway/lifecycle.go:23-60` (Policy), `internal/gateway/lifecycle.go:194-201` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
 
 ## Connected to
 
@@ -37,7 +38,7 @@ Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lif
 
 ## If you change this
 
-- **Hits:** (except for `label`/`description`) the config hash, so every container of that policy is recreated; sockproxy limits (a policy above `MAX_MEMORY` and the like is refused at create); Open WebUI connection URLs (outside the repo); entitlements keyed by the name
+- **Hits:** `egress` also picks the network (sockproxy `OfflineNetwork`, firewall offline rules); (except for `label`/`description`) the config hash, so every container of that policy is recreated; sockproxy limits (a policy above `MAX_MEMORY` and the like is refused at create); Open WebUI connection URLs (outside the repo); entitlements keyed by the name
 - **Does not hit:** home contents (renaming `home` points at a *different* volume, the old one stays)
 
 ## Surfaces

@@ -56,6 +56,9 @@ type Config struct {
 	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
 	ForwarderDNS string
+	// OfflineNetwork is the Docker internal network (no route out) that
+	// "egress": "offline" policies join. Empty: offline policies are refused.
+	OfflineNetwork string
 	// BackupDir stores snapshots and archived homes (control API). Empty
 	// disables them; downloads of the current home still work.
 	BackupDir string
@@ -125,6 +128,9 @@ func New(cfg Config) (*Gateway, error) {
 			return nil, errors.New("control API key must differ from the connection and admin keys")
 		}
 	}
+	if cfg.OfflineNetwork != "" && cfg.OfflineNetwork == cfg.Network {
+		return nil, errors.New("offline network must differ from the sandbox network")
+	}
 	for name, p := range cfg.Policies {
 		if !naming.PolicyName.MatchString(name) {
 			return nil, fmt.Errorf("invalid policy name %q", name)
@@ -158,6 +164,17 @@ func New(cfg Config) (*Gateway, error) {
 		if p.Image != "" && !imageRef.MatchString(p.Image) {
 			return nil, fmt.Errorf("policy %s: invalid image %q", name, p.Image)
 		}
+		switch p.Egress {
+		case "", egressInternet:
+		case egressOffline:
+			// Fail closed: an offline policy without its network would
+			// otherwise land on the sandbox network with internet access.
+			if cfg.OfflineNetwork == "" {
+				return nil, fmt.Errorf("policy %s: egress %q needs OFFLINE_NETWORK", name, egressOffline)
+			}
+		default:
+			return nil, fmt.Errorf("policy %s: egress must be %q or %q", name, egressInternet, egressOffline)
+		}
 		if p.MaxPerUser < 0 {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
 		}
@@ -176,17 +193,18 @@ func New(cfg Config) (*Gateway, error) {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }
 	}
 	m := &manager{
-		docker:       cfg.Docker,
-		image:        cfg.Image,
-		network:      cfg.Network,
-		port:         cfg.Port,
-		keySecret:    []byte(cfg.KeySecret),
-		startWait:    cfg.StartWait,
-		idle:         cfg.IdleTimeout,
-		maxRunning:   cfg.MaxRunning,
-		policies:     cfg.Policies,
-		addrFor:      cfg.AddrFor,
-		forwarderDNS: cfg.ForwarderDNS,
+		docker:         cfg.Docker,
+		image:          cfg.Image,
+		network:        cfg.Network,
+		port:           cfg.Port,
+		keySecret:      []byte(cfg.KeySecret),
+		startWait:      cfg.StartWait,
+		idle:           cfg.IdleTimeout,
+		maxRunning:     cfg.MaxRunning,
+		policies:       cfg.Policies,
+		addrFor:        cfg.AddrFor,
+		forwarderDNS:   cfg.ForwarderDNS,
+		offlineNetwork: cfg.OfflineNetwork,
 		exportLimits: exportLimits{
 			timeout:  cfg.ExportTimeout,
 			maxBytes: cfg.ExportMaxBytes,

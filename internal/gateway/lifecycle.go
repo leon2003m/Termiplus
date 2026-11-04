@@ -55,15 +55,26 @@ type Policy struct {
 	// EXTRA_IMAGES. It must be built on the termiplus terminal image (Open
 	// Terminal on the same port, the same start script).
 	Image string `json:"image,omitempty"`
+	// Egress is "internet" (default): the sandbox network, public internet
+	// allowed, internal ranges denied by deploy/firewall.sh. "offline": the
+	// workspace joins OFFLINE_NETWORK, a Docker internal network with no route
+	// out and no DNS; only the gateway reaches it. The gateway refuses to start
+	// with an offline policy when OFFLINE_NETWORK is not configured.
+	Egress string `json:"egress,omitempty"`
 
 	idle time.Duration
 }
 
 func (p Policy) ephemeral() bool { return p.Storage == storageEphemeral }
 
+func (p Policy) offline() bool { return p.Egress == egressOffline }
+
 const (
 	storagePersistent = "persistent"
 	storageEphemeral  = "ephemeral"
+
+	egressInternet = "internet"
+	egressOffline  = "offline"
 )
 
 type instance struct {
@@ -100,6 +111,9 @@ type manager struct {
 	policies     map[string]Policy
 	addrFor      func(name string, port int) string // overridable in tests
 	forwarderDNS string                             // resolver to pin terminals to, or ""
+	// offlineNetwork is the Docker internal network for "egress": "offline"
+	// policies, or "" when none is configured (then no policy may be offline).
+	offlineNetwork string
 
 	stats counters
 
@@ -153,6 +167,32 @@ func (m *manager) containerKey(name string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// networkFor returns the Docker network a policy's containers join.
+func (m *manager) networkFor(pol Policy) string {
+	if pol.offline() {
+		return m.offlineNetwork
+	}
+	return m.network
+}
+
+// networkOK reports whether a container is attached to exactly the network
+// its policy asks for and nothing else. NetworkMode alone is not enough: a
+// network added later with `docker network connect` (by a host admin, or a
+// future bug) shows up only in NetworkSettings.Networks, and would give an
+// offline workspace a route out.
+func (m *manager) networkOK(ct *dockerapi.Container, pol Policy) bool {
+	want := m.networkFor(pol)
+	if ct.HostConfig.NetworkMode != want {
+		return false
+	}
+	nets := ct.NetworkSettings.Networks
+	if len(nets) != 1 {
+		return false
+	}
+	_, ok := nets[want]
+	return ok
+}
+
 // imageFor returns the image a policy's containers run.
 func (m *manager) imageFor(pol Policy) string {
 	if pol.Image != "" {
@@ -168,7 +208,7 @@ func (m *manager) configHash(pol Policy, policyName string) string {
 	pol.Label, pol.Description = "", ""
 	// Policies without their own image hash exactly as before, so existing
 	// containers are not recreated by this field's introduction.
-	b, _ := json.Marshal([]any{m.imageFor(pol), m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
+	b, _ := json.Marshal([]any{m.imageFor(pol), m.networkFor(pol), m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }
@@ -215,8 +255,12 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 			// 64-bit hash collision or tampering: refuse rather than mix users.
 			return nil, fmt.Errorf("container %s belongs to another user", name)
 		}
-		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) {
-			log.Printf("recreating %q: config changed or stopped sandbox", name)
+		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) ||
+			!m.networkOK(ct, pol) {
+			// The networks are checked against the container itself, not only
+			// its config label, so a workspace is never reused on a network with
+			// more egress than its policy allows.
+			log.Printf("recreating %q: config or network changed, or stopped sandbox", name)
 			if err := m.docker.Remove(ctx, name); err != nil {
 				return nil, err
 			}
@@ -468,7 +512,7 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	labels[naming.LabelConfig] = cfg
 	hostConfig := map[string]any{
 		"Runtime":     pol.Runtime,
-		"NetworkMode": m.network,
+		"NetworkMode": m.networkFor(pol),
 		"Memory":      pol.MemoryMB << 20,
 		"NanoCpus":    int64(pol.CPUs * 1e9),
 		"PidsLimit":   pol.Pids,
@@ -478,7 +522,8 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	// socket proxy independently accepts only this one address, so a tampered
 	// gateway cannot point a terminal at any other resolver.
 	env := []string{"OPEN_TERMINAL_API_KEY=" + m.containerKey(name)}
-	if m.forwarderDNS != "" {
+	// Offline workspaces get no resolver: the forwarder is not on their network.
+	if m.forwarderDNS != "" && !pol.offline() {
 		hostConfig["Dns"] = []string{m.forwarderDNS}
 		// Docker still writes its embedded resolver into resolv.conf, which
 		// gVisor cannot reach (#3); the image's start script uses this instead.
@@ -553,15 +598,23 @@ func (m *manager) touch(inst *instance, connDelta int) {
 }
 
 // adopt registers already running managed containers after a gateway restart
-// so the reaper can stop them once idle.
-func (m *manager) adopt(ctx context.Context) {
+// so the reaper can stop them once idle, and removes those on the wrong
+// networks. See checkNetworks.
+func (m *manager) adopt(ctx context.Context) { m.checkNetworks(ctx) }
+
+// checkNetworks lists the running managed containers from Docker, removes any
+// that is attached to a network its policy does not allow (its home volume
+// stays: it may have a route out that its policy forbids, and an adopted
+// instance is reused without another check), and registers the others that
+// the gateway does not know yet, so the reaper sees them. It runs at startup
+// and every minute. Listing from Docker rather than from m.instances means a
+// container whose removal or inspection failed is retried on the next pass.
+func (m *manager) checkNetworks(ctx context.Context) {
 	list, err := m.docker.List(ctx)
 	if err != nil {
-		log.Printf("adopt: %q", err)
+		log.Printf("network check: %q", err)
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	for _, c := range list {
 		if c.State != "running" || len(c.Names) == 0 {
 			continue
@@ -570,19 +623,48 @@ func (m *manager) adopt(ctx context.Context) {
 		if !naming.IsManagedContainer(name) {
 			continue
 		}
-		if _, ok := m.instances[name]; !ok {
-			pol := m.policies[c.Labels[naming.LabelPolicy]]
-			m.instances[name] = &instance{
-				name:      name,
-				userHash:  naming.UserHash(name),
-				userID:    c.Labels[naming.LabelUser],
-				ephemeral: naming.EphemeralName.MatchString(name),
-				idle:      m.idleFor(pol),
-				lastUsed:  time.Now(),
-				desktop:   pol.Desktop,
-			}
+		m.checkNetwork(ctx, name)
+	}
+}
+
+func (m *manager) checkNetwork(ctx context.Context, name string) {
+	l := m.lockFor(name)
+	l.Lock()
+	defer l.Unlock()
+	ct, err := m.docker.Inspect(ctx, name)
+	switch {
+	case errors.Is(err, dockerapi.ErrNotFound):
+		return
+	case err != nil:
+		log.Printf("network check %q: %q", name, err)
+		return
+	case !ct.State.Running:
+		return
+	}
+	pol := m.policies[ct.Config.Labels[naming.LabelPolicy]]
+	if !m.networkOK(ct, pol) {
+		m.mu.Lock()
+		delete(m.instances, name)
+		m.mu.Unlock()
+		log.Printf("removing %q: attached to networks its policy does not allow", name)
+		if err := m.docker.Remove(ctx, name); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
+			log.Printf("remove %q: %q", name, err)
+		}
+		return
+	}
+	m.mu.Lock()
+	if _, ok := m.instances[name]; !ok {
+		m.instances[name] = &instance{
+			name:      name,
+			userHash:  naming.UserHash(name),
+			userID:    ct.Config.Labels[naming.LabelUser],
+			ephemeral: naming.EphemeralName.MatchString(name),
+			idle:      m.idleFor(pol),
+			lastUsed:  time.Now(),
+			desktop:   pol.Desktop,
 		}
 	}
+	m.mu.Unlock()
 }
 
 // reap stops persistent containers and deletes ephemeral ones once they have
@@ -636,6 +718,7 @@ func (m *manager) runReaper(ctx context.Context, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			m.checkNetworks(ctx)
 			m.reap(ctx)
 		}
 	}

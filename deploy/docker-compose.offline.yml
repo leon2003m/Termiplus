@@ -1,0 +1,43 @@
+# Opt-in overlay: an internal-only network for policies with
+# "egress": "offline" (no internet, no LAN, no DNS).
+#
+#   docker compose -f docker-compose.yml [other overlays] -f docker-compose.offline.yml up -d
+#   sudo ./firewall.sh
+#
+# List it after docker-compose.separate-vm.yml if you use that, because that
+# overlay replaces the gateway's networks.
+#
+# Without this overlay nothing changes, and a policy with "egress": "offline"
+# makes the gateway refuse to start (it never falls back to the internet).
+#
+# Offline terminals join ot-offline instead of ot-sandbox. The network is a
+# Docker internal network (no route out) with enable_icc:false (no
+# terminal<->terminal traffic); firewall.sh adds a second layer that drops all
+# traffic on the bridge except gateway -> terminal. A sandboxed root can forge
+# its own IP or MAC but cannot move its container to another bridge, so the
+# boundary holds even against root inside the sandbox.
+name: termiplus
+
+services:
+  sockproxy:
+    environment:
+      OFFLINE_NETWORK: ot-offline
+
+  gateway:
+    environment:
+      OFFLINE_NETWORK: ot-offline
+    networks:
+      ot-offline:
+        ipv4_address: 172.30.1.2 # referenced by firewall.sh
+
+networks:
+  ot-offline:
+    name: ot-offline
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: ot-offline
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24

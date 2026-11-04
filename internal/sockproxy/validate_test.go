@@ -401,3 +401,48 @@ func TestHealthzNeedsNoTokenButReportsDaemon(t *testing.T) {
 		t.Fatalf("healthz with query must need the token, got %d", rec.Code)
 	}
 }
+
+func TestCreateOfflineNetwork(t *testing.T) {
+	name := naming.Container("u1", "default")
+	m := goodCreate(name)
+	hc(m)["NetworkMode"] = "ot-offline"
+
+	// without OFFLINE_NETWORK the second network is refused like any other
+	if _, err := testRules.ValidateCreate(name, body(t, m)); err == nil {
+		t.Fatal("offline network accepted although not configured")
+	}
+
+	rules := testRules
+	rules.OfflineNetwork = "ot-offline"
+	rules.AllowedDNS = "172.30.0.3"
+	out, err := rules.ValidateCreate(name, body(t, m))
+	if err != nil {
+		t.Fatalf("configured offline network rejected: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(out, &got)
+	if nm := got["HostConfig"].(map[string]any)["NetworkMode"]; nm != "ot-offline" {
+		t.Fatalf("NetworkMode forwarded as %v, want ot-offline", nm)
+	}
+
+	// the default network still works with the offline one configured
+	if _, err := rules.ValidateCreate(name, body(t, goodCreate(name))); err != nil {
+		t.Fatalf("default network rejected: %v", err)
+	}
+
+	// an offline terminal is never pinned to the forwarder, which would be an
+	// address it cannot reach anyway; refuse it so no resolver leaks in
+	hc(m)["Dns"] = []string{"172.30.0.3"}
+	if _, err := rules.ValidateCreate(name, body(t, m)); err == nil {
+		t.Fatal("Dns accepted on the offline network")
+	}
+
+	// other networks remain refused
+	for _, nw := range []string{"host", "bridge", "none", "container:x", "ot-offline2", ""} {
+		m := goodCreate(name)
+		hc(m)["NetworkMode"] = nw
+		if _, err := rules.ValidateCreate(name, body(t, m)); err == nil {
+			t.Fatalf("network %q accepted", nw)
+		}
+	}
+}

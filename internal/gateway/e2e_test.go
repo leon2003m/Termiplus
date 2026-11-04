@@ -122,6 +122,7 @@ type fakeDocker struct {
 	image   string                       // ID testImage currently points to; "" = no such image
 	files   map[string]map[string]string // volume -> path below the home -> content
 	tarPuts []string                     // entry names of extracted tars, as received
+	fail    map[string]int               // "METHOD /path" (container by name) -> requests to answer with 500
 }
 
 // mountedVolume returns the volume a fake container mounts, or "".
@@ -186,12 +187,41 @@ type fakeCtr struct {
 	image   string // image ID at create time
 	running bool
 	srv     *httptest.Server
+	// extraNets are networks attached after create (docker network connect).
+	extraNets []string
+}
+
+// networks is what inspect reports in NetworkSettings.Networks.
+func (c *fakeCtr) networks() map[string]any {
+	out := map[string]any{}
+	if hc, ok := c.body["HostConfig"].(map[string]any); ok {
+		if nm, _ := hc["NetworkMode"].(string); nm != "" {
+			out[nm] = map[string]any{}
+		}
+	}
+	for _, n := range c.extraNets {
+		out[n] = map[string]any{}
+	}
+	return out
 }
 
 func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	p := r.URL.Path
+	k := r.Method + " " + p
+	if rest, ok := strings.CutPrefix(p, "/containers/"); ok { // the proxy sends IDs; key by name
+		id, tail, _ := strings.Cut(rest, "/")
+		if c := d.find(id); c != nil {
+			k = r.Method + " /containers/" + c.name + strings.TrimSuffix("/"+tail, "/")
+		}
+	}
+	if d.fail[k] > 0 {
+		d.fail[k]--
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"message":"injected failure"}`)
+		return
+	}
 	switch {
 	case p == "/volumes/create":
 		var v map[string]any
@@ -274,8 +304,10 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 2 && parts[1] == "json":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id": c.id, "Name": "/" + c.name, "Image": c.image,
-				"State":  map[string]any{"Running": c.running},
-				"Config": map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"State":           map[string]any{"Running": c.running},
+				"Config":          map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"HostConfig":      c.body["HostConfig"],
+				"NetworkSettings": map[string]any{"Networks": c.networks()},
 			})
 		case len(parts) == 2 && parts[1] == "archive":
 			d.archive(w, r, c)

@@ -59,10 +59,22 @@ From A as root: `ip addr add 172.30.0.2/24 dev eth0` and try to reach B; and
 `nping --arp --arp-sender-ip 172.30.0.2 <B>` / a forged-source IPv4 packet to B
 (`hping3 -a 172.30.0.2 <B>`).
 **PASS:** every spoofed-source attempt to B is dropped. (ebtables pins
-172.30.0.2 to the gateway MAC — confirm the `TERMIPLUS-AS` ebtables chain exists:
-`ebtables -t filter -L TERMIPLUS-AS`.) Also confirm the **gateway still reaches
+172.30.0.2 to the gateway MAC and to the gateway's bridge port — confirm both
+ebtables chains exist: `ebtables -t filter -L TERMIPLUS-AS` and
+`ebtables -t nat -L TERMIPLUS-PORT`. A also tries with the gateway's MAC
+forged; that must fail too.) Also confirm the **gateway still reaches
 terminals normally** (a terminal session opens and streams) — the RETURN→ACCEPT
 rework must not have broken the control path.
+
+### V16 — a terminal cannot take over another terminal's MAC
+After the terminals start, run `deploy/firewall.sh --lock-ports` (the
+`termiplus-portlock.service` watcher does this live). From A as root set eth0
+to B's MAC and IP and send traffic.
+**PASS:** every terminal port shows `locked on` and `learning off` in
+`bridge -d link`; each terminal's MAC has a static FDB entry on its own port
+and B's entry stays on B's port while A forges it; the gateway keeps reaching
+B (its replies, which carry B's API key, never go to A) and reaches A again
+once A has its own MAC back. Needs Linux and iproute2 6.2 or newer.
 
 ### V3 — persistent-volume ownership (#16)
 Covered by `checks.py persistence` for the honest case. **(manual)** negative

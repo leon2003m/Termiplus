@@ -29,7 +29,7 @@ These are not in the tree, and a change can break them silently. Name the impact
 | Consumer | Depends on |
 |---|---|
 | A live compose project on the host | base `deploy/docker-compose.yml` plus overlays and a git-excluded local override; service, volume, network and secret names; env variable names |
-| Installed firewall units | `/opt/termiplus/deploy/firewall.sh` and the `termiplus-firewall*.{service,path,timer}` units run straight from the checkout; script arguments, `egress.rules` path |
+| Installed firewall units | `/opt/termiplus/deploy/firewall.sh` and the `termiplus-firewall*.{service,path,timer}` and `termiplus-portlock.service` units run straight from the checkout; script arguments (`--if-needed`, `--watch-ports`), `egress.rules` path |
 | Open WebUI terminal connections | the gateway URL shape `/p/<policy>/…`, the gateway API key, `X-User-Id` / `X-Session-Id` headers, policy names |
 | The Open WebUI MCP tool (plugin) | its valves `mcp_url`, `plugin_key`, `ui_url`; tool names and argument shapes; the `_confirmed` convention |
 | Reverse proxy in front | the oauth2-proxy ports and paths for MCP, console, desktop and forward origins |
