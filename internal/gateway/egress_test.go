@@ -181,6 +181,78 @@ func TestAdoptRemovesWrongNetwork(t *testing.T) {
 	}
 }
 
+// failNext makes the fake dockerd answer the next n "METHOD /path" requests
+// with 500.
+func (h *harness) failNext(req string, n int) {
+	h.docker.mu.Lock()
+	defer h.docker.mu.Unlock()
+	if h.docker.fail == nil {
+		h.docker.fail = map[string]int{}
+	}
+	h.docker.fail[req] = n
+}
+
+func TestFailedRemovalRetried(t *testing.T) {
+	h := offlineHarness(t)
+	off := naming.Container("alice", "off")
+	if code, _ := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("offline request failed")
+	}
+	h.connectNetwork(off, "ai_ai")
+	h.failNext("DELETE /containers/"+off, 1)
+	m := h.g.mgr
+	m.checkNetworks(context.Background())
+	if !h.exists(off) {
+		t.Fatal("injected removal failure did not happen")
+	}
+	m.mu.Lock()
+	_, known := m.instances[off]
+	m.mu.Unlock()
+	if known {
+		t.Fatal("instance still routable after a failed removal")
+	}
+	m.checkNetworks(context.Background())
+	if h.exists(off) {
+		t.Fatal("failed removal not retried")
+	}
+}
+
+func TestFailedAdoptInspectRetried(t *testing.T) {
+	h := offlineHarness(t)
+	off := naming.Container("alice", "off")
+	def := naming.Container("alice", "default")
+	if code, _ := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("offline request failed")
+	}
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("default request failed")
+	}
+	h.connectNetwork(off, "ot-sandbox")
+	m := h.g.mgr
+	m.mu.Lock()
+	m.instances = map[string]*instance{} // a fresh gateway knows nothing
+	m.mu.Unlock()
+	h.failNext("GET /containers/"+off+"/json", 1)
+	h.failNext("GET /containers/"+def+"/json", 1)
+	m.adopt(context.Background())
+	m.mu.Lock()
+	_, defKnown := m.instances[def]
+	m.mu.Unlock()
+	if !h.exists(off) || defKnown {
+		t.Fatal("injected inspect failure did not happen")
+	}
+	m.checkNetworks(context.Background())
+	if h.exists(off) {
+		t.Fatal("container skipped at adopt was never checked again")
+	}
+	m.mu.Lock()
+	_, defKnown = m.instances[def]
+	m.mu.Unlock()
+	if !defKnown {
+		t.Fatal("container skipped at adopt was never registered for reaping")
+	}
+}
+
 func TestEgressValidated(t *testing.T) {
 	base := func(egress, offlineNet string) Config {
 		return Config{APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Network: "ot-sandbox",

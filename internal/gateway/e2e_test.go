@@ -122,6 +122,7 @@ type fakeDocker struct {
 	image   string                       // ID testImage currently points to; "" = no such image
 	files   map[string]map[string]string // volume -> path below the home -> content
 	tarPuts []string                     // entry names of extracted tars, as received
+	fail    map[string]int               // "METHOD /path" (container by name) -> requests to answer with 500
 }
 
 // mountedVolume returns the volume a fake container mounts, or "".
@@ -208,6 +209,19 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	p := r.URL.Path
+	k := r.Method + " " + p
+	if rest, ok := strings.CutPrefix(p, "/containers/"); ok { // the proxy sends IDs; key by name
+		id, tail, _ := strings.Cut(rest, "/")
+		if c := d.find(id); c != nil {
+			k = r.Method + " /containers/" + c.name + strings.TrimSuffix("/"+tail, "/")
+		}
+	}
+	if d.fail[k] > 0 {
+		d.fail[k]--
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"message":"injected failure"}`)
+		return
+	}
 	switch {
 	case p == "/volumes/create":
 		var v map[string]any

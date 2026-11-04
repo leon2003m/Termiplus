@@ -582,13 +582,21 @@ func (m *manager) touch(inst *instance, connDelta int) {
 }
 
 // adopt registers already running managed containers after a gateway restart
-// so the reaper can stop them once idle. A container on the wrong networks is
-// removed instead (its home volume stays): it may have a route out that its
-// policy forbids, and an adopted instance is reused without another check.
-func (m *manager) adopt(ctx context.Context) {
+// so the reaper can stop them once idle, and removes those on the wrong
+// networks. See checkNetworks.
+func (m *manager) adopt(ctx context.Context) { m.checkNetworks(ctx) }
+
+// checkNetworks lists the running managed containers from Docker, removes any
+// that is attached to a network its policy does not allow (its home volume
+// stays: it may have a route out that its policy forbids, and an adopted
+// instance is reused without another check), and registers the others that
+// the gateway does not know yet, so the reaper sees them. It runs at startup
+// and every minute. Listing from Docker rather than from m.instances means a
+// container whose removal or inspection failed is retried on the next pass.
+func (m *manager) checkNetworks(ctx context.Context) {
 	list, err := m.docker.List(ctx)
 	if err != nil {
-		log.Printf("adopt: %q", err)
+		log.Printf("network check: %q", err)
 		return
 	}
 	for _, c := range list {
@@ -599,66 +607,48 @@ func (m *manager) adopt(ctx context.Context) {
 		if !naming.IsManagedContainer(name) {
 			continue
 		}
-		pol := m.policies[c.Labels[naming.LabelPolicy]]
-		ct, err := m.docker.Inspect(ctx, name)
-		if err != nil {
-			log.Printf("adopt %q: %q", name, err)
-			continue
-		}
-		if !m.networkOK(ct, pol) {
-			m.removeWrongNetwork(ctx, name)
-			continue
-		}
+		m.checkNetwork(ctx, name)
+	}
+}
+
+func (m *manager) checkNetwork(ctx context.Context, name string) {
+	l := m.lockFor(name)
+	l.Lock()
+	defer l.Unlock()
+	ct, err := m.docker.Inspect(ctx, name)
+	switch {
+	case errors.Is(err, dockerapi.ErrNotFound):
+		return
+	case err != nil:
+		log.Printf("network check %q: %q", name, err)
+		return
+	case !ct.State.Running:
+		return
+	}
+	pol := m.policies[ct.Config.Labels[naming.LabelPolicy]]
+	if !m.networkOK(ct, pol) {
 		m.mu.Lock()
-		if _, ok := m.instances[name]; !ok {
-			m.instances[name] = &instance{
-				name:      name,
-				userHash:  naming.UserHash(name),
-				userID:    c.Labels[naming.LabelUser],
-				ephemeral: naming.EphemeralName.MatchString(name),
-				idle:      m.idleFor(pol),
-				lastUsed:  time.Now(),
-				desktop:   pol.Desktop,
-			}
-		}
+		delete(m.instances, name)
 		m.mu.Unlock()
-	}
-}
-
-// removeWrongNetwork forgets and removes a container attached to networks its
-// policy does not allow. Persistent homes are volumes and stay.
-func (m *manager) removeWrongNetwork(ctx context.Context, name string) {
-	m.mu.Lock()
-	delete(m.instances, name)
-	m.mu.Unlock()
-	log.Printf("removing %q: attached to networks its policy does not allow", name)
-	if err := m.docker.Remove(ctx, name); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
-		log.Printf("remove %q: %q", name, err)
-	}
-}
-
-// checkNetworks re-inspects every running workspace and removes any that has
-// been attached to another network since it was created or adopted.
-func (m *manager) checkNetworks(ctx context.Context) {
-	m.mu.Lock()
-	names := make([]string, 0, len(m.instances))
-	for name := range m.instances {
-		names = append(names, name)
-	}
-	m.mu.Unlock()
-	for _, name := range names {
-		l := m.lockFor(name)
-		l.Lock()
-		ct, err := m.docker.Inspect(ctx, name)
-		switch {
-		case errors.Is(err, dockerapi.ErrNotFound):
-		case err != nil:
-			log.Printf("network check %q: %q", name, err)
-		case !m.networkOK(ct, m.policies[ct.Config.Labels[naming.LabelPolicy]]):
-			m.removeWrongNetwork(ctx, name)
+		log.Printf("removing %q: attached to networks its policy does not allow", name)
+		if err := m.docker.Remove(ctx, name); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
+			log.Printf("remove %q: %q", name, err)
 		}
-		l.Unlock()
+		return
 	}
+	m.mu.Lock()
+	if _, ok := m.instances[name]; !ok {
+		m.instances[name] = &instance{
+			name:      name,
+			userHash:  naming.UserHash(name),
+			userID:    ct.Config.Labels[naming.LabelUser],
+			ephemeral: naming.EphemeralName.MatchString(name),
+			idle:      m.idleFor(pol),
+			lastUsed:  time.Now(),
+			desktop:   pol.Desktop,
+		}
+	}
+	m.mu.Unlock()
 }
 
 // reap stops persistent containers and deletes ephemeral ones once they have
