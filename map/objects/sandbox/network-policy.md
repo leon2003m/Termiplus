@@ -13,7 +13,7 @@ The admin-set DNS entries and internal egress allowances for terminals. In code:
 
 ## Why this shape
 
-The default is fixed in code: public egress allowed, internal destinations denied. Admins need narrow exceptions ("this one internal Git server on 443") without editing the firewall. The rule is enforced in Go, not in the shell script: a fixed deny-list (loopback, link-local including the metadata address, CGNAT, the sandbox subnet) can never be opened, whatever the admin enters. The firewall re-checks it anyway.
+The default is fixed in code: public egress allowed, internal destinations denied. Admins need narrow exceptions ("this one internal Git server on 443") without editing the firewall. The rule is enforced in Go, not in the shell script: a fixed deny-list (loopback, link-local including the metadata address, CGNAT, the sandbox and offline subnets) can never be opened, whatever the admin enters. The firewall re-checks it anyway.
 
 ## Shape
 
@@ -22,7 +22,7 @@ The default is fixed in code: public egress allowed, internal destinations denie
 - `Store.Put` validates, then writes policy, hosts and egress files atomically. A rejected policy changes nothing on disk.
 - Files (netpolicy overlay): `NETPOLICY_FILE`, `NETPOLICY_DNSMASQ_FILE`, `NETPOLICY_EGRESS_FILE` under `deploy/netpolicy/`.
 
-Citations: `internal/netpolicy/netpolicy.go:1-11` (rule), `:43` (Policy), `:50-61` (denyList), `:72` (Validate), `internal/netpolicy/render.go:18`, `:41`, `internal/netpolicy/store.go:85` (Put), `:142` (writeFilesAtomic), `internal/gateway/admin.go:65` (putNetPolicy), `deploy/docker-compose.netpolicy.yml:55-59`
+Citations: `internal/netpolicy/netpolicy.go:1-11` (rule), `:43` (Policy), `:50-62` (denyList), `:72` (Validate), `internal/netpolicy/render.go:18`, `:41`, `internal/netpolicy/store.go:85` (Put), `:142` (writeFilesAtomic), `internal/gateway/admin.go:65` (putNetPolicy), `deploy/docker-compose.netpolicy.yml:55-59`
 
 ## Connected to
 

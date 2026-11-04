@@ -171,7 +171,7 @@ List every such image in the socket proxy's `EXTRA_IMAGES` (comma-separated, exa
 
 ### Offline workspaces
 
-A policy with `"egress": "offline"` runs its terminals on a second network, `ot-offline`, that has no route out at all: no internet, no LAN, no DNS, no host services. Only the gateway can reach them, so Open WebUI, the file browser and the console keep working. Useful for untrusted code or data that must not leave the machine.
+A policy with `"egress": "offline"` runs its terminals on a second network, `ot-offline`, that has no route out at all: no internet, no LAN, no DNS, no host services. Only the gateway can reach them, so Open WebUI, the file browser and the console keep working. Useful for untrusted code or data that must not leave the machine. Docker's embedded resolver (127.0.0.11) does not forward outside names on an internal network: a lookup there returns SERVFAIL, so DNS cannot be used as a side channel either.
 
 ```json
 "offline": { "runtime": "runsc", "memory_mb": 2048, "cpus": 2, "pids": 512, "egress": "offline" }

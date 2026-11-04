@@ -149,6 +149,10 @@ rules_current() {
   if offline_present; then
     iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
     iptables -C TERMIPLUS-IN -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
+    iptables -C TERMIPLUS -o "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
+    ip6tables -C FORWARD -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
+    ip6tables -C FORWARD -o "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
+    ip6tables -C INPUT -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
     m=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
     if [ -n "$m" ]; then
       echo "$pinned" | grep -F -- "--ip-src $OFFLINE_GATEWAY " | grep -qiF -- "$m" || return 1
