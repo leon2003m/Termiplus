@@ -26,6 +26,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Changed
 
+- Record the alpha checkpoint and the decision to use Open WebUI's native
+  Desktop and Browser workspace, retaining termiplus isolation and storage.
+
 - Desktop defaults now use Dolphin, matching dark Qt/GTK settings, a green accent and a compact bottom dock with Firefox, Dolphin, terminal and Kate. Existing home-folder customizations remain in place.
 
 - MQTT discovery messages are off by default. Set `MQTT_DISCOVERY_PREFIX` to your hub's discovery prefix to keep sending them; the MQTT docs and examples no longer name a specific hub.
