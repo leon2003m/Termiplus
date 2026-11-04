@@ -247,8 +247,11 @@ scenario V16 "a terminal cannot take over another terminal's MAC"
 # Terminals started after the stack: lock their ports like termiplus-portlock.service would.
 expect "firewall.sh --lock-ports locks and pins every terminal port" 0 "$WORK/deploy/firewall.sh" --lock-ports
 fdb_dev() { bridge fdb show br ot-sandbox | awk -v m="$1" 'tolower($1) == tolower(m) && / static/ && !/permanent/ {print $3; exit}'; }
-BMAC="$(asroot "$B" "cat /sys/class/net/eth0/address" 2>/dev/null || true)"
-AMAC="$(asroot "$A" "cat /sys/class/net/eth0/address" 2>/dev/null || true)"
+# Read the MAC via "ip link", not /sys/class/net/eth0/address: Sysbox's
+# virtualized /sys does not expose that sysfs file, so the cat returns empty.
+mac_of() { asroot "$1" "ip -o link show eth0" 2>/dev/null | grep -oE 'ether [0-9a-f:]{17}' | awk '{print $2}'; }
+BMAC="$(mac_of "$B")"
+AMAC="$(mac_of "$A")"
 APORT="$(fdb_dev "$AMAC")"
 BPORT="$(fdb_dev "$BMAC")"
 expect "A and B have static entries on different ports" 0 test -n "$APORT" -a -n "$BPORT" -a "$APORT" != "$BPORT"
