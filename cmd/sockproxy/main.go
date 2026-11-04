@@ -23,9 +23,9 @@ func main() {
 		Image:       config.Must("TERMINAL_IMAGE"),
 		Runtimes:    map[string]bool{},
 		Network:     config.Get("SANDBOX_NETWORK", "ot-sandbox"),
-		MaxMemory:   config.Int("MAX_MEMORY_MB", 8192) << 20,
-		MaxNanoCPUs: config.Int("MAX_CPUS", 4) * 1e9,
-		MaxPids:     config.Int("MAX_PIDS", 2048),
+		MaxMemory:   config.IntIn("MAX_MEMORY_MB", 8192, 1, 1<<24) << 20,
+		MaxNanoCPUs: config.IntIn("MAX_CPUS", 4, 1, 4096) * 1e9,
+		MaxPids:     config.IntIn("MAX_PIDS", 2048, 1, 1<<22),
 		AllowedDNS:  config.Get("ALLOWED_DNS", ""),
 	}
 	// A terminal may be pinned to exactly this resolver (the internal

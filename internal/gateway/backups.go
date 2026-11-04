@@ -37,6 +37,11 @@ var backupID = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z(-[0-9]{3})?$`)
 
 var errNoBackup = errors.New("no such backup")
 
+// errWouldPrune: a snapshot create that would delete the oldest snapshot was
+// not allowed to (security audit run 2: the MCP confirmation is checked
+// against a separate list, so overlapping creates could both pass it).
+var errWouldPrune = errors.New("the snapshot limit is reached: a new snapshot would delete the oldest")
+
 // Backup describes one stored archive.
 type Backup struct {
 	ID      string    `json:"id"`
@@ -101,9 +106,11 @@ func (b *backupStore) list(kind, volume string) ([]Backup, error) {
 }
 
 // create writes a new backup from write (which produces the plain tar) and,
-// for snapshots, deletes the oldest beyond keep. Nothing is left behind if
-// write fails.
-func (b *backupStore) create(kind, volume string, write func(io.Writer) error) (Backup, error) {
+// for snapshots, deletes the oldest beyond keep. Without prune, a snapshot
+// that would push out the oldest is refused with errWouldPrune instead; the
+// check runs under b.mu with the commit. Nothing is left behind if write
+// fails.
+func (b *backupStore) create(kind, volume string, prune bool, write func(io.Writer) error) (Backup, error) {
 	dir, err := b.homeDir(kind, volume)
 	if err != nil {
 		return Backup{}, err
@@ -136,16 +143,21 @@ func (b *backupStore) create(kind, volume string, write func(io.Writer) error) (
 	now := time.Now().UTC()
 	base := now.Format("20060102T150405Z")
 	next := 0
-	if existing, err := b.list(kind, volume); err == nil {
-		for _, e := range existing {
-			if e.ID == base && next < 1 {
-				next = 1
-			}
-			if n, ok := strings.CutPrefix(e.ID, base+"-"); ok {
-				var v int
-				if _, err := fmt.Sscanf(n, "%03d", &v); err == nil && v+1 > next {
-					next = v + 1
-				}
+	existing, err := b.list(kind, volume)
+	if err != nil {
+		return Backup{}, err
+	}
+	if kind == kindSnapshot && !prune && len(existing) >= b.keep {
+		return Backup{}, errWouldPrune
+	}
+	for _, e := range existing {
+		if e.ID == base && next < 1 {
+			next = 1
+		}
+		if n, ok := strings.CutPrefix(e.ID, base+"-"); ok {
+			var v int
+			if _, err := fmt.Sscanf(n, "%03d", &v); err == nil && v+1 > next {
+				next = v + 1
 			}
 		}
 	}

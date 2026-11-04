@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -88,5 +90,50 @@ func TestServerEnforcesEntitlements(t *testing.T) {
 	resp = toolCall(t, s, "persist-tok", "request_session", map[string]any{"workspace": "desk", "persistent": true})
 	if resp.Error == nil || resp.Error.Code != codeConfirmRequired {
 		t.Fatalf("bob got %+v, want confirmation required", resp.Error)
+	}
+}
+
+func TestEntitlementsFileFailsClosedAndRejectsUnknownWorkspace(t *testing.T) {
+	s := NewServer(NewStaticAuthenticator(nil), NewStubBackend("https://gw.example"), "test")
+	if _, err := s.WithEntitlementsFile(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("missing entitlement file was accepted")
+	}
+	path := filepath.Join(t.TempDir(), "entitlements.json")
+	if err := os.WriteFile(path, []byte(`{"default":"deny","workspaces":{"deskk":["team-a"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WithEntitlementsFile(path); err == nil {
+		t.Fatal("unknown workspace typo was accepted")
+	}
+	if err := os.WriteFile(path, []byte(`{"default":"deny","workspaces":{"desk":["team-a"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WithEntitlementsFile(path); err != nil {
+		t.Fatalf("valid entitlement file rejected: %v", err)
+	}
+}
+
+func TestRevokedWorkspaceHidesExistingSessions(t *testing.T) {
+	b := NewStubBackend("https://gw.example")
+	s := NewServer(NewStaticAuthenticator(map[string]Principal{
+		"user-tok": {UserID: "alice"},
+	}), b, "test")
+	created := toolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"})
+	var session Session
+	result(t, created, &session)
+
+	deny, err := ParseEntitlements([]byte(`{"default":"deny","workspaces":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithEntitlements(deny)
+
+	var sessions []Session
+	result(t, toolCall(t, s, "user-tok", "list_sessions", nil), &sessions)
+	if len(sessions) != 0 {
+		t.Fatalf("revoked session remains visible: %+v", sessions)
+	}
+	if err := s.entitledSession(t.Context(), Principal{UserID: "alice"}, session.ID); err == nil {
+		t.Fatal("revoked session remains usable")
 	}
 }

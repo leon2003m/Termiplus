@@ -193,7 +193,7 @@ func (s *Server) audit(p Principal, t *tool, args map[string]any, outcome string
 		e.Error = err.Error()
 	}
 	if werr := s.auditLog.Append(e); werr != nil {
-		log.Printf("audit: could not record %s by %s: %v", t.name, p.UserID, werr)
+		log.Printf("audit: could not record %q by %q: %q", t.name, p.UserID, werr)
 	}
 }
 

@@ -10,7 +10,11 @@ import (
 
 func TestAdminToolsNeedRoleAndConfirmation(t *testing.T) {
 	s := newTestServer()
-	if _, err := s.WithEntitlementsFile(filepath.Join(t.TempDir(), "ent.json")); err != nil {
+	path := filepath.Join(t.TempDir(), "ent.json")
+	if err := os.WriteFile(path, []byte(`{"default":"allow","workspaces":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WithEntitlementsFile(path); err != nil {
 		t.Fatal(err)
 	}
 	for _, tool := range []string{"get_network_policy", "get_entitlements", "set_entitlements", "set_network_policy"} {
@@ -27,6 +31,9 @@ func TestAdminToolsNeedRoleAndConfirmation(t *testing.T) {
 
 func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ent.json")
+	if err := os.WriteFile(path, []byte(`{"default":"allow","workspaces":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	s := newTestServer()
 	if _, err := s.WithEntitlementsFile(path); err != nil {
 		t.Fatal(err)
@@ -34,7 +41,11 @@ func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 	var got struct{ Entitlements Entitlements }
 	result(t, toolCall(t, s, "admin-tok", "get_entitlements", nil), &got)
 	if got.Entitlements.Default != "allow" {
-		t.Fatalf("missing file should mean allow: %+v", got)
+		t.Fatalf("initial explicit allow policy changed: %+v", got)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// Invalid input is refused and changes nothing.
@@ -42,8 +53,12 @@ func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 	if resp := toolCall(t, s, "admin-tok", "set_entitlements", bad); resp.Error != nil || !strings.Contains(string(resp.Result), "isError") {
 		t.Fatalf("invalid entitlements: %+v %s", resp.Error, resp.Result)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("invalid entitlements were written")
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("invalid entitlements changed the persisted file: before=%s after=%s", before, after)
 	}
 
 	set := map[string]any{"_confirmed": true, "entitlements": map[string]any{"default": "deny", "workspaces": map[string]any{"desk": []any{RolePersist}}}}
@@ -70,7 +85,11 @@ func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 
 func TestUIAdmin(t *testing.T) {
 	f := newUIFixture(t)
-	if _, err := f.ui.srv.WithEntitlementsFile(filepath.Join(t.TempDir(), "ent.json")); err != nil {
+	path := filepath.Join(t.TempDir(), "ent.json")
+	if err := os.WriteFile(path, []byte(`{"default":"allow","workspaces":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ui.srv.WithEntitlementsFile(path); err != nil {
 		t.Fatal(err)
 	}
 	ent := `{"default":"allow","workspaces":{"desk":["desk-users"]}}`

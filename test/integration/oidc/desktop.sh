@@ -55,7 +55,7 @@ PUBLIC="http://127.0.0.1:$PORT"   # console (desk-auth)
 SPUBLIC="http://127.0.0.1:$SPORT" # desktops (desk-stream-auth), another origin
 
 cfg="$(cd "$ROOT/deploy" && MCP_OIDC_ISSUER_URL="$ISSUER" DESKTOP_PUBLIC_URL="$PUBLIC" DESKTOP_STREAM_URL="$SPUBLIC" \
-  FORWARD_PUBLIC_URL=http://127.0.0.1:1 TERMINAL_IMAGE=unused \
+  FORWARD_PUBLIC_URL=http://127.0.0.1:1 TERMINAL_IMAGE=unused DOCKER_GID=0 \
   docker compose -p "$P" -f docker-compose.yml -f docker-compose.mcp.yml -f docker-compose.desktop.yml \
   config --format json)"
 PROXY_IMAGE="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["desk-auth"]["image"])' <<<"$cfg")"
@@ -106,11 +106,13 @@ SUB_A="$(curl -s -m 10 -d grant_type=password -d client_id=termiplus-desktop -d 
   python3 -c 'import base64,json,sys; t=json.load(sys.stdin)["access_token"].split(".")[1]; print(json.loads(base64.urlsafe_b64decode(t+"="*(-len(t)%4)))["sub"])')"
 mkdir "$WORK/data"
 printf '{"subjects":{"%s":"owui-alice"}}\n' "$SUB_A" >"$WORK/data/identities.json"
+printf '{"default":"allow","workspaces":{}}\n' >"$WORK/data/entitlements.json"
 chmod 755 "$WORK/data"
-chmod 644 "$WORK/data/identities.json"
+chmod 644 "$WORK/data/identities.json" "$WORK/data/entitlements.json"
 docker run -d --name "$P-mcp" --network "$P-desk" --network-alias mcp \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true -v "$WORK/data:/data:ro" \
   -e MCP_AUTH=proxy -e MCP_STUB_BACKEND=1 -e MCP_IDENTITY_FILE=/data/identities.json -e UI_LISTEN_ADDR=:8091 \
+  -e MCP_ENTITLEMENTS_FILE=/data/entitlements.json -e MCP_OWUI_PLUGIN_KEY=plugin-key-it-0123456789abcdef0123456789 \
   -e STREAM_LISTEN_ADDR=:8093 -e CONSOLE_PUBLIC_URL="$PUBLIC" -e STREAM_PUBLIC_URL="$SPUBLIC" \
   -e CONTROL_API_KEY=control-key-it-0123456789abcdef0123456789 \
   "$MCP_IMAGE" >/dev/null

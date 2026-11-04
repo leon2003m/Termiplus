@@ -380,7 +380,7 @@ func newHarness(t *testing.T, opts ...func(*harnessOpts)) *harness {
 		Policies: map[string]Policy{
 			"default": {Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256},
 			"sysbox":  {Runtime: "sysbox-runc", MemoryMB: 2048, CPUs: 2, Pids: 512, Home: "default"},
-			"scratch": {Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256, Storage: "ephemeral", IdleTimeout: "10m", MaxPerUser: 2},
+			"scratch": {Label: "Temporary terminal", Description: "Deleted when idle.", Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256, Storage: "ephemeral", IdleTimeout: "10m", MaxPerUser: 2},
 		},
 		StartWait: 5 * time.Second, IdleTimeout: time.Hour, MaxRunning: 3,
 		Docker: dockerapi.New(proxy.URL, "proxy-token"),
@@ -1010,6 +1010,28 @@ func TestPolicyImageValidated(t *testing.T) {
 	}
 }
 
+func TestPolicyDisplayTextValidated(t *testing.T) {
+	for _, p := range []Policy{
+		{Label: strings.Repeat("x", maxPolicyLabel+1)},
+		{Description: strings.Repeat("x", maxPolicyDescription+1)},
+		{Label: "two\nlines"},
+		{Description: "bell\a"},
+		{Label: "bad \xff utf8"},
+	} {
+		p.Runtime, p.MemoryMB, p.CPUs, p.Pids = "runsc", 1, 1, 1
+		cfg := Config{APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Policies: map[string]Policy{"default": p}}
+		if _, err := New(cfg); err == nil {
+			t.Fatalf("display text accepted: %+v", p)
+		}
+	}
+	cfg := Config{APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Policies: map[string]Policy{
+		"default": {Label: "Temporäres Terminal", Description: "Wird nach 15 Minuten gelöscht.", Runtime: "runsc", MemoryMB: 1, CPUs: 1, Pids: 1},
+	}}
+	if _, err := New(cfg); err != nil {
+		t.Fatalf("valid display text rejected: %v", err)
+	}
+}
+
 // Policies without their own image must hash exactly as before the field
 // existed, or every existing workspace would be recreated on upgrade.
 func TestConfigHashUnchangedWithoutImage(t *testing.T) {
@@ -1026,6 +1048,11 @@ func TestConfigHashUnchangedWithoutImage(t *testing.T) {
 	sum := sha256.Sum256(b)
 	if got, want := m.configHash(pol, "default"), hex.EncodeToString(sum[:8]); got != want {
 		t.Fatalf("hash changed: %s != %s", got, want)
+	}
+	labelled := pol
+	labelled.Label, labelled.Description = "Terminal", "Your own terminal."
+	if got, want := m.configHash(labelled, "default"), hex.EncodeToString(sum[:8]); got != want {
+		t.Fatalf("label or description changed the hash: %s != %s", got, want)
 	}
 	pol.Image = "registry.local/ot-python:1"
 	if m.configHash(pol, "default") == hex.EncodeToString(sum[:8]) {

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"termiplus/internal/naming"
 )
@@ -130,5 +132,27 @@ func TestConcurrentStartsRespectCaps(t *testing.T) {
 	}
 	if n := countRunning(h, naming.ContainerPrefix); n > 3 || ok > 3 || ok == 0 {
 		t.Fatalf("running %d, ok %d; MaxRunning is 3", n, ok)
+	}
+}
+
+// A container's /health that redirects must not make the gateway request the
+// redirect target, and does not count as healthy (security audit run 2).
+func TestHealthChecksDoNotFollowRedirects(t *testing.T) {
+	marker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("health check followed a redirect to %s", r.URL)
+	}))
+	defer marker.Close()
+	term := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, marker.URL+"/internal", http.StatusFound)
+	}))
+	defer term.Close()
+
+	m := &manager{startWait: 700 * time.Millisecond}
+	inst := &instance{name: "t", addr: strings.TrimPrefix(term.URL, "http://")}
+	if m.probe(context.Background(), inst) {
+		t.Fatal("probe: a redirect counted as healthy")
+	}
+	if err := m.waitReady(context.Background(), inst); err == nil {
+		t.Fatal("waitReady: a redirect counted as ready")
 	}
 }

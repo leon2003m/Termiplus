@@ -83,14 +83,14 @@ func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID,
 	// Only now, after authentication, may a container be started.
 	inst, err := g.mgr.ensure(r.Context(), userID, sessionID, policyName, pol)
 	if err != nil {
-		log.Printf("ws ensure %s/%s: %v", userID, policyName, err)
+		log.Printf("ws ensure %q/%q: %q", userID, policyName, err)
 		writeClose(conn, 1011, "Terminal unavailable")
 		return
 	}
 
 	up, upReader, err := dialUpstream(inst.addr, rest, r.URL.RawQuery, r.Header)
 	if err != nil {
-		log.Printf("ws dial %s: %v", inst.name, err)
+		log.Printf("ws dial %q: %q", inst.name, err)
 		g.mgr.invalidate(inst.name)
 		writeClose(conn, 1011, "Terminal unavailable")
 		return

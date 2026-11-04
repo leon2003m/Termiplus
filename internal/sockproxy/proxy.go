@@ -81,7 +81,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			p.failed.Add(1)
 		}
-		log.Printf("DENY %s %s: %v", r.Method, r.URL.RequestURI(), err)
+		log.Printf("DENY %q %q: %q", r.Method, r.URL.RequestURI(), err)
 		writeJSON(w, status, map[string]string{"message": "termiplus-sockproxy: " + err.Error()})
 		return
 	}
@@ -302,13 +302,13 @@ func (p *Proxy) forwardStream(w http.ResponseWriter, r *http.Request, method, p2
 		return fmt.Errorf("daemon: %w", err)
 	}
 	defer resp.Body.Close()
-	log.Printf("ALLOW %s %s -> %d", method, p2, resp.StatusCode)
+	log.Printf("ALLOW %q %q -> %d", method, p2, resp.StatusCode)
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		log.Printf("copy archive: %v", err)
+		log.Printf("copy archive: %q", err)
 	}
 	return nil
 }
@@ -338,7 +338,7 @@ func (p *Proxy) imageID(w http.ResponseWriter, r *http.Request, p2, ref string) 
 	if !imageID.MatchString(info.ID) {
 		return fmt.Errorf("unexpected image id from daemon")
 	}
-	log.Printf("ALLOW GET %s -> 200 (id only)", p2)
+	log.Printf("ALLOW GET %q -> 200 (id only)", p2)
 	writeJSON(w, http.StatusOK, map[string]string{"Id": info.ID})
 	return nil
 }
@@ -410,7 +410,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, method, p2 strin
 		return fmt.Errorf("daemon: %w", err)
 	}
 	defer resp.Body.Close()
-	log.Printf("ALLOW %s %s -> %d", method, p2, resp.StatusCode)
+	log.Printf("ALLOW %q %q -> %d", method, p2, resp.StatusCode)
 	for _, h := range []string{"Content-Type", "Api-Version", "Docker-Experimental", "Ostype"} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
@@ -419,7 +419,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, method, p2 strin
 	w.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(w, io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		log.Printf("copy response: %v", err)
+		log.Printf("copy response: %q", err)
 	}
 	return nil
 }

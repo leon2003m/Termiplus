@@ -53,7 +53,11 @@ var ErrUnauthenticated = errors.New("unauthenticated")
 
 // Workspace is a launchable profile/image the caller may request.
 type Workspace struct {
-	Name        string `json:"name"`
+	ConnectionName string `json:"connection_name,omitempty"`
+	IdleSeconds    int64  `json:"idle_seconds,omitempty"`
+	Name           string `json:"name"`
+	// Label is the human-readable name; empty means use Name.
+	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Persistent reports whether this workspace can be launched with a
 	// persistent home (still subject to the caller's entitlement).
@@ -64,13 +68,17 @@ type Workspace struct {
 
 // Session is a provisioned sandbox and the handle used to reach it.
 type Session struct {
-	ID          string `json:"session_id"`
-	Workspace   string `json:"workspace"`
-	UserID      string `json:"-"`
-	Persistent  bool   `json:"persistent"`
-	Label       string `json:"label,omitempty"`
-	Running     bool   `json:"running"`
-	TerminalURL string `json:"terminal_url,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
+	LastActivity  string `json:"last_activity,omitempty"`
+	IdleExpiresAt string `json:"idle_expires_at,omitempty"`
+	IdleSeconds   int64  `json:"idle_seconds,omitempty"`
+	ID            string `json:"session_id"`
+	Workspace     string `json:"workspace"`
+	UserID        string `json:"-"`
+	Persistent    bool   `json:"persistent"`
+	Label         string `json:"label,omitempty"`
+	Running       bool   `json:"running"`
+	TerminalURL   string `json:"terminal_url,omitempty"`
 	// TerminalSession must be sent as X-Session-Id to reach an ephemeral
 	// session through TerminalURL; empty for persistent sessions.
 	TerminalSession string `json:"terminal_session,omitempty"`

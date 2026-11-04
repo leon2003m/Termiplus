@@ -110,18 +110,120 @@ func (s *Store) write(p Policy) error {
 	}
 	j = append(j, '\n')
 
-	// Render the derived files first; if any temp write fails, the live files
-	// are untouched because renames happen only after all temps are written.
-	if err := writeFileAtomic(s.dnsPath, []byte(v.DnsmasqHosts())); err != nil {
-		return fmt.Errorf("render dns: %w", err)
-	}
-	if err := writeFileAtomic(s.egressPath, []byte(v.EgressRules())); err != nil {
-		return fmt.Errorf("render egress: %w", err)
-	}
-	if err := writeFileAtomic(s.policyPath, j); err != nil {
-		return fmt.Errorf("persist policy: %w", err)
+	// Stage all three files before publishing any of them. If a rename fails,
+	// already-published files are rolled back to their previous bytes.
+	if err := writeFilesAtomic([]fileChange{
+		{path: s.dnsPath, data: []byte(v.DnsmasqHosts())},
+		{path: s.egressPath, data: []byte(v.EgressRules())},
+		{path: s.policyPath, data: j},
+	}); err != nil {
+		return err
 	}
 	s.current = stored
+	return nil
+}
+
+type fileChange struct {
+	path string
+	data []byte
+}
+
+type stagedFile struct {
+	fileChange
+	tmp       string
+	old       []byte
+	existed   bool
+	published bool
+}
+
+// writeFilesAtomic stages every replacement first, then publishes the files.
+// A publication failure triggers rollback of prior renames. Rollback failures
+// are returned explicitly because mixed runtime policy must not be hidden.
+func writeFilesAtomic(changes []fileChange) error {
+	staged := make([]stagedFile, 0, len(changes))
+	cleanup := func() {
+		for _, f := range staged {
+			if f.tmp != "" {
+				_ = os.Remove(f.tmp)
+			}
+		}
+	}
+	for _, change := range changes {
+		f := stagedFile{fileChange: change}
+		old, err := os.ReadFile(change.path)
+		switch {
+		case err == nil:
+			f.old, f.existed = old, true
+		case os.IsNotExist(err):
+		default:
+			cleanup()
+			return fmt.Errorf("read prior %s: %w", change.path, err)
+		}
+		tmp, err := os.CreateTemp(filepath.Dir(change.path), ".tmp-"+filepath.Base(change.path)+"-*")
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("stage %s: %w", change.path, err)
+		}
+		f.tmp = tmp.Name()
+		staged = append(staged, f)
+		if _, err := tmp.Write(change.data); err != nil {
+			_ = tmp.Close()
+			cleanup()
+			return fmt.Errorf("stage %s: %w", change.path, err)
+		}
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			cleanup()
+			return fmt.Errorf("sync %s: %w", change.path, err)
+		}
+		if err := tmp.Close(); err != nil {
+			cleanup()
+			return fmt.Errorf("close %s: %w", change.path, err)
+		}
+		// 0644: the forwarder and firewall run as other users and must read these.
+		if err := os.Chmod(f.tmp, 0o644); err != nil {
+			cleanup()
+			return fmt.Errorf("chmod %s: %w", change.path, err)
+		}
+	}
+	for i := range staged {
+		f := &staged[i]
+		if err := os.Rename(f.tmp, f.path); err != nil {
+			var rollbackErr error
+			for j := i - 1; j >= 0; j-- {
+				prev := staged[j]
+				if !prev.published {
+					continue
+				}
+				var e error
+				if prev.existed {
+					e = writeFileAtomic(prev.path, prev.old)
+				} else {
+					e = os.Remove(prev.path)
+					if os.IsNotExist(e) {
+						e = nil
+					}
+				}
+				if e != nil {
+					rollbackErr = fmt.Errorf("%v; rollback %s: %w", rollbackErr, prev.path, e)
+				}
+			}
+			cleanup()
+			if rollbackErr != nil {
+				return fmt.Errorf("publish %s: %w (rollback incomplete: %v)", f.path, err, rollbackErr)
+			}
+			return fmt.Errorf("publish %s: %w (previous files restored)", f.path, err)
+		}
+		f.tmp = ""
+		f.published = true
+	}
+	for _, f := range staged {
+		if dir, err := os.Open(filepath.Dir(f.path)); err == nil {
+			_ = dir.Sync()
+			_ = dir.Close()
+		}
+	}
+	cleanup()
 	return nil
 }
 

@@ -257,7 +257,7 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = ids.Record("kc-alice", "alice")
-	srv.WithUIBase("https://console.example")
+	srv.WithUIBase("https://console.example").WithDesktopBase("https://desk.example")
 	dh, err := mcp.NewDesktopHandler(srv, ids, h.gw.URL, testControlKey)
 	if err != nil {
 		t.Fatal(err)
@@ -344,7 +344,8 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 	}
 	// WebSockets only from the desktop's own origin.
 	ws := map[string]string{"Connection": "Upgrade", "Upgrade": "websocket"}
-	for _, origin := range []string{"", "null", "https://evil.example"} {
+	// The console's origin is not the desktops' origin either.
+	for _, origin := range []string{"", "null", "https://evil.example", "https://console.example", "http://desk.example"} {
 		hdr := map[string]string{"Origin": origin}
 		for k, v := range ws {
 			hdr[k] = v
@@ -352,6 +353,15 @@ func TestDesktopStreamThroughMCP(t *testing.T) {
 		if code, _ := get("kc-alice", path+"websockify", hdr); code != http.StatusForbidden {
 			t.Errorf("WebSocket from Origin %q: want 403, got %d", origin, code)
 		}
+	}
+	// From the desktops' configured origin (STREAM_PUBLIC_URL) the upgrade
+	// reaches the desktop.
+	hdr := map[string]string{"Origin": "https://desk.example"}
+	for k, v := range ws {
+		hdr[k] = v
+	}
+	if code, _ := get("kc-alice", path+"websockify", hdr); code == http.StatusForbidden || code == http.StatusNotFound {
+		t.Errorf("WebSocket from the desktops' origin: got %d", code)
 	}
 	if code, _ := h.control(t, http.MethodDelete, "sessions/"+s.ID, testControlKey, "alice", ""); code != http.StatusOK && code != http.StatusNoContent {
 		t.Fatalf("remove alice's desktop: %d", code)

@@ -4,7 +4,7 @@ on:
   push:
     branches: [dev]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, alpha]
   schedule:
     - cron: "17 5 * * 1" # Mondays 05:17 UTC
   workflow_dispatch:
@@ -129,6 +129,7 @@ jobs:
           - { image: gateway, context: ., target: gateway }
           - { image: sockproxy, context: ., target: sockproxy }
           - { image: terminal, context: image, target: "" }
+          - { image: mcp, context: ., target: mcp }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

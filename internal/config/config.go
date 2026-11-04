@@ -38,6 +38,30 @@ func Int(name string, def int64) int64 {
 	return n
 }
 
+// IntIn is Int limited to [lo, hi]; a value outside exits, so limits derived
+// from it (shifted, multiplied) cannot overflow.
+func IntIn(name string, def, lo, hi int64) int64 {
+	n := Int(name, def)
+	if n < lo || n > hi {
+		log.Fatalf("%s must be between %d and %d", name, lo, hi)
+	}
+	return n
+}
+
+// SmallInt reads an int setting in [lo, hi] (counts, ports); a value outside
+// exits.
+func SmallInt(name string, def, lo, hi int) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil || n < int64(lo) || n > int64(hi) {
+		log.Fatalf("%s must be a whole number between %d and %d", name, lo, hi)
+	}
+	return int(n)
+}
+
 func Duration(name string, def time.Duration) time.Duration {
 	v := os.Getenv(name)
 	if v == "" {

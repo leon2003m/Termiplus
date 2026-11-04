@@ -1,6 +1,6 @@
-# Opt-in overlay: the gateway publishes its metrics to an MQTT broker, for
-# example the Mosquitto app of Home Assistant, which then shows them as
-# sensors of a "termiplus" device (MQTT discovery).
+# Opt-in overlay: the gateway publishes its metrics to an MQTT broker. With
+# MQTT_DISCOVERY_PREFIX set it also sends MQTT discovery messages, so hubs that
+# read them show the metrics as sensors of a "termiplus" device.
 #
 #   docker compose -f docker-compose.yml [other overlays] -f docker-compose.mqtt.yml up -d
 #
@@ -8,7 +8,7 @@
 #   MQTT_URL              required: mqtt://host:1883 or mqtts://host:8883
 #   MQTT_USERNAME         optional
 #   MQTT_TOPIC_PREFIX     default termiplus  (state: <prefix>/state, <prefix>/status)
-#   MQTT_DISCOVERY_PREFIX default homeassistant; "off" disables discovery
+#   MQTT_DISCOVERY_PREFIX default empty (no discovery messages)
 #   MQTT_INTERVAL         default 30s
 # The password is read from deploy/secrets/mqtt_password (create it, empty if
 # the broker needs none).
@@ -19,11 +19,11 @@
 services:
   gateway:
     environment:
-      MQTT_URL: ${MQTT_URL:?set MQTT_URL, e.g. mqtt://homeassistant.local:1883}
+      MQTT_URL: ${MQTT_URL:?set MQTT_URL, e.g. mqtt://broker.local:1883}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
       MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
       MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-termiplus}
-      MQTT_DISCOVERY_PREFIX: ${MQTT_DISCOVERY_PREFIX:-homeassistant}
+      MQTT_DISCOVERY_PREFIX: ${MQTT_DISCOVERY_PREFIX:-}
       MQTT_INTERVAL: ${MQTT_INTERVAL:-30s}
     secrets: [mqtt_password]
     networks:

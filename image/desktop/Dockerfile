@@ -21,9 +21,35 @@ RUN curl -fsSL -o /tmp/kasmvnc.deb \
     && echo "${KASMVNC_SHA256}  /tmp/kasmvnc.deb" | sha256sum -c - \
     && apt-get update && apt-get install -y --no-install-recommends \
         /tmp/kasmvnc.deb xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-terminal xfce4-settings \
-        dbus-x11 x11-xserver-utils fonts-dejavu-core \
+        libglib2.0-bin maim python3-pil dbus-x11 x11-xserver-utils fonts-dejavu-core \
+        dolphin kio-extras qt6ct kde-style-breeze kate ristretto xfce4-appfinder xfce4-whiskermenu-plugin exo-utils xdg-utils \
+        firefox-esr webext-ublock-origin-firefox arc-theme papirus-icon-theme fonts-inter fonts-noto-color-emoji fonts-noto-cjk librsvg2-common \
     && rm -rf /var/lib/apt/lists/* /tmp/kasmvnc.deb \
     && usermod -aG ssl-cert user
+
+# Desktop defaults: theme, icons, fonts, panel, default applications, Firefox
+# policies and the wallpaper (files/). They apply until a user changes them in
+# Settings; those changes are kept in ~/.config on the home volume.
+COPY files/ /
+# The wallpaper: replace files/usr/share/backgrounds/termiplus/default.svg
+# before building to change it for everyone. xfdesktop shows its built-in
+# default image until a user picks another one, so that path points here.
+RUN dpkg-divert --quiet --local --rename --add /usr/share/backgrounds/xfce/xfce-x.svg \
+    && ln -s ../termiplus/default.svg /usr/share/backgrounds/xfce/xfce-x.svg
+
+ENV QT_QPA_PLATFORMTHEME=qt6ct \
+    QT_LOGGING_RULES="*.debug=false;kf.solid.backends.udisks2.warning=false"
+
+COPY theme.py /usr/local/libexec/termiplus/theme.py
+RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-dev-bin qt6-svg-plugins libkf6iconthemes-bin thunar gvfs \
+    && rm /usr/share/dbus-1/services/org.xfce.Thunar.FileManager1.service \
+    && python3 /usr/local/libexec/termiplus/theme.py \
+    && apt-get purge -y libglib2.0-dev-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+# Restore our hidden Dolphin compatibility entry after installing the XFCE trash backend.
+COPY files/usr/share/applications/thunar.desktop /usr/share/applications/thunar.desktop
+COPY files/usr/share/xfce4/helpers/thunar.desktop /usr/share/xfce4/helpers/thunar.desktop
 
 COPY start-desktop.sh /usr/local/bin/start-desktop
 RUN chmod 755 /usr/local/bin/start-desktop

@@ -19,6 +19,18 @@ if [ -n "$pw" ]; then
     echo "start-desktop: OPEN_TERMINAL_DESKTOP_PASSWORD must be at least 32 characters" >&2
     exit 1
   fi
+  # Seed only missing app preferences; existing personal settings win.
+  for app in qt6ct gtk-3.0; do
+    mkdir -p "$HOME/.config/$app"
+    for config in /etc/xdg/"$app"/*; do
+      [ -f "$config" ] || continue
+      target="$HOME/.config/$app/${config##*/}"
+      [ -e "$target" ] || cp "$config" "$target"
+    done
+  done
+  for config in kdeglobals dolphinrc; do
+    [ -e "$HOME/.config/$config" ] || cp "/etc/xdg/$config" "$HOME/.config/$config"
+  done
   mkdir -p "$HOME/.vnc"
   cat >"$HOME/.vnc/kasmvnc.yaml" <<'YAML'
 network:
@@ -36,7 +48,7 @@ security:
   brute_force_protection:
     blacklist_threshold: 0
 YAML
-  printf '#!/bin/sh\nexec dbus-launch --exit-with-session startxfce4\n' >"$HOME/.vnc/xstartup"
+  printf '#!/bin/sh\nexec dbus-launch --exit-with-session /usr/local/libexec/termiplus/start-xfce\n' >"$HOME/.vnc/xstartup"
   chmod 700 "$HOME/.vnc/xstartup"
   touch "$HOME/.vnc/.de-was-selected"
   # Write permission only (no "owner"): the stream user cannot use the admin API.

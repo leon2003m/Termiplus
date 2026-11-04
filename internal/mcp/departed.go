@@ -104,7 +104,7 @@ func (s *Server) WithDeparted(store *DepartedStore, after time.Duration) *Server
 func (s *Server) RunDeparted(ctx context.Context, interval time.Duration) {
 	for {
 		if err := s.CheckDeparted(ctx); err != nil {
-			log.Printf("departed users: %v", err)
+			log.Printf("departed users: %q", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -196,7 +196,7 @@ func (s *Server) CheckDeparted(ctx context.Context) error {
 	for _, e := range comeBack {
 		res, err := s.userHomes(ctx, hb, e.Subject, "restore")
 		s.audit(systemPrincipal, s.findTool("manage_departed"), map[string]any{"action": "restore", "subject": e.Subject, "username": e.Username, "automatic": true}, outcome(err), err)
-		log.Printf("departed users: %s (%s) is back: restored %s (err %v)", e.Username, e.Subject, res, err)
+		log.Printf("departed users: %q (%q) is back: restored %q (err %q)", e.Username, e.Subject, res, errText(err))
 	}
 	sort.Strings(due)
 	for _, sub := range due {
@@ -251,7 +251,7 @@ func (s *Server) archiveDeparted(ctx context.Context, hb HomeBackend, subject st
 	username := e.Username
 	d.store.mu.Unlock()
 	s.audit(systemPrincipal, s.findTool("manage_departed"), map[string]any{"action": "archive", "subject": subject, "username": username, "automatic": automatic}, outcome(err), err)
-	log.Printf("departed users: archived %s (%s): %s (err %v)", username, subject, res, err)
+	log.Printf("departed users: archived %q (%q): %q (err %q)", username, subject, res, errText(err))
 	if err != nil {
 		return err
 	}
@@ -325,4 +325,12 @@ func (s *Server) departedTools() []tool {
 		},
 		handle: s.manageDeparted,
 	}}
+}
+
+// errText is err's message, or "none", for logs that report success too.
+func errText(err error) string {
+	if err == nil {
+		return "none"
+	}
+	return err.Error()
 }

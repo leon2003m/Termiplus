@@ -68,3 +68,41 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 }
+
+func TestBoundedInts(t *testing.T) {
+	t.Setenv("TP_TEST_N", "")
+	if got := SmallInt("TP_TEST_N", 7, 1, 10); got != 7 {
+		t.Fatalf("default: %d", got)
+	}
+	t.Setenv("TP_TEST_N", "10")
+	if got := SmallInt("TP_TEST_N", 7, 1, 10); got != 10 {
+		t.Fatalf("upper bound: %d", got)
+	}
+	if got := IntIn("TP_TEST_N", 7, 10, 10); got != 10 {
+		t.Fatalf("IntIn: %d", got)
+	}
+}
+
+// A value outside the range (or one that would overflow an int32 before the
+// check) stops the program instead of wrapping.
+func TestBoundedIntsExitOutsideRange(t *testing.T) {
+	if os.Getenv("TP_TEST_CHILD") == "1" {
+		if os.Getenv("TP_TEST_FN") == "IntIn" {
+			IntIn("TP_TEST_N", 4, 1, 4096)
+		} else {
+			SmallInt("TP_TEST_N", 4, 1, 1024)
+		}
+		return
+	}
+	for _, c := range []struct{ fn, v string }{
+		{"SmallInt", "0"}, {"SmallInt", "1025"}, {"SmallInt", "4294967297"}, {"SmallInt", "x"},
+		{"IntIn", "0"}, {"IntIn", "9223372036854775807"},
+	} {
+		cmd := exec.Command(os.Args[0], "-test.run=TestBoundedIntsExitOutsideRange")
+		cmd.Env = append(os.Environ(), "TP_TEST_CHILD=1", "TP_TEST_FN="+c.fn, "TP_TEST_N="+c.v)
+		out, err := cmd.CombinedOutput()
+		if ee, ok := err.(*exec.ExitError); !ok || ee.Success() {
+			t.Errorf("%s(%q): want non-zero exit, got err=%v out=%q", c.fn, c.v, err, out)
+		}
+	}
+}

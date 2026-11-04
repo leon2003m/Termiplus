@@ -4,7 +4,7 @@ on:
   push:
     branches: [dev, alpha]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, alpha]
   workflow_dispatch:
 
 permissions:
@@ -39,8 +39,14 @@ jobs:
         run: .github/scripts/install-tools.sh actionlint hadolint
       - name: gofmt
         run: |
+          gofmt -d . > gofmt.diff || true
           out="$(gofmt -l .)"
-          if [ -n "$out" ]; then echo "::error::not gofmt-formatted:"; echo "$out"; exit 1; fi
+          if [ -n "$out" ]; then
+            echo "::error::not gofmt-formatted:"
+            echo "$out"
+            cat gofmt.diff
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: staticcheck
@@ -57,13 +63,19 @@ jobs:
           exit "$rc"
       - name: shellcheck
         if: success() || failure()
-        run: shellcheck --format=gcc deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/alpha-e2e.sh test/integration/oidc/run.sh test/integration/oidc/desktop.sh image/desktop/start-desktop.sh .github/scripts/*.sh
+        run: shellcheck --format=gcc deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/alpha-e2e.sh test/integration/oidc/run.sh test/integration/oidc/desktop.sh image/desktop/start-desktop.sh image/desktop/files/usr/local/bin/thunar image/desktop/files/usr/local/libexec/termiplus/start-xfce .github/scripts/*.sh
       - name: hadolint
         if: success() || failure()
         run: hadolint --format tty Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
       - name: actionlint
         if: success() || failure()
         run: actionlint
+      - name: system map twins
+        if: success() || failure()
+        run: |
+          for f in map/AGENTS.md map/routing.md; do
+            cmp -s map/CLAUDE.md "$f" || { echo "::error file=$f::differs from map/CLAUDE.md (run make map)"; exit 1; }
+          done
 
   test:
     name: test
@@ -157,3 +169,14 @@ jobs:
           docker build -q --build-arg BASE=termiplus-terminal:ci -t termiplus-desktop:ci image/desktop
       - name: Smoke test (Open Terminal, KasmVNC, gateway stream route)
         run: .github/scripts/desktop-smoke.sh termiplus-desktop:ci
+
+  oidc-integration:
+    name: OIDC proxy integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run real-Keycloak and oauth2-proxy integration tests
+        run: bash test/integration/oidc/run.sh

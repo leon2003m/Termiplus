@@ -78,7 +78,7 @@ func (g *Gateway) serveStream(w http.ResponseWriter, r *http.Request, userID, re
 		},
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("stream %s: %v", name, err)
+			log.Printf("stream %q: %q", name, err)
 			httpError(w, http.StatusBadGateway, "desktop unavailable")
 		},
 	}

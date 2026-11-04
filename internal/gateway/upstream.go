@@ -37,6 +37,18 @@ var (
 	forwardTransport = newUpstreamTransport(5 * time.Minute)
 )
 
+// healthClient checks a container's /health. It never follows a redirect:
+// the gateway reaches networks a terminal may not, so a user's health server
+// must not be able to send the gateway's request elsewhere (security audit
+// run 2). Only a direct 200 counts as healthy.
+var healthClient = &http.Client{
+	Transport: newUpstreamTransport(2 * time.Second),
+	Timeout:   2 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 // maxProxiedConns caps concurrent desktop-stream and forwarded connections
 // per container, so one user cannot tie up the shared gateway with them.
 const maxProxiedConns = 32

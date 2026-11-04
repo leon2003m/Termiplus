@@ -3,7 +3,7 @@ REVISION  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 REGISTRY  ?= ghcr.io/leon2003m
 BUILD_ARGS = --build-arg VERSION=$(VERSION) --build-arg REVISION=$(REVISION)
 
-.PHONY: help fmt fmt-check vet staticcheck test test-plugin cover lint check build scan clean
+.PHONY: help fmt fmt-check vet staticcheck test test-plugin cover lint check map build scan clean
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -33,11 +33,23 @@ cover: ## Tests with coverage report
 	go tool cover -func=coverage.out | tail -1
 
 lint: fmt-check vet staticcheck ## Go linters
-	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/desktop/start-desktop.sh image/start image/start-docker
+	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/desktop/start-desktop.sh image/desktop/files/usr/local/bin/thunar image/desktop/files/usr/local/libexec/termiplus/start-xfce image/start image/start-docker
 	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
 	actionlint
+	@# Scripts that hosts and tests run directly must stay executable in git.
+	@for f in deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh test/integration/*.sh test/integration/oidc/*.sh .github/scripts/*.sh; do \
+	  git ls-files -s "$$f" | grep -q '^100755' || { echo "$$f is not executable in git (git update-index --chmod=+x $$f)"; exit 1; }; \
+	done
+	@# map/AGENTS.md and map/routing.md are generated from map/CLAUDE.md (make map).
+	@for f in map/AGENTS.md map/routing.md; do \
+	  cmp -s map/CLAUDE.md "$$f" || { echo "$$f differs from map/CLAUDE.md (run make map)"; exit 1; }; \
+	done
 
 check: lint test test-plugin ## Everything CI checks on code and config
+
+map: ## Regenerate map/AGENTS.md and map/routing.md from map/CLAUDE.md
+	cp map/CLAUDE.md map/AGENTS.md
+	cp map/CLAUDE.md map/routing.md
 
 build: ## Build all images locally
 	docker build $(BUILD_ARGS) --target gateway   -t $(REGISTRY)/termiplus-gateway:$(VERSION) .

@@ -87,7 +87,7 @@ func (g *Gateway) reset(ctx context.Context, userID, name string) (*sessionInfo,
 	return &s, nil
 }
 
-func (g *Gateway) snapshot(ctx context.Context, userID, ws string) (Backup, error) {
+func (g *Gateway) snapshot(ctx context.Context, userID, ws string, prune bool) (Backup, error) {
 	if g.backups == nil {
 		return Backup{}, errNoBackups
 	}
@@ -98,7 +98,7 @@ func (g *Gateway) snapshot(ctx context.Context, userID, ws string) (Backup, erro
 	if _, err := g.mgr.ownedVolume(ctx, userID, home); err != nil {
 		return Backup{}, err
 	}
-	return g.backups.create(kindSnapshot, naming.Volume(userID, home), func(w io.Writer) error {
+	return g.backups.create(kindSnapshot, naming.Volume(userID, home), prune, func(w io.Writer) error {
 		return g.mgr.exportHome(ctx, userID, home, w)
 	})
 }
@@ -139,7 +139,7 @@ func (g *Gateway) archiveUser(ctx context.Context, userID string) ([]ArchivedHom
 		} else if err != nil {
 			return out, err
 		}
-		b, err := g.backups.create(kindArchived, naming.Volume(userID, home), func(w io.Writer) error {
+		b, err := g.backups.create(kindArchived, naming.Volume(userID, home), false, func(w io.Writer) error {
 			return g.mgr.exportHome(ctx, userID, home, w)
 		})
 		if err != nil {
@@ -148,7 +148,7 @@ func (g *Gateway) archiveUser(ctx context.Context, userID string) ([]ArchivedHom
 		res := ArchivedHome{Home: home, Backup: b.ID}
 		if err := g.mgr.removeHome(ctx, userID, home); err != nil {
 			res.Note = "archived, but the home was kept: " + err.Error()
-			log.Printf("archive %s/%s: %v", userID, home, err)
+			log.Printf("archive %q/%q: %q", userID, home, err)
 		} else {
 			res.Removed = true
 		}
@@ -199,7 +199,7 @@ func (g *Gateway) restoreUser(ctx context.Context, userID string) ([]RestoredHom
 //
 //	GET    archive                    the current home as a tar
 //	GET    snapshots                  list
-//	POST   snapshots                  create
+//	POST   snapshots                  create (?prune=1 may delete the oldest)
 //	GET    snapshots/<id>             download (.tar.gz)
 //	POST   snapshots/<id>/restore     restore (stops the workspaces of the home)
 //	DELETE snapshots/<id>             delete
@@ -226,18 +226,21 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"home": home, "snapshots": list, "keep": g.backups.keep})
 	case rest == "snapshots" && r.Method == http.MethodPost:
-		b, err := g.snapshot(r.Context(), userID, ws)
+		b, err := g.snapshot(r.Context(), userID, ws, r.URL.Query().Get("prune") == "1")
 		switch {
+		case errors.Is(err, errWouldPrune):
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
+			httpError(w, http.StatusConflict, err.Error()+"; it needs a confirmation")
 		case errors.Is(err, errNoHome):
 			httpError(w, http.StatusNotFound, "this workspace has no home yet: start it once")
 		case errors.Is(err, errExportTooLarge):
-			log.Printf("snapshot %s/%s: %v", userID, home, err)
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusRequestEntityTooLarge, "the home is larger than the export limit (EXPORT_MAX_BYTES); large sparse files count at their full size")
 		case err != nil:
-			log.Printf("snapshot %s/%s: %v", userID, home, err)
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusBadGateway, "could not take the snapshot")
 		default:
-			log.Printf("snapshot %s of %s/%s", b.ID, userID, home)
+			log.Printf("snapshot %q of %q/%q", b.ID, userID, home)
 			writeJSON(w, http.StatusCreated, b)
 		}
 	case rest == "snapshots":
@@ -264,10 +267,10 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		case errors.Is(err, errNoBackup):
 			httpError(w, http.StatusNotFound, "no such snapshot")
 		case err != nil:
-			log.Printf("restore %s of %s/%s: %v", parts[1], userID, home, err)
+			log.Printf("restore %q of %q/%q: %q", parts[1], userID, home, err)
 			httpError(w, http.StatusBadGateway, "could not restore the snapshot")
 		default:
-			log.Printf("restored snapshot %s of %s/%s", parts[1], userID, home)
+			log.Printf("restored snapshot %q of %q/%q", parts[1], userID, home)
 			writeJSON(w, http.StatusOK, map[string]any{"restored": parts[1], "home": home})
 		}
 	default:

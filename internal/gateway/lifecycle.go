@@ -21,6 +21,12 @@ import (
 // Policy describes one kind of terminal environment. Users reach a policy via
 // the URL prefix /p/<name>; Open WebUI group access decides who sees which.
 type Policy struct {
+	// Label is the name shown to people (e.g. "Temporary terminal"). Optional;
+	// the policy name is shown without it.
+	Label string `json:"label,omitempty"`
+	// Description is a short help text shown under the label. Optional.
+	Description string `json:"description,omitempty"`
+
 	Runtime  string  `json:"runtime"`
 	MemoryMB int64   `json:"memory_mb"`
 	CPUs     float64 `json:"cpus"`
@@ -61,17 +67,21 @@ const (
 )
 
 type instance struct {
-	name      string
-	userHash  string
-	userID    string // owner, from the request that created it or its label
-	ephemeral bool
-	idle      time.Duration
-	addr      string // host:port reachable from the gateway
-	key       string // per-container Open Terminal API key
-	ready     bool
-	lastUsed  time.Time
-	conns     int // open WebSocket sessions (terminal and desktop stream)
-	desktop   bool
+	previewMu   sync.Mutex
+	previewData []byte
+	previewAt   time.Time
+	name        string
+	userHash    string
+	userID      string // owner, from the request that created it or its label
+	ephemeral   bool
+	idle        time.Duration
+	addr        string // host:port reachable from the gateway
+	key         string // per-container Open Terminal API key
+	ready       bool
+	lastUsed    time.Time
+	startedAt   time.Time
+	conns       int // open WebSocket sessions (terminal and desktop stream)
+	desktop     bool
 	// controlSession is the session id of an ephemeral sandbox created through
 	// the control API, so it can be listed with a usable handle. In memory only
 	// (ephemerals are throwaway); never set for Open WebUI chat sandboxes.
@@ -153,6 +163,9 @@ func (m *manager) imageFor(pol Policy) string {
 
 func (m *manager) configHash(pol Policy, policyName string) string {
 	secretFP := sha256.Sum256(m.keySecret)
+	// Display texts do not affect the container: changing them must not
+	// recreate anyone's workspace.
+	pol.Label, pol.Description = "", ""
 	// Policies without their own image hash exactly as before, so existing
 	// containers are not recreated by this field's introduction.
 	b, _ := json.Marshal([]any{m.imageFor(pol), m.network, m.port, pol, policyName, hex.EncodeToString(secretFP[:4]), m.forwarderDNS})
@@ -182,7 +195,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 			m.touch(inst, 0)
 			return inst, nil
 		}
-		log.Printf("%s no longer answers, re-checking container", name)
+		log.Printf("%q no longer answers, re-checking container", name)
 		m.invalidate(name)
 	} else {
 		m.mu.Unlock()
@@ -203,7 +216,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 			return nil, fmt.Errorf("container %s belongs to another user", name)
 		}
 		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) {
-			log.Printf("recreating %s: config changed or stopped sandbox", name)
+			log.Printf("recreating %q: config changed or stopped sandbox", name)
 			if err := m.docker.Remove(ctx, name); err != nil {
 				return nil, err
 			}
@@ -211,7 +224,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 		} else if !pol.ephemeral() && !ct.State.Running && m.imageOutdated(ctx, ct, m.imageFor(pol)) {
 			// Same config but the image tag now points to a newer image. Only a
 			// stopped workspace is recreated; its home volume is kept.
-			log.Printf("recreating %s: stopped and image updated", name)
+			log.Printf("recreating %q: stopped and image updated", name)
 			m.stats.imageRecreates.Add(1)
 			if err := m.docker.Remove(ctx, name); err != nil {
 				return nil, err
@@ -237,7 +250,7 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 		if err := m.docker.Start(ctx, name); err != nil {
 			return nil, err
 		}
-		log.Printf("started %s (policy %s)", name, policyName)
+		log.Printf("started %q (policy %q)", name, policyName)
 		m.stats.starts.Add(1)
 	}
 
@@ -259,6 +272,9 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 	}
 	inst.ready = true
 	inst.lastUsed = time.Now()
+	if ct == nil || !ct.State.Running {
+		inst.startedAt = inst.lastUsed
+	}
 
 	m.mu.Lock()
 	if old := m.instances[name]; old != nil {
@@ -278,7 +294,7 @@ func (m *manager) imageOutdated(ctx context.Context, ct *dockerapi.Container, re
 	}
 	id, err := m.docker.ImageID(ctx, ref)
 	if err != nil {
-		log.Printf("image check for %s skipped: %v", strings.TrimPrefix(ct.Name, "/"), err)
+		log.Printf("image check for %q skipped: %q", strings.TrimPrefix(ct.Name, "/"), err)
 		return false
 	}
 	return id != ct.Image
@@ -409,7 +425,7 @@ func (m *manager) makeRoomForEphemeral(ctx context.Context, list []dockerapi.Lis
 		if err := m.docker.Remove(ctx, victim); err != nil {
 			return err
 		}
-		log.Printf("deleted %s to make room for a new sandbox", victim)
+		log.Printf("deleted %q to make room for a new sandbox", victim)
 		m.stats.sandboxesDeleted.Add(1)
 		for i, n := range mine {
 			if n == victim {
@@ -481,7 +497,7 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 	if err := m.docker.Create(ctx, name, spec); err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
-	log.Printf("created %s (policy %s, runtime %s, storage %s)", name, policyName, pol.Runtime, labels[naming.LabelStorage])
+	log.Printf("created %q (policy %q, runtime %q, storage %q)", name, policyName, pol.Runtime, labels[naming.LabelStorage])
 	return nil
 }
 
@@ -493,7 +509,7 @@ func (m *manager) probe(ctx context.Context, inst *instance) bool {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+inst.addr+"/health", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := healthClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -504,10 +520,9 @@ func (m *manager) probe(ctx context.Context, inst *instance) bool {
 func (m *manager) waitReady(ctx context.Context, inst *instance) error {
 	ctx, cancel := context.WithTimeout(ctx, m.startWait)
 	defer cancel()
-	client := &http.Client{Timeout: 2 * time.Second}
 	for {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+inst.addr+"/health", nil)
-		resp, err := client.Do(req)
+		resp, err := healthClient.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -542,7 +557,7 @@ func (m *manager) touch(inst *instance, connDelta int) {
 func (m *manager) adopt(ctx context.Context) {
 	list, err := m.docker.List(ctx)
 	if err != nil {
-		log.Printf("adopt: %v", err)
+		log.Printf("adopt: %q", err)
 		return
 	}
 	m.mu.Lock()
@@ -596,16 +611,16 @@ func (m *manager) reap(ctx context.Context) {
 		switch {
 		case still && inst.ephemeral:
 			if err := m.docker.Remove(ctx, name); err != nil {
-				log.Printf("remove %s: %v", name, err)
+				log.Printf("remove %q: %q", name, err)
 			} else {
-				log.Printf("deleted idle sandbox %s", name)
+				log.Printf("deleted idle sandbox %q", name)
 				m.stats.sandboxesDeleted.Add(1)
 			}
 		case still:
 			if err := m.docker.Stop(ctx, name, 10); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
-				log.Printf("stop %s: %v", name, err)
+				log.Printf("stop %q: %q", name, err)
 			} else {
-				log.Printf("stopped idle %s", name)
+				log.Printf("stopped idle %q", name)
 				m.stats.idleStops.Add(1)
 			}
 		}

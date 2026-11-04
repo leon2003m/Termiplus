@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"termiplus/internal/naming"
 	"termiplus/internal/netpolicy"
@@ -122,21 +123,21 @@ func (g *Gateway) serveHomes(w http.ResponseWriter, r *http.Request, rest string
 		g.exportHome(w, r, userID, home)
 	case sub == "archive" && r.Method == http.MethodPut:
 		if err := g.mgr.importHome(r.Context(), userID, home, r.Body); err != nil {
-			log.Printf("admin: import home %s of %s: %v", home, userID, err)
+			log.Printf("admin: import home %q of %q: %q", home, userID, err)
 			httpError(w, http.StatusBadGateway, "could not restore the home")
 			return
 		}
-		log.Printf("admin: restored home %s of %s", home, userID)
+		log.Printf("admin: restored home %q of %q", home, userID)
 		w.WriteHeader(http.StatusNoContent)
 	case sub == "archive":
 		methodNotAllowed(w, "GET, PUT")
 	case sub == "" && r.Method == http.MethodDelete:
 		if err := g.mgr.removeHome(r.Context(), userID, home); err != nil {
-			log.Printf("admin: remove home %s of %s: %v", home, userID, err)
+			log.Printf("admin: remove home %q of %q: %q", home, userID, err)
 			httpError(w, http.StatusBadGateway, "could not remove the home")
 			return
 		}
-		log.Printf("admin: removed home %s of %s", home, userID)
+		log.Printf("admin: removed home %q of %q", home, userID)
 		w.WriteHeader(http.StatusNoContent)
 	case sub == "":
 		methodNotAllowed(w, "DELETE")
@@ -155,6 +156,7 @@ func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, hom
 	// The reader paces the export and the helper lock is held meanwhile;
 	// manager.exportHome adds the deadline and the byte cap.
 	err := g.mgr.exportHome(r.Context(), userID, home, sw)
+	_ = sw.SetWriteDeadline(time.Time{}) // the error response may still need writing
 	switch {
 	case err == nil && !sw.started:
 		sw.header()
@@ -164,10 +166,10 @@ func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, hom
 	case errors.Is(err, errExportTooLarge) && !sw.started:
 		httpError(w, http.StatusRequestEntityTooLarge, "the home is larger than the export limit")
 	case err != nil && !sw.started:
-		log.Printf("export home %s of %s: %v", home, userID, err)
+		log.Printf("export home %q of %q: %q", home, userID, err)
 		httpError(w, http.StatusBadGateway, "could not read the home")
 	case err != nil:
-		log.Printf("export home %s of %s: %v (stream cut)", home, userID, err)
+		log.Printf("export home %q of %q: %q (stream cut)", home, userID, err)
 	}
 }
 
@@ -185,6 +187,12 @@ func (s *startWriter) Write(p []byte) (int, error) {
 		s.w.WriteHeader(http.StatusOK)
 	}
 	return s.w.Write(p)
+}
+
+// SetWriteDeadline lets exportHome's deadline end a write the client does
+// not read.
+func (s *startWriter) SetWriteDeadline(t time.Time) error {
+	return http.NewResponseController(s.w).SetWriteDeadline(t)
 }
 
 func methodNotAllowed(w http.ResponseWriter, allow string) {
