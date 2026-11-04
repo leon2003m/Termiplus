@@ -66,6 +66,16 @@ forged; that must fail too.) Also confirm the **gateway still reaches
 terminals normally** (a terminal session opens and streams) — the RETURN→ACCEPT
 rework must not have broken the control path.
 
+### V16 — a terminal cannot take over another terminal's MAC
+After the terminals start, run `deploy/firewall.sh --lock-ports` (the
+`termiplus-portlock.service` watcher does this live). From A as root set eth0
+to B's MAC and IP and send traffic.
+**PASS:** every terminal port shows `locked on` and `learning off` in
+`bridge -d link`; each terminal's MAC has a static FDB entry on its own port
+and B's entry stays on B's port while A forges it; the gateway keeps reaching
+B (its replies, which carry B's API key, never go to A) and reaches A again
+once A has its own MAC back. Needs Linux and iproute2 6.2 or newer.
+
 ### V3 — persistent-volume ownership (#16)
 Covered by `checks.py persistence` for the honest case. **(manual)** negative
 case: pre-create a volume named like another user's home with a foreign

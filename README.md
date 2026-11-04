@@ -43,6 +43,7 @@ image/Dockerfile            terminal image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
+                            termiplus-portlock.service,
                             docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
                             docker-compose.mcp-netpolicy.yml (opt-in: network policy via MCP),
                             docker-compose.mcp-users.yml (opt-in: group membership via MCP),
@@ -97,6 +98,11 @@ cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
 sudo ./firewall.sh
 sudo cp termiplus-firewall-watch.service termiplus-firewall-watch.timer /etc/systemd/system/
 sudo systemctl enable --now termiplus-firewall-watch.timer
+#    Terminal ports: lock each new terminal's bridge port to its own MAC as soon
+#    as it starts, so a terminal cannot forge another's MAC (needs Linux and
+#    iproute2 >= 6.2):
+sudo cp termiplus-portlock.service /etc/systemd/system/
+sudo systemctl enable --now termiplus-portlock.service
 ```
 
 7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:

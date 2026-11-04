@@ -33,7 +33,7 @@ Citations: `internal/netpolicy/netpolicy.go:1-11` (rule), `:43` (Policy), `:50-6
 
 ## If you change this
 
-- **Hits:** the deny-list is a security boundary (see [AGENTS.md](../../../AGENTS.md)); the `egress.rules` format is parsed again by `deploy/firewall.sh:47`; `test/integration/validate.sh`
+- **Hits:** the deny-list is a security boundary (see [AGENTS.md](../../../AGENTS.md)); the `egress.rules` format is parsed again by `deploy/firewall.sh:70`; `test/integration/validate.sh`
 - **Does not hit:** sockproxy, container naming
 
 ## Surfaces

@@ -33,6 +33,15 @@
 # offline terminals, plus the replies on those connections. The bridge is a
 # Docker internal network with enable_icc:false, so it has no route out even
 # without these rules; they are the second layer.
+#
+# Locked bridge ports: every other port on both bridges (the terminals) runs
+# with learning off and "locked on", and gets a static FDB entry for the MAC
+# Docker assigned to that container. A terminal that forges another terminal's
+# MAC can then neither move that MAC to its own port nor send with it, so it
+# never receives the gateway's replies (which carry the other terminal's API
+# key). New terminals are locked by --watch-ports (termiplus-portlock.service)
+# within a second; a port whose MAC is not known yet stays locked without an
+# entry, i.e. without traffic. Needs Linux and iproute2 >= 6.2.
 set -eu
 
 SANDBOX=172.30.0.0/24
@@ -179,6 +188,178 @@ port_pinned() {
 # offline_present: the offline overlay's bridge exists on this host.
 offline_present() { ip link show "$OFFLINE_BRIDGE" >/dev/null 2>&1; }
 
+# Locked bridge ports. The pins above protect the gateway's and forwarder's
+# addresses, but a sandboxed root could still forge another terminal's MAC:
+# the bridge would learn it on the attacker's port and deliver that terminal's
+# traffic (gateway requests carrying its API key) to the attacker instead. So
+# every port of both bridges runs with "locked on, learning off" and one static
+# FDB entry for the MAC Docker assigned to the container behind it. A locked
+# port drops every frame whose source MAC has no entry pointing at that port,
+# so a terminal can only send as itself, and nothing it sends moves another
+# port's entry. A port whose container cannot be resolved stays locked with no
+# entry (no traffic): fail closed. Needs Linux >= 6.2 and iproute2 >= 6.2.
+PORTLOCK_DIR=/run/termiplus-portlock
+
+# port_flags_ok PORT: locked and not learning.
+port_flags_ok() {
+  link=$(bridge -d link show dev "$1" 2>/dev/null) || return 1
+  case "$link" in *" locked on "*) ;; *) return 1 ;; esac
+  case "$link" in *" learning off "*) ;; *) return 1 ;; esac
+}
+
+# port_locked PORT: locked, not learning, and holding a static entry.
+port_locked() {
+  port_flags_ok "$1" || return 1
+  bridge fdb show dev "$1" 2>/dev/null | grep -v permanent | grep -q ' static' || return 1
+}
+
+# lock_port PORT sets the flags, only if they are not set yet (setting them
+# raises a link event, which the watcher would otherwise answer forever).
+lock_port() {
+  port_flags_ok "$1" || bridge link set dev "$1" locked on learning off 2>/dev/null
+}
+
+# port_macs BRIDGE prints "PORT MAC" for every container on the network of the
+# same name. The MAC comes from Docker (not from the bridge's table, which a
+# forger could poison); the port is found by asking the container's own network
+# namespace which interface carries that MAC and which host interface is its
+# peer, and is cross-checked from the host side (the port must be on BRIDGE and
+# its peer must be that interface).
+port_macs() {
+  pm_br=$1
+  docker network inspect "$pm_br" \
+    --format '{{range .Containers}}{{.Name}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
+    | while read -r pm_name pm_mac; do
+      [ -n "$pm_mac" ] || continue
+      pm_pid=$(docker inspect -f '{{.State.Pid}}' "$pm_name" 2>/dev/null) || continue
+      [ "${pm_pid:-0}" -gt 0 ] 2>/dev/null || continue
+      # "2: eth0@if17: <...> ... link/ether MAC ..." -> "2 17"
+      pm_ids=$(nsenter -t "$pm_pid" -n ip -o link 2>/dev/null \
+        | awk -v m="$pm_mac" 'index(tolower($0), " link/ether " tolower(m) " ") {
+            i = $1; sub(/:$/, "", i); split($2, a, "@if"); sub(/:$/, "", a[2]); print i, a[2]; exit }')
+      [ -n "$pm_ids" ] || continue
+      pm_cidx=${pm_ids% *}
+      pm_hidx=${pm_ids#* }
+      for pm_p in /sys/class/net/"$pm_br"/brif/*; do
+        [ -e "$pm_p" ] || continue
+        pm_dev=${pm_p##*/}
+        [ "$(cat "/sys/class/net/$pm_dev/ifindex" 2>/dev/null)" = "$pm_hidx" ] || continue
+        [ "$(cat "/sys/class/net/$pm_dev/iflink" 2>/dev/null)" = "$pm_cidx" ] || continue
+        echo "$pm_dev $pm_mac"
+      done
+    done
+}
+
+# sync_ports BRIDGE locks every port of BRIDGE and gives each newly locked
+# port its static entry. Ports already locked with an entry are left alone.
+# Returns 1 if a port cannot be locked (too old kernel/iproute2), 2 if some
+# port's container could not be resolved yet (retry), 0 otherwise.
+sync_ports() {
+  sp_br=$1
+  [ -d "/sys/class/net/$sp_br/brif" ] || return 0
+  sp_rc=0
+  sp_macs=""
+  for sp_p in /sys/class/net/"$sp_br"/brif/*; do
+    [ -e "$sp_p" ] || continue
+    sp_dev=${sp_p##*/}
+    port_locked "$sp_dev" && continue
+    if ! lock_port "$sp_dev"; then
+      [ -e "$sp_p" ] || continue # port vanished meanwhile
+      echo "firewall: cannot lock bridge port $sp_dev on $sp_br (needs Linux and iproute2 >= 6.2) - terminal MACs stay spoofable" >&2
+      sp_rc=1
+      continue
+    fi
+    [ -n "$sp_macs" ] || sp_macs=$(port_macs "$sp_br")
+    sp_mac=$(echo "$sp_macs" | awk -v d="$sp_dev" '$1 == d {print $2; exit}')
+    if [ -z "$sp_mac" ]; then
+      [ "$sp_rc" -eq 1 ] || sp_rc=2
+      continue
+    fi
+    if ! bridge fdb replace "$sp_mac" dev "$sp_dev" master static 2>/dev/null; then
+      [ "$sp_rc" -eq 1 ] || sp_rc=2
+    fi
+  done
+  return "$sp_rc"
+}
+
+# sync_all runs sync_ports for both bridges, one run at a time host-wide, and
+# returns the worse result.
+sync_all() {
+  mkdir -p "$PORTLOCK_DIR"
+  sa_rc=0
+  for sa_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    sa_one=0
+    (
+      flock 9
+      sync_ports "$sa_br"
+    ) 9>"$PORTLOCK_DIR/lock" || sa_one=$?
+    if [ "$sa_one" -eq 1 ] || { [ "$sa_one" -ne 0 ] && [ "$sa_rc" -eq 0 ]; }; then
+      sa_rc=$sa_one
+    fi
+  done
+  return "$sa_rc"
+}
+
+# port_worker keeps syncing while containers are still starting (their port
+# exists before Docker lists them) or the watcher saw new ports meanwhile
+# ($PORTLOCK_DIR/dirty), for up to a minute per run.
+port_worker() {
+  pw_i=0
+  while [ "$pw_i" -lt 120 ]; do
+    rm -f "$PORTLOCK_DIR/dirty"
+    pw_rc=0
+    sync_all || pw_rc=$?
+    if [ "$pw_rc" -ne 2 ] && [ ! -e "$PORTLOCK_DIR/dirty" ]; then
+      return "$pw_rc"
+    fi
+    pw_i=$((pw_i + 1))
+    sleep 0.5
+  done
+  echo "firewall: some bridge ports could not be matched to a container - they stay locked with no traffic" >&2
+  return 2
+}
+
+# --lock-ports: one sync, then exit. 0 = all ports locked and resolved,
+# 1 = locking unsupported, 2 = some port unresolved (locked, no traffic).
+if [ "${1:-}" = --lock-ports ]; then
+  rc=0
+  sync_all || rc=$?
+  exit "$rc"
+fi
+
+# --watch-ports (termiplus-portlock.service): lock each new port the moment it
+# joins a bridge, then give it its entry as soon as Docker lists the container.
+# The termiplus-firewall-watch timer re-syncs every 20 s as a backstop.
+if [ "${1:-}" = --watch-ports ]; then
+  if ! command -v nsenter >/dev/null 2>&1 || ! command -v flock >/dev/null 2>&1; then
+    echo "firewall: nsenter and flock are required to lock bridge ports" >&2
+    exit 1
+  fi
+  mkdir -p "$PORTLOCK_DIR"
+  (
+    sleep 1 # let the monitor below start first, so no port slips between
+    port_worker || true
+  ) &
+  worker=""
+  ip -o monitor link | while read -r line; do
+    case "$line" in Deleted*) continue ;; esac
+    for br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+      case "$line" in *" master $br "*) ;; *) continue ;; esac
+      # "17: vethabc@if2: <...> ... master ot-sandbox ..." -> vethabc
+      dev=$(echo "$line" | awk '{sub(/:$/, "", $2); sub(/@.*/, "", $2); print $2}')
+      [ -n "$dev" ] || continue
+      port_locked "$dev" && continue
+      lock_port "$dev" || echo "firewall: cannot lock bridge port $dev on $br" >&2
+      touch "$PORTLOCK_DIR/dirty"
+      if [ -z "$worker" ] || ! kill -0 "$worker" 2>/dev/null; then
+        port_worker &
+        worker=$!
+      fi
+    done
+  done
+  exit 1 # the monitor ended; systemd restarts the service
+fi
+
 # --if-needed (for the termiplus-firewall-watch timer): only (re)apply when the
 # rules are missing or a pinned MAC no longer matches the running gateway or
 # forwarder, e.g. after a reboot or a recreated gateway. A full run briefly
@@ -213,6 +394,12 @@ rules_current() {
   fi
 }
 if [ "${1:-}" = --if-needed ]; then
+  # Backstop for termiplus-portlock.service: cheap when every port is done.
+  lock_rc=0
+  sync_all || lock_rc=$?
+  if [ "$lock_rc" -eq 1 ]; then
+    echo "firewall: bridge ports could not be locked" >&2
+  fi
   if [ -z "$(mac_of "$GATEWAY")" ]; then
     exit 0 # gateway not (yet) running: nothing to pin, try again later
   fi
@@ -393,3 +580,16 @@ if offline_present; then
 fi
 
 echo "termiplus firewall rules applied"
+
+# Lock every bridge port to its container's MAC (see sync_ports). Last, so a
+# refusal here still leaves all the rules above in place.
+lock_rc=0
+sync_all || lock_rc=$?
+case "$lock_rc" in
+  0) echo "termiplus bridge ports locked" ;;
+  2) echo "firewall: some bridge ports have no container yet - locked with no traffic; termiplus-portlock.service finishes them" >&2 ;;
+  *)
+    echo "firewall: bridge ports could not be locked - terminal MACs stay spoofable" >&2
+    exit 1
+    ;;
+esac
