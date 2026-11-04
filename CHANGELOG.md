@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- Desktop image includes geckodriver 0.37.1 (checksum-pinned), so an agent in the workspace can drive Firefox ESR over WebDriver on 127.0.0.1 (about 6 MB additional image size).
+
 - Terminal image includes fdfind, rsync, bc and pipx (about 10 MB additional image size); workspace tool and desktop-control design notes document the proposal and egress limits.
 
 - Console dialogs replace browser prompts, with duration presets, an exact-name person picker and copyable share links. Terminal cards show observed activity and idle-deletion estimates; workspace and port help explain private access.

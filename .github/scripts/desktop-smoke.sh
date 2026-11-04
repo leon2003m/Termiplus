@@ -57,6 +57,7 @@ check "desktop: Open Terminal is running" 1 "$([ "${ot:-0}" -ge 1 ] && echo 1 ||
 check "desktop: Open Terminal does not get the desktop password" 0 "$leaked"
 check "desktop: Firefox policies are in place" 0 "$(docker exec "$P" test -r /usr/lib/firefox-esr/distribution/policies.json; echo $?)"
 check "desktop: uBlock Origin is installed" 0 "$(docker exec "$P" sh -c 'test -d /usr/share/mozilla/extensions/*/uBlock0@raymondhill.net'; echo $?)"
+check "desktop: geckodriver runs" 0 "$(docker exec "$P" sh -c 'geckodriver --version >/dev/null'; echo $?)"
 
 check "desktop: Dolphin is installed" 0 "$(docker exec "$P" sh -c 'command -v dolphin >/dev/null'; echo $?)"
 check "desktop: panel launches Dolphin" 0 "$(docker exec "$P" grep -q org.kde.dolphin.desktop /etc/xdg/xfce4/panel/default.xml; echo $?)"
