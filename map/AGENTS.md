@@ -55,3 +55,6 @@ See [native Desktop](processes/desktop-stream.md),
 [model tool boundary](objects/control-plane/mcp-tools.md) and
 [migration](../docs/native-integration.md). No AI administration or snapshot
 pruning is exposed. Shared viewing is image-only at five-second intervals.
+The native image smoke test runs under Sysbox, including Chromium with its
+sandbox enabled. The desktop CI job installs a checksum-pinned Sysbox package;
+ordinary Docker is insufficient for that browser sandbox test on the live host.

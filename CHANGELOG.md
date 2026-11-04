@@ -17,13 +17,11 @@ All notable changes to this project are documented here. The format is based on 
 
 
 ### Fixed
-- Preserve XFCE desktop trash operations with Dolphin as the folder opener.
+- Run native Desktop/Browser CI tests under Sysbox so Chromium keeps its sandbox.
 - Give the "Terminal with Docker" workspace its own fallback text in the console instead of repeating the plain terminal text.
 
 
 ### Added
-
-- Desktop image includes geckodriver 0.37.1 (checksum-pinned), so an agent in the workspace can drive Firefox ESR over WebDriver on 127.0.0.1 (about 6 MB additional image size).
 
 - Terminal image includes fdfind, rsync, bc and pipx (about 10 MB additional image size); workspace tool and desktop-control design notes document the proposal and egress limits.
 

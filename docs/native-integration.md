@@ -49,15 +49,42 @@ changes independently; do not copy Open WebUI code.
 - `make check` passes, including race detection and all 30 plugin tests.
 - Native gateway tests cover first-frame and Browser header authentication,
   chat scoping, per-user routing, capability discovery and denied legacy routes.
-- The actual Open Terminal 0.16.0 terminal image builds. Its authenticated file
-  API, capability discovery and disabled desktop policy pass a container test.
-- The desktop image build stopped during package installation because the host
-  filesystem ran out of space. Only this test's containers/images were removed.
-  The graphical image smoke test, Chromium sandbox compatibility and real
-  Open WebUI Desktop/Browser interaction remain unverified. The new smoke test
-  requires Chromium to start with its sandbox; it does not permit `--no-sandbox`.
+- Both Open Terminal 0.16.0 images build. Under Sysbox, the image smoke test
+  passes authenticated screenshots, keyboard actions, the first-frame-authenticated
+  VNC stream, wrong-key rejection, native app previews and Chromium automation
+  snapshots with Chromium's sandbox enabled. Plain policies deny Desktop.
+- The running Open WebUI 0.13.0 installation now uses the new gateway, MCP and
+  desktop image, with explicit Desktop and Temporary desktop connections and
+  plugin 0.6.0. Capability discovery, screenshots, keyboard actions and the
+  authenticated desktop WebSocket pass through the actual Open WebUI proxy.
+  Rollback images, deployment settings, the Open WebUI database and existing
+  ephemeral home data were backed up before the rollout.
+- A browser check confirms both connections appear in the picker and selecting
+  Desktop adds Browser and Desktop to the native tab menu. Opening Desktop
+  renders the live 1280 × 800 canvas. Native Browser creation, sandboxed Chromium,
+  automation snapshots and its capability-authenticated VNC WebSocket also pass
+  through the actual Open WebUI proxy and gateway.
+- Chromium's sandbox fails with the ordinary Docker runtime on this host.
+  The desktop CI job now installs checksum-pinned Sysbox 0.7.1 and runs the same
+  smoke test with `sysbox-runc`; the hosted-runner installation has not run here.
+  No test or image disables Chromium's sandbox to accommodate the runner.
 - Updated OIDC/deployment integration scripts have syntax/lint coverage here;
   the real provider and host-firewall scenarios were not rerun.
 
-No deployment, push or release is part of this migration commit. Existing
-workspace containers, homes, backup data and deployed credentials are retained.
+No push or release was performed. Existing home volumes, backup data and deployed
+credentials are retained. Running workspaces are adopted; their image updates
+when their normal lifecycle recreates them.
+
+## Testing in Open WebUI
+
+1. Reload Open WebUI and open a new chat.
+2. In the connection picker beside the message input, choose **Desktop**
+   (persistent) or **Temporary desktop** (per chat).
+3. In the workspace tab bar, choose **+**, then **Desktop**. The same menu
+   also offers **Browser**, terminals and files.
+4. Keep that connection selected when asking the model to use the workspace;
+   the model and the visible native tabs then use the same user/policy/chat.
+
+Requesting a session with the MCP plugin provisions it but does not select a
+native connection in the frontend. Desktop entries depend on the selected
+connection's capabilities; choosing a plain terminal hides them.
