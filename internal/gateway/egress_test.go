@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -82,6 +83,101 @@ func TestNetworkMismatchRecreates(t *testing.T) {
 	}
 	if nw := hostNetwork(h.ctr(name)); nw != "ot-offline" {
 		t.Fatalf("recreated on %v", nw)
+	}
+}
+
+// connectNetwork attaches another network to a container, as
+// `docker network connect` would after create.
+func (h *harness) connectNetwork(name, network string) {
+	h.docker.mu.Lock()
+	defer h.docker.mu.Unlock()
+	c := h.docker.ctrs[name]
+	c.extraNets = append(c.extraNets, network)
+}
+
+func (h *harness) exists(name string) bool {
+	h.docker.mu.Lock()
+	defer h.docker.mu.Unlock()
+	_, ok := h.docker.ctrs[name]
+	return ok
+}
+
+// A stopped container with an extra network keeps the right NetworkMode, so
+// only the full network list shows it; it must be recreated, not reused.
+func TestExtraNetworkRecreates(t *testing.T) {
+	h := offlineHarness(t)
+	name := naming.Container("alice", "off")
+	if code, _ := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("first request failed")
+	}
+	h.stopBehindGateway(name)
+	h.connectNetwork(name, "ot-sandbox")
+	if code, b := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatalf("%d %s", code, b)
+	}
+	if h.docker.creates != 2 {
+		t.Fatalf("extra network must recreate, creates=%d", h.docker.creates)
+	}
+	if n := h.ctr(name).networks(); len(n) != 1 || n["ot-offline"] == nil {
+		t.Fatalf("recreated on %v", n)
+	}
+}
+
+// A running workspace that gains a network is removed by the periodic check,
+// and the next request starts a clean one. A correct workspace is left alone.
+func TestRunningExtraNetworkRemoved(t *testing.T) {
+	h := offlineHarness(t)
+	off := naming.Container("alice", "off")
+	def := naming.Container("alice", "default")
+	if code, _ := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("offline request failed")
+	}
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("default request failed")
+	}
+	h.connectNetwork(off, "ai_ai")
+	h.g.mgr.checkNetworks(context.Background())
+	if h.exists(off) {
+		t.Fatal("workspace with an extra network kept running")
+	}
+	if !h.exists(def) {
+		t.Fatal("correct workspace removed")
+	}
+	if code, b := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatalf("%d %s", code, b)
+	}
+	if n := h.ctr(off).networks(); len(n) != 1 || n["ot-offline"] == nil {
+		t.Fatalf("restarted on %v", n)
+	}
+}
+
+// After a gateway restart, adoption must not register a running workspace
+// that is attached to networks its policy does not allow.
+func TestAdoptRemovesWrongNetwork(t *testing.T) {
+	h := offlineHarness(t)
+	off := naming.Container("alice", "off")
+	def := naming.Container("alice", "default")
+	if code, _ := h.get(t, "/p/off/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("offline request failed")
+	}
+	if code, _ := h.get(t, "/files/cwd", "alice", testAPIKey); code != http.StatusOK {
+		t.Fatal("default request failed")
+	}
+	h.connectNetwork(off, "ot-sandbox")
+	m := h.g.mgr
+	m.mu.Lock()
+	m.instances = map[string]*instance{} // a fresh gateway knows nothing
+	m.mu.Unlock()
+	m.adopt(context.Background())
+	if h.exists(off) {
+		t.Fatal("adopted a workspace with an extra network")
+	}
+	m.mu.Lock()
+	_, offKnown := m.instances[off]
+	_, defKnown := m.instances[def]
+	m.mu.Unlock()
+	if offKnown || !defKnown {
+		t.Fatalf("adopted off=%v default=%v, want false/true", offKnown, defKnown)
 	}
 }
 

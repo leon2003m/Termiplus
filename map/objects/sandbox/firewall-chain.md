@@ -9,13 +9,13 @@ entity: deploy/firewall.sh
 
 # Firewall chain
 
-Host iptables and ebtables rules that decide what a terminal on `ot-sandbox` (172.30.0.0/24) can reach: chain `TERMIPLUS` in `DOCKER-USER`, chain `TERMIPLUS-IN` in `INPUT`, and the ebtables `TERMIPLUS-AS` anti-spoof chain.
+Host iptables and ebtables rules that decide what a terminal on `ot-sandbox` (172.30.0.0/24) can reach: chain `TERMIPLUS` in `DOCKER-USER`, chain `TERMIPLUS-IN` in `INPUT`, and the ebtables anti-spoof chains `TERMIPLUS-AS` (filter `FORWARD`, MAC pin) and `TERMIPLUS-PORT` (nat `PREROUTING`, bridge-port pin).
 
 ## Why this shape
 
 A terminal has root inside its sandbox. So isolation cannot depend on anything inside the container:
 
-- Only the gateway (.2) may open connections to terminals, and that allow is pinned to the gateway's real MAC so a terminal cannot spoof its IP.
+- Only the gateway (.2) may open connections to terminals, and that allow is pinned to the gateway's real MAC and to its own bridge port (veth), so a terminal cannot spoof its IP, not even by forging the gateway's MAC as well. The port pin runs in nat `PREROUTING`, before the bridge learns MACs, so forged frames cannot redirect the gateway's traffic either. The forwarder (.3) and the offline gateway (172.30.1.2) get the same pins. The port is found from the container's own network namespace (`nsenter`), not from the bridge's MAC table.
 - Terminal ↔ terminal traffic is dropped twice: here, and by Docker's `enable_icc:false`.
 - A fixed deny-list is dropped before any admin allow can match. Private ranges are dropped unless an admin rule returned first. Public egress falls through.
 - There is deliberately **no global ESTABLISHED,RELATED accept**. That would bypass policy for long-lived connections on every Docker network. Reply rules are scoped to the gateway and forwarder DNS.
@@ -25,11 +25,11 @@ A terminal has root inside its sandbox. So isolation cannot depend on anything i
 ## Shape
 
 - Variables: `SANDBOX`, `GATEWAY=.2`, `FORWARDER=.3`, `BRIDGE=ot-sandbox`, `OFFLINE_BRIDGE=ot-offline`, `OFFLINE_SUBNET`, `OFFLINE_GATEWAY=172.30.1.2`, `EGRESS_RULES`, `DNS_UPSTREAM` (from the environment or `deploy/.env`).
-- `--if-needed` re-applies only when rules are missing or out of date (`rules_current`: chain jumps, the ebtables attachment, pinned MACs and every offline rule).
+- `--if-needed` re-applies only when rules are missing or out of date (`rules_current`: chain jumps, both ebtables attachments, pinned MACs, pinned bridge ports (so a recreated gateway is re-pinned) and every offline rule).
 - Bridge netfilter must be on (`deploy/sysctl.d/90-termiplus-bridge.conf`, `ensure_bridge_netfilter`).
 - systemd: `termiplus-firewall.service` (on Docker start), `.path` (on `egress.rules` change), `termiplus-firewall-watch.timer` (every 20 s, `--if-needed`).
 
-Citations: `deploy/firewall.sh:1-26` (intent), `:35-39`, `:58` (apply_egress_allow), `:95` (ensure_bridge_netfilter), `:128` (pin_ip), `:140` (rules_current), `:175` (ensure_gateway_antispoof), `:219-280` (TERMIPLUS), `:281-299` (TERMIPLUS-IN), `deploy/docker-compose.yml:81`, `:87-101`
+Citations: `deploy/firewall.sh:1-35` (intent), `:38-44`, `:59` (apply_egress_allow), `:96` (ensure_bridge_netfilter), `:136` (port_of), `:163` (pin_ip), `:186` (rules_current), `:225` (ensure_gateway_antispoof), `:301-358` (TERMIPLUS), `:363-381` (TERMIPLUS-IN), `deploy/docker-compose.yml:81`, `:87-101`
 
 ## Connected to
 

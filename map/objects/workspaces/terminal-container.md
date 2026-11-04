@@ -20,9 +20,9 @@ The name *is* the lookup key. The gateway finds a user's container by hashing th
 - Suffix: 16 hex characters of sha256(user id), then `-` and the policy. Ephemeral puts 12 hex characters of sha256(chat id) between them (`X-Session-Id`, default `nochat`).
 - Labels: `termiplus.managed`, `.user`, `.policy`, `.config` (the config hash), `.storage`.
 - Env: `OPEN_TERMINAL_API_KEY` = HMAC(`KEY_SECRET`, name). DNS is pinned to the [DNS forwarder](../sandbox/dns-forwarder.md).
-- Lifecycle: `ensure` adopts, creates or recreates it on a config-hash mismatch. The reaper stops persistent containers and removes ephemeral ones once idle. Admission enforces `MAX_RUNNING` and `max_per_user`.
+- Lifecycle: `ensure` adopts, creates or recreates it on a config-hash mismatch or when it is on any network but its policy's one. `adopt` (at startup) and `checkNetworks` (every minute) remove a running one that has gained an extra network. The reaper stops persistent containers and removes ephemeral ones once idle. Admission enforces `MAX_RUNNING` and `max_per_user`.
 
-Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Container, Ephemeral, IsManagedContainer, UserHash), `internal/gateway/lifecycle.go:140` (containerKey), `:165` (ensure), `:201-203` (owner check), `:291` (admit), `:424` (create), `:541` (adopt), `:575` (reap)
+Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Container, Ephemeral, IsManagedContainer, UserHash), `internal/gateway/lifecycle.go:154` (containerKey), `:173` (networkOK), `:205` (ensure), `:241-244` (owner check), `:335` (admit), `:468` (create), `:588` (adopt), `:642` (checkNetworks), `:667` (reap)
 
 ## Connected to
 

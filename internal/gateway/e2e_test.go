@@ -186,6 +186,22 @@ type fakeCtr struct {
 	image   string // image ID at create time
 	running bool
 	srv     *httptest.Server
+	// extraNets are networks attached after create (docker network connect).
+	extraNets []string
+}
+
+// networks is what inspect reports in NetworkSettings.Networks.
+func (c *fakeCtr) networks() map[string]any {
+	out := map[string]any{}
+	if hc, ok := c.body["HostConfig"].(map[string]any); ok {
+		if nm, _ := hc["NetworkMode"].(string); nm != "" {
+			out[nm] = map[string]any{}
+		}
+	}
+	for _, n := range c.extraNets {
+		out[n] = map[string]any{}
+	}
+	return out
 }
 
 func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -274,9 +290,10 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 2 && parts[1] == "json":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id": c.id, "Name": "/" + c.name, "Image": c.image,
-				"State":      map[string]any{"Running": c.running},
-				"Config":     map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
-				"HostConfig": c.body["HostConfig"],
+				"State":           map[string]any{"Running": c.running},
+				"Config":          map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"HostConfig":      c.body["HostConfig"],
+				"NetworkSettings": map[string]any{"Networks": c.networks()},
 			})
 		case len(parts) == 2 && parts[1] == "archive":
 			d.archive(w, r, c)

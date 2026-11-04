@@ -59,8 +59,10 @@ From A as root: `ip addr add 172.30.0.2/24 dev eth0` and try to reach B; and
 `nping --arp --arp-sender-ip 172.30.0.2 <B>` / a forged-source IPv4 packet to B
 (`hping3 -a 172.30.0.2 <B>`).
 **PASS:** every spoofed-source attempt to B is dropped. (ebtables pins
-172.30.0.2 to the gateway MAC — confirm the `TERMIPLUS-AS` ebtables chain exists:
-`ebtables -t filter -L TERMIPLUS-AS`.) Also confirm the **gateway still reaches
+172.30.0.2 to the gateway MAC and to the gateway's bridge port — confirm both
+ebtables chains exist: `ebtables -t filter -L TERMIPLUS-AS` and
+`ebtables -t nat -L TERMIPLUS-PORT`. A also tries with the gateway's MAC
+forged; that must fail too.) Also confirm the **gateway still reaches
 terminals normally** (a terminal session opens and streams) — the RETURN→ACCEPT
 rework must not have broken the control path.
 

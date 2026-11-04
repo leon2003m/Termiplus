@@ -165,6 +165,24 @@ func (m *manager) networkFor(pol Policy) string {
 	return m.network
 }
 
+// networkOK reports whether a container is attached to exactly the network
+// its policy asks for and nothing else. NetworkMode alone is not enough: a
+// network added later with `docker network connect` (by a host admin, or a
+// future bug) shows up only in NetworkSettings.Networks, and would give an
+// offline workspace a route out.
+func (m *manager) networkOK(ct *dockerapi.Container, pol Policy) bool {
+	want := m.networkFor(pol)
+	if ct.HostConfig.NetworkMode != want {
+		return false
+	}
+	nets := ct.NetworkSettings.Networks
+	if len(nets) != 1 {
+		return false
+	}
+	_, ok := nets[want]
+	return ok
+}
+
 // imageFor returns the image a policy's containers run.
 func (m *manager) imageFor(pol Policy) string {
 	if pol.Image != "" {
@@ -225,9 +243,9 @@ func (m *manager) ensure(ctx context.Context, userID, sessionID, policyName stri
 			return nil, fmt.Errorf("container %s belongs to another user", name)
 		}
 		if ct.Config.Labels[naming.LabelConfig] != want || (pol.ephemeral() && !ct.State.Running) ||
-			ct.HostConfig.NetworkMode != m.networkFor(pol) {
-			// The network is checked against the container itself, not only its
-			// config label, so a workspace is never adopted onto a network with
+			!m.networkOK(ct, pol) {
+			// The networks are checked against the container itself, not only
+			// its config label, so a workspace is never reused on a network with
 			// more egress than its policy allows.
 			log.Printf("recreating %q: config or network changed, or stopped sandbox", name)
 			if err := m.docker.Remove(ctx, name); err != nil {
@@ -564,15 +582,15 @@ func (m *manager) touch(inst *instance, connDelta int) {
 }
 
 // adopt registers already running managed containers after a gateway restart
-// so the reaper can stop them once idle.
+// so the reaper can stop them once idle. A container on the wrong networks is
+// removed instead (its home volume stays): it may have a route out that its
+// policy forbids, and an adopted instance is reused without another check.
 func (m *manager) adopt(ctx context.Context) {
 	list, err := m.docker.List(ctx)
 	if err != nil {
 		log.Printf("adopt: %q", err)
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	for _, c := range list {
 		if c.State != "running" || len(c.Names) == 0 {
 			continue
@@ -581,8 +599,18 @@ func (m *manager) adopt(ctx context.Context) {
 		if !naming.IsManagedContainer(name) {
 			continue
 		}
+		pol := m.policies[c.Labels[naming.LabelPolicy]]
+		ct, err := m.docker.Inspect(ctx, name)
+		if err != nil {
+			log.Printf("adopt %q: %q", name, err)
+			continue
+		}
+		if !m.networkOK(ct, pol) {
+			m.removeWrongNetwork(ctx, name)
+			continue
+		}
+		m.mu.Lock()
 		if _, ok := m.instances[name]; !ok {
-			pol := m.policies[c.Labels[naming.LabelPolicy]]
 			m.instances[name] = &instance{
 				name:      name,
 				userHash:  naming.UserHash(name),
@@ -593,6 +621,43 @@ func (m *manager) adopt(ctx context.Context) {
 				desktop:   pol.Desktop,
 			}
 		}
+		m.mu.Unlock()
+	}
+}
+
+// removeWrongNetwork forgets and removes a container attached to networks its
+// policy does not allow. Persistent homes are volumes and stay.
+func (m *manager) removeWrongNetwork(ctx context.Context, name string) {
+	m.mu.Lock()
+	delete(m.instances, name)
+	m.mu.Unlock()
+	log.Printf("removing %q: attached to networks its policy does not allow", name)
+	if err := m.docker.Remove(ctx, name); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
+		log.Printf("remove %q: %q", name, err)
+	}
+}
+
+// checkNetworks re-inspects every running workspace and removes any that has
+// been attached to another network since it was created or adopted.
+func (m *manager) checkNetworks(ctx context.Context) {
+	m.mu.Lock()
+	names := make([]string, 0, len(m.instances))
+	for name := range m.instances {
+		names = append(names, name)
+	}
+	m.mu.Unlock()
+	for _, name := range names {
+		l := m.lockFor(name)
+		l.Lock()
+		ct, err := m.docker.Inspect(ctx, name)
+		switch {
+		case errors.Is(err, dockerapi.ErrNotFound):
+		case err != nil:
+			log.Printf("network check %q: %q", name, err)
+		case !m.networkOK(ct, m.policies[ct.Config.Labels[naming.LabelPolicy]]):
+			m.removeWrongNetwork(ctx, name)
+		}
+		l.Unlock()
 	}
 }
 
@@ -647,6 +712,7 @@ func (m *manager) runReaper(ctx context.Context, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			m.checkNetworks(ctx)
 			m.reap(ctx)
 		}
 	}

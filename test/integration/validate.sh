@@ -206,6 +206,7 @@ for phase in "with firewall" "without firewall"; do
     iptables -D DOCKER-USER -j TERMIPLUS 2>/dev/null || true
     iptables -D INPUT -j TERMIPLUS-IN 2>/dev/null || true
     ebtables -t filter -D FORWARD -j TERMIPLUS-AS 2>/dev/null || true
+    ebtables -t nat -D PREROUTING -j TERMIPLUS-PORT 2>/dev/null || true
   fi
 done
 reapply
@@ -213,6 +214,7 @@ expect "gateway still reaches A" 0 test "$(gw GET /files/cwd val-a | grep -c cwd
 
 scenario V2 "gateway source-IP / ARP spoofing is blocked"
 expect "ebtables chain TERMIPLUS-AS exists" 0 ebtables -t filter -L TERMIPLUS-AS
+expect "gateway IP pinned to a bridge port" 0 bash -c "ebtables -t nat -L TERMIPLUS-PORT | grep -q -- '--ip-src 172.30.0.2 '"
 asroot "$B" "rm -f /tmp/got; (timeout 25 python3 -c '
 import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"0.0.0.0\", 9999))
 d, a = s.recvfrom(100); open(\"/tmp/got\",\"w\").write(a[0])' &) " || true
@@ -224,6 +226,18 @@ import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"172
   asroot "$A" "ip addr del 172.30.0.2/24 dev eth0" 2>/dev/null || true
 else
   pass "A cannot even add the gateway IP to its interface"
+fi
+# Forge the gateway's MAC as well: only the bridge-port pin stops this.
+GWMAC="$(docker network inspect ot-sandbox --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' | awk '$1 ~ /^172\.30\.0\.2\// {print $2}')"
+AMAC="$(asroot "$A" "cat /sys/class/net/eth0/address" 2>/dev/null || true)"
+if [ -n "$GWMAC" ] && [ -n "$AMAC" ] && asroot "$A" "ip link set eth0 address $GWMAC && ip addr add 172.30.0.2/24 dev eth0" 2>/dev/null; then
+  asroot "$A" "python3 -c '
+import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"172.30.0.2\", 0))
+[s.sendto(b\"x\", (\"$BIP\", 9999)) for _ in range(5)]'" >/dev/null 2>&1 || true
+  expect "A cannot reach B:8000 with the gateway's IP and MAC" 1 asroot "$A" "curl -s -m3 --interface 172.30.0.2 http://$BIP:8000/health"
+  asroot "$A" "ip addr del 172.30.0.2/24 dev eth0; ip link set eth0 address $AMAC" 2>/dev/null || true
+else
+  pass "A cannot change its MAC to the gateway's"
 fi
 sleep 2
 expect "B received no packet with the spoofed source" 1 asroot "$B" "test -s /tmp/got"

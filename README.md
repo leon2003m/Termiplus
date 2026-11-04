@@ -91,7 +91,7 @@ cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
   docker compose -f docker-compose.yml -f docker-compose.separate-vm.yml up -d --build
 
 # 6. Egress rules. They must be reapplied after every reboot, Docker restart and
-#    recreated gateway (its MAC is pinned). The watch timer checks every 20 s and
+#    restarted gateway (its MAC and bridge port are pinned). The watch timer checks every 20 s and
 #    reapplies only when something is missing or stale (adjust ExecStart if the
 #    repo is not in /opt/termiplus):
 sudo ./firewall.sh
@@ -177,7 +177,7 @@ A policy with `"egress": "offline"` runs its terminals on a second network, `ot-
 "offline": { "runtime": "runsc", "memory_mb": 2048, "cpus": 2, "pids": 512, "egress": "offline" }
 ```
 
-Add `deploy/docker-compose.offline.yml` (after `docker-compose.separate-vm.yml` if you use it) and re-run `deploy/firewall.sh`. The network is a Docker internal network with `enable_icc:false`; `firewall.sh` drops everything on its bridge except gateway → terminal, with the gateway's address pinned to its MAC. Root inside a sandbox can forge its IP or MAC but cannot move its container to another bridge. Without the overlay, a policy with `"egress": "offline"` stops the gateway from starting; it never falls back to the internet. Switching a policy between `internet` and `offline` recreates its containers on their next use (the home stays), and a container found on the wrong network is recreated instead of reused. Installing packages in an offline workspace does not work; build them into an image (`image`) instead.
+Add `deploy/docker-compose.offline.yml` (after `docker-compose.separate-vm.yml` if you use it) and re-run `deploy/firewall.sh`. The network is a Docker internal network with `enable_icc:false`; `firewall.sh` drops everything on its bridge except gateway → terminal, with the gateway's address pinned to its MAC and its bridge port. Root inside a sandbox can forge its IP or MAC but cannot move its container to another bridge. Without the overlay, a policy with `"egress": "offline"` stops the gateway from starting; it never falls back to the internet. Switching a policy between `internet` and `offline` recreates its containers on their next use (the home stays), and a container found on the wrong network, or on any extra one, is recreated instead of reused; a running one that gains an extra network (`docker network connect` on the host) is removed within a minute. Installing packages in an offline workspace does not work; build them into an image (`image`) instead.
 
 ### Disk quota for home volumes
 

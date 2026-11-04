@@ -41,6 +41,11 @@ type Container struct {
 	HostConfig struct {
 		NetworkMode string `json:"NetworkMode"`
 	} `json:"HostConfig"`
+	// NetworkSettings.Networks lists every network the container is attached
+	// to, including ones added after create with `docker network connect`.
+	NetworkSettings struct {
+		Networks map[string]struct{} `json:"Networks"`
+	} `json:"NetworkSettings"`
 }
 
 type ListItem struct {

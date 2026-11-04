@@ -6,9 +6,10 @@
 #   - no other terminals on the same bridge
 #   - no private ranges (your LAN, Proxmox, customer networks)
 #   - no services on the VM itself
-# The gateway (172.30.0.2) may reach every terminal. That allow is pinned to the
-# gateway's real MAC at L2 (ebtables) so a sandboxed root cannot spoof the
-# gateway's source IP to reach another terminal (#13), and the sandbox bridge
+# The gateway (172.30.0.2) may reach every terminal. That allow is pinned at L2
+# (ebtables) to the gateway's real MAC and to its own bridge port, so a
+# sandboxed root cannot spoof the gateway's source IP to reach another terminal
+# (#13), not even by forging the gateway's MAC as well, and the sandbox bridge
 # runs with enable_icc:false so terminal<->terminal isolation does not fail open
 # if these rules are ever missing (#14).
 #
@@ -28,7 +29,7 @@
 # Offline network (offline overlay, "egress": "offline" policies): if the
 # ot-offline bridge exists, everything entering or leaving it is dropped, both
 # routed and to the host, IPv4 and IPv6. The only exception is the gateway
-# (172.30.1.2, MAC-pinned like on the sandbox bridge) opening connections to
+# (172.30.1.2, MAC- and port-pinned like on the sandbox bridge) opening connections to
 # offline terminals, plus the replies on those connections. The bridge is a
 # Docker internal network with enable_icc:false, so it has no route out even
 # without these rules; they are the second layer.
@@ -114,8 +115,11 @@ ensure_bridge_netfilter
 # bare source IP is spoofable on the shared bridge - a sandboxed root could
 # forge src=172.30.0.2 and ride it to another terminal. This drops any frame
 # (IPv4 or ARP) claiming the gateway's IP from any other MAC, before iptables
-# sees it. Needs ebtables and the gateway container running; fails closed
-# (installs nothing) if either is missing, since the ACCEPT would be unsafe (#13).
+# sees it, and any frame on the bridge claiming the gateway's IP or MAC that
+# does not enter through the gateway's own bridge port (so forging both does
+# not help either). Needs ebtables, nsenter and the gateway container running;
+# fails closed (keeps the previous pins, adds nothing) if any is missing, since
+# the ACCEPT would be unsafe (#13).
 # mac_of prints the MAC of the container holding IP on the bridge (or on the
 # network named by the second argument), or nothing.
 mac_of() {
@@ -124,10 +128,52 @@ mac_of() {
     | awk -v ip="$1" '{split($1, a, "/"); if (a[1] == ip) print $2}'
 }
 
-# pin_ip drops every frame (IPv4 or ARP) that claims IP from any MAC but MAC.
+# port_of prints the host-side bridge port (veth) of the container holding IP
+# on the network named by the second argument (network and bridge share a
+# name), or nothing. It asks the container's own network namespace which
+# interface carries that MAC and which host interface is its peer, so it does
+# not trust the bridge's learned MAC table, which a forger could poison.
+port_of() {
+  name=$(docker network inspect "$2" \
+    --format '{{range .Containers}}{{.IPv4Address}} {{.Name}}{{"\n"}}{{end}}' 2>/dev/null \
+    | awk -v ip="$1" '{split($1, a, "/"); if (a[1] == ip) print $2}')
+  [ -n "$name" ] || return 0
+  m=$(mac_of "$1" "$2")
+  [ -n "$m" ] || return 0
+  pid=$(docker inspect -f '{{.State.Pid}}' "$name" 2>/dev/null) || return 0
+  [ "${pid:-0}" -gt 0 ] 2>/dev/null || return 0
+  # "2: eth0@if17: <...> ... link/ether MAC ..." -> 17, the peer's ifindex
+  idx=$(nsenter -t "$pid" -n ip -o link 2>/dev/null \
+    | awk -v m="$m" 'index(tolower($0), tolower(m)) {split($2, a, "@if"); sub(/:$/, "", a[2]); print a[2]; exit}')
+  [ -n "$idx" ] || return 0
+  for dev in /sys/class/net/*; do
+    [ "$(cat "$dev/ifindex" 2>/dev/null)" = "$idx" ] || continue
+    if [ "$(basename "$(readlink "$dev/master" 2>/dev/null)")" = "$2" ]; then
+      basename "$dev"
+    fi
+    return 0
+  done
+}
+
+# pin_ip IP MAC BRIDGE PORT drops every frame (IPv4 or ARP) that claims IP
+# from any MAC but MAC (filter FORWARD), and every frame on BRIDGE that claims
+# IP or MAC from any port but PORT (nat PREROUTING). The port pin is what stops
+# a sandboxed root that forges both the IP and the MAC; it runs before the
+# bridge learns MACs, so forged frames cannot redirect the real one's traffic.
 pin_ip() {
   ebtables -t filter -A TERMIPLUS-AS -p IPv4 --ip-source "$1" -s ! "$2" -j DROP
   ebtables -t filter -A TERMIPLUS-AS -p ARP --arp-ip-src "$1" -s ! "$2" -j DROP
+  ebtables -t nat -A TERMIPLUS-PORT -p IPv4 --ip-source "$1" --logical-in "$3" ! -i "$4" -j DROP
+  ebtables -t nat -A TERMIPLUS-PORT -p ARP --arp-ip-src "$1" --logical-in "$3" ! -i "$4" -j DROP
+  ebtables -t nat -A TERMIPLUS-PORT -s "$2" --logical-in "$3" ! -i "$4" -j DROP
+}
+
+# port_pinned LISTING IP NETWORK: the port pin for IP names the container's
+# current bridge port.
+port_pinned() {
+  pp=$(port_of "$2" "$3")
+  [ -n "$pp" ] || return 1
+  echo "$1" | grep -F -- "--ip-src $2 " | grep -qF -- "! -i $pp " || return 1
 }
 
 # offline_present: the offline overlay's bridge exists on this host.
@@ -142,10 +188,13 @@ rules_current() {
   iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || return 1
   pinned=$(ebtables -t filter -L TERMIPLUS-AS 2>/dev/null) || return 1
   ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || return 1
+  ports=$(ebtables -t nat -L TERMIPLUS-PORT 2>/dev/null) || return 1
+  ebtables -t nat -C PREROUTING -j TERMIPLUS-PORT 2>/dev/null || return 1
   for ip in "$GATEWAY" "$FORWARDER"; do
     m=$(mac_of "$ip")
     [ -z "$m" ] && continue
     echo "$pinned" | grep -F -- "--ip-src $ip " | grep -qiF -- "$m" || return 1
+    port_pinned "$ports" "$ip" "$BRIDGE" || return 1
   done
   if offline_present; then
     iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
@@ -157,6 +206,7 @@ rules_current() {
     m=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
     if [ -n "$m" ]; then
       echo "$pinned" | grep -F -- "--ip-src $OFFLINE_GATEWAY " | grep -qiF -- "$m" || return 1
+      port_pinned "$ports" "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE" || return 1
       iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_GATEWAY" -d "$OFFLINE_SUBNET" -j ACCEPT 2>/dev/null || return 1
       iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_SUBNET" -d "$OFFLINE_GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || return 1
     fi
@@ -177,31 +227,63 @@ ensure_gateway_antispoof() {
     echo "firewall: ebtables not found - refusing, gateway source IP would be spoofable (#13)" >&2
     exit 1
   fi
+  if ! command -v nsenter >/dev/null 2>&1; then
+    echo "firewall: nsenter not found - refusing, cannot pin the gateway to its bridge port (#13)" >&2
+    exit 1
+  fi
+  # Look everything up before touching a rule, so a refusal leaves the
+  # previous pins in place.
   mac=$(mac_of "$GATEWAY")
   if [ -z "$mac" ]; then
     echo "firewall: no MAC for gateway $GATEWAY on $BRIDGE - is the gateway running? refusing (#13)" >&2
     exit 1
   fi
-  ebtables -t filter -N TERMIPLUS-AS 2>/dev/null || ebtables -t filter -F TERMIPLUS-AS
-  pin_ip "$GATEWAY" "$mac"
-  # The forwarder's address gets the same pin, so its DNS allowances below
+  port=$(port_of "$GATEWAY" "$BRIDGE")
+  if [ -z "$port" ]; then
+    echo "firewall: no bridge port for gateway $GATEWAY on $BRIDGE - refusing (#13)" >&2
+    exit 1
+  fi
+  # The forwarder's address gets the same pins, so its DNS allowances below
   # cannot be ridden by a terminal claiming to be the forwarder.
   forwarder_mac=$(mac_of "$FORWARDER")
+  forwarder_port=""
   if [ -n "$forwarder_mac" ]; then
-    pin_ip "$FORWARDER" "$forwarder_mac"
+    forwarder_port=$(port_of "$FORWARDER" "$BRIDGE")
+    if [ -z "$forwarder_port" ]; then
+      echo "firewall: no bridge port for forwarder $FORWARDER on $BRIDGE - refusing" >&2
+      exit 1
+    fi
   fi
   # The gateway's address on the offline bridge, same reason. Without it the
   # gateway gets no allow there and offline terminals are unreachable (closed).
   offline_gateway_mac=""
+  offline_gateway_port=""
   if offline_present; then
     offline_gateway_mac=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
     if [ -n "$offline_gateway_mac" ]; then
-      pin_ip "$OFFLINE_GATEWAY" "$offline_gateway_mac"
+      offline_gateway_port=$(port_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
+      if [ -z "$offline_gateway_port" ]; then
+        echo "firewall: no bridge port for gateway $OFFLINE_GATEWAY on $OFFLINE_BRIDGE - refusing" >&2
+        exit 1
+      fi
     else
       echo "firewall: no gateway on $OFFLINE_BRIDGE - offline terminals stay unreachable" >&2
     fi
   fi
+
+  ebtables -t filter -N TERMIPLUS-AS 2>/dev/null || ebtables -t filter -F TERMIPLUS-AS
+  # User chains in ebtables default to ACCEPT, which would end PREROUTING.
+  ebtables -t nat -N TERMIPLUS-PORT -P RETURN 2>/dev/null || ebtables -t nat -F TERMIPLUS-PORT
+  ebtables -t nat -P TERMIPLUS-PORT RETURN
+  pin_ip "$GATEWAY" "$mac" "$BRIDGE" "$port"
+  if [ -n "$forwarder_mac" ]; then
+    pin_ip "$FORWARDER" "$forwarder_mac" "$BRIDGE" "$forwarder_port"
+  fi
+  if [ -n "$offline_gateway_mac" ]; then
+    pin_ip "$OFFLINE_GATEWAY" "$offline_gateway_mac" "$OFFLINE_BRIDGE" "$offline_gateway_port"
+  fi
   ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || ebtables -t filter -I FORWARD 1 -j TERMIPLUS-AS
+  ebtables -t nat -C PREROUTING -j TERMIPLUS-PORT 2>/dev/null || ebtables -t nat -I PREROUTING 1 -j TERMIPLUS-PORT
 }
 ensure_gateway_antispoof
 
