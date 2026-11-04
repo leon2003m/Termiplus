@@ -8,8 +8,10 @@
 #   sudo systemctl enable --now termiplus-portlock.service
 [Unit]
 Description=termiplus bridge port lock watcher
+# Wants, not Requires: a Docker stop must not stop the watcher (systemd would
+# not start it again with Docker); while Docker is down it just retries.
 After=docker.service
-Requires=docker.service
+Wants=docker.service
 
 [Service]
 Type=simple
@@ -18,4 +20,4 @@ Restart=always
 RestartSec=2
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target docker.service
