@@ -39,7 +39,9 @@
 # Docker assigned to that container. A terminal that forges another terminal's
 # MAC can then neither move that MAC to its own port nor send with it, so it
 # never receives the gateway's replies (which carry the other terminal's API
-# key). New terminals are locked by --watch-ports (termiplus-portlock.service)
+# key). Source guards also bind every port to Docker's IPv4 and MAC, so a
+# terminal using its own MAC cannot announce another terminal's IP via ARP.
+# New terminals are locked by --watch-ports (termiplus-portlock.service)
 # within a second; a port whose MAC is not known yet stays locked without an
 # entry, i.e. without traffic. Needs Linux and iproute2 >= 6.2.
 set -eu
@@ -139,29 +141,9 @@ mac_of() {
 
 # port_of prints the host-side bridge port (veth) of the container holding IP
 # on the network named by the second argument (network and bridge share a
-# name), or nothing. It asks the container's own network namespace which
-# interface carries that MAC and which host interface is its peer, so it does
-# not trust the bridge's learned MAC table, which a forger could poison.
+# name), or nothing. Use the same host-only mapping as the workspace pins.
 port_of() {
-  name=$(docker network inspect "$2" \
-    --format '{{range .Containers}}{{.IPv4Address}} {{.Name}}{{"\n"}}{{end}}' 2>/dev/null \
-    | awk -v ip="$1" '{split($1, a, "/"); if (a[1] == ip) print $2}')
-  [ -n "$name" ] || return 0
-  m=$(mac_of "$1" "$2")
-  [ -n "$m" ] || return 0
-  pid=$(docker inspect -f '{{.State.Pid}}' "$name" 2>/dev/null) || return 0
-  [ "${pid:-0}" -gt 0 ] 2>/dev/null || return 0
-  # "2: eth0@if17: <...> ... link/ether MAC ..." -> 17, the peer's ifindex
-  idx=$(nsenter -t "$pid" -n ip -o link 2>/dev/null \
-    | awk -v m="$m" 'index(tolower($0), tolower(m)) {split($2, a, "@if"); sub(/:$/, "", a[2]); print a[2]; exit}')
-  [ -n "$idx" ] || return 0
-  for dev in /sys/class/net/*; do
-    [ "$(cat "$dev/ifindex" 2>/dev/null)" = "$idx" ] || continue
-    if [ "$(basename "$(readlink "$dev/master" 2>/dev/null)")" = "$2" ]; then
-      basename "$dev"
-    fi
-    return 0
-  done
+  port_macs "$2" | awk -v ip="$1" '$3 == ip {port=$1; n++} END {if (n == 1) print port}'
 }
 
 # pin_ip IP MAC BRIDGE PORT drops every frame (IPv4 or ARP) that claims IP
@@ -205,76 +187,198 @@ port_flags_ok() {
   link=$(bridge -d link show dev "$1" 2>/dev/null) || return 1
   case "$link" in *" locked on "*) ;; *) return 1 ;; esac
   case "$link" in *" learning off "*) ;; *) return 1 ;; esac
+  case "$link" in *" flood off "*) ;; *) return 1 ;; esac
 }
 
-# port_locked PORT: locked, not learning, and holding a static entry.
+# port_locked PORT [MAC]: locked, not learning, and holding a static entry
+# (for MAC when supplied; a stale entry must not prevent a replacement).
 port_locked() {
   port_flags_ok "$1" || return 1
-  bridge fdb show dev "$1" 2>/dev/null | grep -v permanent | grep -q ' static' || return 1
+  bridge fdb show dev "$1" 2>/dev/null | awk -v mac="${2:-}" '
+    / static/ && !/permanent/ && (mac == "" || tolower($1) == tolower(mac)) {found=1}
+    END {exit !found}' || return 1
 }
 
 # lock_port PORT sets the flags, only if they are not set yet (setting them
 # raises a link event, which the watcher would otherwise answer forever).
 lock_port() {
-  port_flags_ok "$1" || bridge link set dev "$1" locked on learning off 2>/dev/null
+  port_flags_ok "$1" || bridge link set dev "$1" locked on learning off flood off 2>/dev/null
 }
 
-# port_macs BRIDGE prints "PORT MAC" for every container on the network of the
-# same name. The MAC comes from Docker (not from the bridge's table, which a
-# forger could poison); the port is found by asking the container's own network
-# namespace which interface carries that MAC and which host interface is its
-# peer, and is cross-checked from the host side (the port must be on BRIDGE and
-# its peer must be that interface).
+# port_macs BRIDGE prints "PORT MAC IPv4" for every container on the network of the
+# same name. Match host-side link-netnsid to the kernel namespace ID of the
+# Docker PID. Never inspect links inside the workspace: NET_ADMIN can create
+# links with chosen indices/MACs there. Ambiguous namespaces or duplicate port
+# claims get no entry. Failed discovery revokes the old bindings, fail closed.
 port_macs() {
   pm_br=$1
-  docker network inspect "$pm_br" \
-    --format '{{range .Containers}}{{.Name}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
-    | while read -r pm_name pm_mac; do
-      [ -n "$pm_mac" ] || continue
+  pm_links=$(ip -o link show master "$pm_br" 2>/dev/null) || return 0
+  pm_rows=$(docker network inspect "$pm_br" \
+    --format '{{range .Containers}}{{.Name}} {{.MacAddress}} {{.IPv4Address}}{{"\n"}}{{end}}' 2>/dev/null) || return 0
+  echo "$pm_rows" | while read -r pm_name pm_mac pm_addr; do
+      if [ -z "$pm_mac" ] || [ -z "$pm_addr" ]; then continue; fi
+      pm_ip=${pm_addr%/*}
       pm_pid=$(docker inspect -f '{{.State.Pid}}' "$pm_name" 2>/dev/null) || continue
       [ "${pm_pid:-0}" -gt 0 ] 2>/dev/null || continue
-      # "2: eth0@if17: <...> ... link/ether MAC ..." -> "2 17"
-      pm_ids=$(nsenter -t "$pm_pid" -n ip -o link 2>/dev/null \
-        | awk -v m="$pm_mac" 'index(tolower($0), " link/ether " tolower(m) " ") {
-            i = $1; sub(/:$/, "", i); split($2, a, "@if"); sub(/:$/, "", a[2]); print i, a[2]; exit }')
-      [ -n "$pm_ids" ] || continue
-      pm_cidx=${pm_ids% *}
-      pm_hidx=${pm_ids#* }
-      for pm_p in /sys/class/net/"$pm_br"/brif/*; do
-        [ -e "$pm_p" ] || continue
-        pm_dev=${pm_p##*/}
-        [ "$(cat "/sys/class/net/$pm_dev/ifindex" 2>/dev/null)" = "$pm_hidx" ] || continue
-        [ "$(cat "/sys/class/net/$pm_dev/iflink" 2>/dev/null)" = "$pm_cidx" ] || continue
-        echo "$pm_dev $pm_mac"
-      done
-    done
+      pm_nsid=$(lsns --type net --task "$pm_pid" --noheadings --raw --output NETNSID 2>/dev/null) || continue
+      case "$pm_nsid" in '' | *[!0-9]*) continue ;; esac
+      pm_dev=$(echo "$pm_links" | awk -v id="$pm_nsid" '
+        {for (i=1; i<NF; i++) if ($i == "link-netnsid" && $(i+1) == id) {
+          port=$2; sub(/[@:].*/, "", port); n++
+        }} END {if (n == 1) print port}')
+      [ -n "$pm_dev" ] || continue
+      echo "$pm_dev $pm_mac $pm_ip"
+    done | awk '{n[$1]++; row[$1]=$0} END {for (p in n) if (n[p] == 1) print row[p]}'
 }
 
-# sync_ports BRIDGE locks every port of BRIDGE and gives each newly locked
-# port its static entry. Ports already locked with an entry are left alone.
-# Returns 1 if a port cannot be locked (too old kernel/iproute2), 2 if some
-# port's container could not be resolved yet (retry), 0 otherwise.
+# ebtables -C changes counters; unlike iptables it does NOT check a rule.
+# Compare the canonical listing for our unconditional (or bridge-scoped) jumps.
+eb_jump_exists() {
+  ej_rule="-j $3"
+  [ "$#" -lt 4 ] || ej_rule="--logical-in $4 -j $3"
+  ebtables -t "$1" -L "$2" --Lmac2 2>/dev/null | grep -qxF -- "$ej_rule"
+}
+
+# Source guards run in bridge nat PREROUTING before neighbour processing or
+# MAC learning. Every port, including newly attached/unresolved ports, must
+# match a Docker-assigned (port, Ethernet MAC, IPv4) tuple. ARP also checks its
+# sender hardware address. Everything else, including IPv6/VLAN frames, drops.
+#
+# Two chains per bridge allow updates without flushing an attached chain. The
+# replacement is built detached with an explicit final DROP, attached BEFORE
+# the old guard, then the old jump is removed. While both are attached their
+# allowed sets intersect: a failed update can deny traffic, never open a gap.
+# Do not rely on user-chain policies: ebtables-nft reports them as RETURN.
+source_chains() {
+  case "$1" in
+    "$BRIDGE") echo "TERMIPLUS-IP-SA TERMIPLUS-IP-SB" ;;
+    "$OFFLINE_BRIDGE") echo "TERMIPLUS-IP-OA TERMIPLUS-IP-OB" ;;
+    *) return 1 ;;
+  esac
+}
+
+# source_guard BRIDGE prints the attached guard's name. On first installation
+# attach a DROP-only chain before looking up containers. Never flush a chain
+# until its jump is removed and another guard is known to be attached.
+source_guard() {
+  sg_br=$1
+  sg_names=$(source_chains "$sg_br") || return 1
+  sg_a=${sg_names% *}
+  sg_b=${sg_names#* }
+  sg_listing=$(ebtables -t nat -L PREROUTING 2>/dev/null) || return 1
+  sg_active=$(echo "$sg_listing" | awk -v br="$sg_br" -v a="$sg_a" -v b="$sg_b" '
+    $1 == "--logical-in" && $2 == br && $3 == "-j" && ($4 == a || $4 == b) {print $4; exit}')
+  if [ -z "$sg_active" ]; then
+    ebtables -t nat -N "$sg_a" 2>/dev/null || ebtables -t nat -F "$sg_a" || return 1
+    ebtables -t nat -A "$sg_a" -j DROP || return 1
+    ebtables -t nat -I PREROUTING 1 --logical-in "$sg_br" -j "$sg_a" || return 1
+    sg_active=$sg_a
+  fi
+  sg_other=$sg_a
+  [ "$sg_other" != "$sg_active" ] || sg_other=$sg_b
+  # Recover a previous interrupted swap while retaining the active guard.
+  # Use the successful snapshot, not a failed listing mistaken for absence.
+  sg_count=$(echo "$sg_listing" | awk -v br="$sg_br" -v c="$sg_other" '
+    $1 == "--logical-in" && $2 == br && $3 == "-j" && $4 == c {n++} END {print n+0}')
+  while [ "$sg_count" -gt 0 ]; do
+    ebtables -t nat -D PREROUTING --logical-in "$sg_br" -j "$sg_other" || return 1
+    sg_count=$((sg_count - 1))
+  done
+  echo "$sg_active"
+}
+
+# source_pins_current BRIDGE BINDINGS checks exact rule count as well as every
+# tuple, so stale allows are revoked on disconnect, address or port reuse.
+source_pins_current() {
+  sc_names=$(source_chains "$1") || return 1
+  sc_chain=""
+  for sc_c in $sc_names; do
+    if eb_jump_exists nat PREROUTING "$sc_c" "$1"; then
+      [ -z "$sc_chain" ] || return 1
+      sc_chain=$sc_c
+    fi
+  done
+  [ -n "$sc_chain" ] || return 1
+  sc_listing=$(ebtables -t nat -L "$sc_chain" --Lmac2 2>/dev/null) || return 1
+  sc_count=1 # explicit final DROP
+  while read -r sc_dev sc_mac sc_ip; do
+    [ -n "$sc_dev" ] || continue
+    echo "$sc_listing" | grep -qxF -- "-p IPv4 -s $sc_mac -i $sc_dev --ip-src $sc_ip -j RETURN" || return 1
+    echo "$sc_listing" | grep -qxF -- "-p ARP -s $sc_mac -i $sc_dev --arp-ip-src $sc_ip --arp-mac-src $sc_mac -j RETURN" || return 1
+    sc_count=$((sc_count + 2))
+  done <<EOF
+$2
+EOF
+  echo "$sc_listing" | grep -qF "entries: $sc_count," || return 1
+  echo "$sc_listing" | tail -n 1 | grep -qxF -- "-j DROP" || return 1
+}
+
+sync_source_pins() {
+  ss_br=$1
+  ss_rows=$2
+  ss_active=$(source_guard "$ss_br") || return 1
+  source_pins_current "$ss_br" "$ss_rows" && return 0
+  ss_names=$(source_chains "$ss_br") || return 1
+  ss_next=${ss_names% *}
+  [ "$ss_next" != "$ss_active" ] || ss_next=${ss_names#* }
+  ebtables -t nat -N "$ss_next" 2>/dev/null || ebtables -t nat -F "$ss_next" || return 1
+  while read -r ss_dev ss_mac ss_ip; do
+    [ -n "$ss_dev" ] || continue
+    ebtables -t nat -A "$ss_next" -i "$ss_dev" -s "$ss_mac" -p IPv4 --ip-src "$ss_ip" -j RETURN || return 1
+    ebtables -t nat -A "$ss_next" -i "$ss_dev" -s "$ss_mac" -p ARP --arp-ip-src "$ss_ip" --arp-mac-src "$ss_mac" -j RETURN || return 1
+  done <<EOF
+$ss_rows
+EOF
+  ebtables -t nat -A "$ss_next" -j DROP || return 1
+  ebtables -t nat -I PREROUTING 1 --logical-in "$ss_br" -j "$ss_next" || return 1
+  ebtables -t nat -D PREROUTING --logical-in "$ss_br" -j "$ss_active" || return 1
+}
+
+# watcher fast path: a locked port still needs its source guard; the FDB alone
+# says nothing about IP ownership. Full tuple/policy checks run in sync_all.
+source_port_pinned() {
+  spp_names=$(source_chains "$1") || return 1
+  for spp_c in $spp_names; do
+    eb_jump_exists nat PREROUTING "$spp_c" "$1" || continue
+    ebtables -t nat -L "$spp_c" 2>/dev/null | grep -qF -- "-i $2 " && return 0
+  done
+  return 1
+}
+
+# sync_ports BRIDGE installs source guards before admitting any MAC into the
+# FDB, then locks all ports and supplies known static entries. Existing locked
+# ports are included in the source refresh. Unknown ports stay denied even if
+# an old FDB entry survives. 1 = error, 2 = unresolved container (retry).
 sync_ports() {
   sp_br=$1
-  [ -d "/sys/class/net/$sp_br/brif" ] || return 0
+  # Guard bridge names even before they exist: a later-created offline bridge
+  # must not admit an unresolved first port before the watcher sees its event.
+  source_guard "$sp_br" >/dev/null || return 1
+  if [ ! -d "/sys/class/net/$sp_br/brif" ]; then
+    sync_source_pins "$sp_br" ""
+    return $?
+  fi
+  sp_macs=$(port_macs "$sp_br")
+  if ! sync_source_pins "$sp_br" "$sp_macs"; then
+    echo "firewall: cannot synchronize IP/MAC source pins on $sp_br" >&2
+    return 1
+  fi
   sp_rc=0
-  sp_macs=""
   for sp_p in /sys/class/net/"$sp_br"/brif/*; do
     [ -e "$sp_p" ] || continue
     sp_dev=${sp_p##*/}
-    port_locked "$sp_dev" && continue
     if ! lock_port "$sp_dev"; then
-      [ -e "$sp_p" ] || continue # port vanished meanwhile
-      echo "firewall: cannot lock bridge port $sp_dev on $sp_br (needs Linux and iproute2 >= 6.2) - terminal MACs stay spoofable" >&2
+      [ -e "$sp_p" ] || continue
+      echo "firewall: cannot lock bridge port $sp_dev on $sp_br (needs Linux and iproute2 >= 6.2)" >&2
       sp_rc=1
       continue
     fi
-    [ -n "$sp_macs" ] || sp_macs=$(port_macs "$sp_br")
     sp_mac=$(echo "$sp_macs" | awk -v d="$sp_dev" '$1 == d {print $2; exit}')
     if [ -z "$sp_mac" ]; then
       [ "$sp_rc" -eq 1 ] || sp_rc=2
       continue
     fi
+    port_locked "$sp_dev" "$sp_mac" && continue
     if ! bridge fdb replace "$sp_mac" dev "$sp_dev" master static 2>/dev/null; then
       [ "$sp_rc" -eq 1 ] || sp_rc=2
     fi
@@ -290,7 +394,7 @@ sync_all() {
   for sa_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
     sa_one=0
     (
-      flock 9
+      flock 9 || exit 1
       sync_ports "$sa_br"
     ) 9>"$PORTLOCK_DIR/lock" || sa_one=$?
     if [ "$sa_one" -eq 1 ] || { [ "$sa_one" -ne 0 ] && [ "$sa_rc" -eq 0 ]; }; then
@@ -309,6 +413,12 @@ port_worker() {
     rm -f "$PORTLOCK_DIR/dirty"
     pw_rc=0
     sync_all || pw_rc=$?
+    # A recreated gateway/forwarder has a new MAC and port. Refresh its L3
+    # allowances and legacy pins as soon as source discovery succeeds, rather
+    # than waiting for the timer. Source guards remain attached on failure.
+    if [ "$pw_rc" -ne 1 ]; then
+      "$SCRIPT_DIR/firewall.sh" --if-needed || return 1
+    fi
     if [ "$pw_rc" -ne 2 ] && [ ! -e "$PORTLOCK_DIR/dirty" ]; then
       return "$pw_rc"
     fi
@@ -317,6 +427,11 @@ port_worker() {
   done
   echo "firewall: some bridge ports could not be matched to a container - they stay locked with no traffic" >&2
   return 2
+}
+
+# ip monitor prefixes removals with "Deleted", shifting the interface field.
+link_event_port() {
+  echo "$1" | awk '{i=($1 == "Deleted" ? 3 : 2); sub(/:$/, "", $i); sub(/@.*/, "", $i); print $i}'
 }
 
 # --lock-ports: one sync, then exit. 0 = all ports locked and resolved,
@@ -331,25 +446,35 @@ fi
 # joins a bridge, then give it its entry as soon as Docker lists the container.
 # The termiplus-firewall-watch timer re-syncs every 20 s as a backstop.
 if [ "${1:-}" = --watch-ports ]; then
-  if ! command -v nsenter >/dev/null 2>&1 || ! command -v flock >/dev/null 2>&1; then
-    echo "firewall: nsenter and flock are required to lock bridge ports" >&2
+  if ! command -v lsns >/dev/null 2>&1 || ! command -v flock >/dev/null 2>&1; then
+    echo "firewall: lsns (NETNSID) and flock are required to lock bridge ports" >&2
     exit 1
   fi
   mkdir -p "$PORTLOCK_DIR"
+  watch_rc=0
+  sync_all || watch_rc=$?
+  if [ "$watch_rc" -eq 1 ]; then
+    echo "firewall: cannot establish source guards/port locks; refusing watcher startup" >&2
+    exit 1 # systemd retries; do not report an unprotected watcher as healthy
+  fi
   (
     sleep 1 # let the monitor below start first, so no port slips between
     port_worker || true
   ) &
   worker=""
   ip -o monitor link | while read -r line; do
-    case "$line" in Deleted*) continue ;; esac
     for br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
       case "$line" in *" master $br "*) ;; *) continue ;; esac
       # "17: vethabc@if2: <...> ... master ot-sandbox ..." -> vethabc
-      dev=$(echo "$line" | awk '{sub(/:$/, "", $2); sub(/@.*/, "", $2); print $2}')
+      dev=$(link_event_port "$line")
       [ -n "$dev" ] || continue
-      port_locked "$dev" && continue
-      lock_port "$dev" || echo "firewall: cannot lock bridge port $dev on $br" >&2
+      case "$line" in
+        Deleted*) ;; # revoke the old tuple even if no replacement appears
+        *)
+          if port_locked "$dev" && source_port_pinned "$br" "$dev"; then continue; fi
+          lock_port "$dev" || echo "firewall: cannot lock bridge port $dev on $br" >&2
+          ;;
+      esac
       touch "$PORTLOCK_DIR/dirty"
       if [ -z "$worker" ] || ! kill -0 "$worker" 2>/dev/null; then
         port_worker &
@@ -360,17 +485,27 @@ if [ "${1:-}" = --watch-ports ]; then
   exit 1 # the monitor ended; systemd restarts the service
 fi
 
+# Serialize full applies and their current-state checks. Link events, policy
+# updates and the timer may race; none may flush/rebuild another apply's chains.
+mkdir -p "$PORTLOCK_DIR"
+exec 8>"$PORTLOCK_DIR/apply.lock"
+flock 8 || exit 1
+
 # --if-needed (for the termiplus-firewall-watch timer): only (re)apply when the
 # rules are missing or a pinned MAC no longer matches the running gateway or
 # forwarder, e.g. after a reboot or a recreated gateway. A full run briefly
 # rebuilds the chains, so it is not repeated while everything is current.
 rules_current() {
+  for rc_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    [ -d "/sys/class/net/$rc_br/brif" ] || continue
+    source_pins_current "$rc_br" "$(port_macs "$rc_br")" || return 1
+  done
   iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || return 1
   iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || return 1
   pinned=$(ebtables -t filter -L TERMIPLUS-AS 2>/dev/null) || return 1
-  ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || return 1
+  eb_jump_exists filter FORWARD TERMIPLUS-AS || return 1
   ports=$(ebtables -t nat -L TERMIPLUS-PORT 2>/dev/null) || return 1
-  ebtables -t nat -C PREROUTING -j TERMIPLUS-PORT 2>/dev/null || return 1
+  eb_jump_exists nat PREROUTING TERMIPLUS-PORT || return 1
   for ip in "$GATEWAY" "$FORWARDER"; do
     m=$(mac_of "$ip")
     [ -z "$m" ] && continue
@@ -398,7 +533,8 @@ if [ "${1:-}" = --if-needed ]; then
   lock_rc=0
   sync_all || lock_rc=$?
   if [ "$lock_rc" -eq 1 ]; then
-    echo "firewall: bridge ports could not be locked" >&2
+    echo "firewall: source guards/bridge ports could not be synchronized" >&2
+    exit 1
   fi
   if [ -z "$(mac_of "$GATEWAY")" ]; then
     exit 0 # gateway not (yet) running: nothing to pin, try again later
@@ -414,8 +550,8 @@ ensure_gateway_antispoof() {
     echo "firewall: ebtables not found - refusing, gateway source IP would be spoofable (#13)" >&2
     exit 1
   fi
-  if ! command -v nsenter >/dev/null 2>&1; then
-    echo "firewall: nsenter not found - refusing, cannot pin the gateway to its bridge port (#13)" >&2
+  if ! command -v lsns >/dev/null 2>&1; then
+    echo "firewall: lsns not found - refusing, cannot pin the gateway to its bridge port (#13)" >&2
     exit 1
   fi
   # Look everything up before touching a rule, so a refusal leaves the
@@ -469,9 +605,17 @@ ensure_gateway_antispoof() {
   if [ -n "$offline_gateway_mac" ]; then
     pin_ip "$OFFLINE_GATEWAY" "$offline_gateway_mac" "$OFFLINE_BRIDGE" "$offline_gateway_port"
   fi
-  ebtables -t filter -C FORWARD -j TERMIPLUS-AS 2>/dev/null || ebtables -t filter -I FORWARD 1 -j TERMIPLUS-AS
-  ebtables -t nat -C PREROUTING -j TERMIPLUS-PORT 2>/dev/null || ebtables -t nat -I PREROUTING 1 -j TERMIPLUS-PORT
+  eb_jump_exists filter FORWARD TERMIPLUS-AS || ebtables -t filter -I FORWARD 1 -j TERMIPLUS-AS
+  eb_jump_exists nat PREROUTING TERMIPLUS-PORT || ebtables -t nat -I PREROUTING 1 -j TERMIPLUS-PORT
 }
+# Source guards are independent of the legacy service pins: full applies never
+# flush an attached source guard, including during gateway/forwarder recreation.
+initial_lock_rc=0
+sync_all || initial_lock_rc=$?
+if [ "$initial_lock_rc" -eq 1 ]; then
+  echo "firewall: source pins/port locks failed; refusing full apply" >&2
+  exit 1
+fi
 ensure_gateway_antispoof
 
 # Each forwarder upstream (DNS_UPSTREAM, comma-separated) must be a plain IPv4

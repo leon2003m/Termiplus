@@ -10,6 +10,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"termiplus/internal/dockerapi"
@@ -119,12 +120,29 @@ func (m *manager) withHelper(ctx context.Context, userID, home string, fn func(h
 // archive), has the gateway's deadline, waits for one of a few global slots
 // and stops at the byte cap (exportLimits).
 func (m *manager) exportHome(ctx context.Context, userID, home string, w io.Writer) error {
-	lim := m.exportLimits
+	lim := &m.exportLimits
 	if lim.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, lim.timeout)
 		defer cancel()
 	}
+	// Charge one operation per principal before taking a global slot. Queued
+	// exports for the same helper/home must not consume every shared slot.
+	lim.mu.Lock()
+	if lim.users == nil {
+		lim.users = make(map[string]bool)
+	}
+	if lim.users[userID] {
+		lim.mu.Unlock()
+		return errExportBusy
+	}
+	lim.users[userID] = true
+	lim.mu.Unlock()
+	defer func() {
+		lim.mu.Lock()
+		delete(lim.users, userID)
+		lim.mu.Unlock()
+	}()
 	if lim.slots != nil {
 		select {
 		case lim.slots <- struct{}{}:
@@ -144,16 +162,67 @@ func (m *manager) exportHome(ctx context.Context, userID, home string, w io.Writ
 				_ = dw.SetWriteDeadline(d)
 			}
 		}
-		if lim.maxBytes <= 0 {
-			_, err = io.Copy(w, rc)
+		return copyHomeArchive(w, rc, lim.maxBytes)
+	})
+}
+
+// copyHomeArchive keeps Docker's tar byte-for-byte, but rejects an oversized
+// member at its header, before Docker streams a sparse file's expanded holes.
+// The writer also counts headers, padding and trailing bytes against the cap.
+// No Docker exec endpoint or running privileged backup helper is needed.
+func copyHomeArchive(w io.Writer, r io.Reader, maxBytes int64) error {
+	if maxBytes <= 0 {
+		_, err := io.Copy(w, r)
+		return err
+	}
+	cw := &archiveLimitWriter{w: w, remaining: maxBytes}
+	tr := tar.NewReader(io.TeeReader(r, cw))
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			// tar.Reader stops at the end marker. Preserve any remaining Docker
+			// padding while keeping the byte cap in force.
+			_, err = io.Copy(cw, r)
 			return err
 		}
-		n, err := io.Copy(w, io.LimitReader(rc, lim.maxBytes+1))
-		if err == nil && n > lim.maxBytes {
-			err = fmt.Errorf("%w (%d bytes)", errExportTooLarge, lim.maxBytes)
+		if err != nil {
+			return fmt.Errorf("read home archive header: %w", err)
 		}
-		return err
-	})
+		if h.Size > cw.remaining {
+			return fmt.Errorf("%w: member exceeds remaining archive budget", errExportTooLarge)
+		}
+		before := cw.remaining
+		if _, err := io.Copy(io.Discard, tr); err != nil {
+			return fmt.Errorf("read home archive member: %w", err)
+		}
+		// GNU/PAX sparse members may encode holes without putting their
+		// bytes on the wire. Charge those holes too, so many individually
+		// small sparse members cannot evade the cumulative expanded limit.
+		if encoded := before - cw.remaining; h.Size > encoded {
+			cw.remaining -= h.Size - encoded
+		}
+	}
+}
+
+type archiveLimitWriter struct {
+	w         io.Writer
+	remaining int64
+}
+
+func (w *archiveLimitWriter) Write(p []byte) (int, error) {
+	tooLarge := int64(len(p)) > w.remaining
+	if tooLarge {
+		p = p[:w.remaining]
+	}
+	n, err := w.w.Write(p)
+	w.remaining -= int64(n)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	if err == nil && tooLarge {
+		err = errExportTooLarge
+	}
+	return n, err
 }
 
 // exportLimits bound home exports (Config.ExportTimeout, ExportMaxBytes,
@@ -162,6 +231,8 @@ type exportLimits struct {
 	timeout  time.Duration
 	maxBytes int64
 	slots    chan struct{}
+	mu       sync.Mutex
+	users    map[string]bool
 }
 
 // deadlineWriter is a destination whose blocked writes can be cut off. The
@@ -175,6 +246,8 @@ type deadlineWriter interface {
 // errExportTooLarge: the home's tar is larger than the export cap, usually
 // because of sparse files, which the home quota barely charges.
 var errExportTooLarge = errors.New("the home is larger than the export limit")
+
+var errExportBusy = errors.New("a home export for this user is already in progress")
 
 // lockHome takes the locks of every container of the user that uses home, so
 // none of them is started while the home is rewritten, and stops the running

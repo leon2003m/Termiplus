@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [1.0.0] - 2026-11-05
 
+Republished with the workspace source-identity and home-export fixes below.
+The original 1.0.0 release was withdrawn. Upgrade the gateway image and the
+host firewall together; container images alone do not install the source guards.
+
+### Security
+
+- Bind every container on `ot-sandbox` and `ot-offline` to its Docker-assigned
+  bridge port, Ethernet MAC and IPv4 address, including the ARP sender address.
+  This closes cross-user ARP poisoning with an attacker's own MAC, which could
+  redirect gateway requests and expose another workspace's API key under Sysbox.
+- Drop traffic from unresolved ports and unsupported EtherTypes before bridge
+  learning; refresh source guards without flushing attached rules. Keep the
+  existing MAC port locks as an additional layer. Correct ebtables jump detection
+  (`-C` changes counters; it does not test rule presence).
+- Resolve bridge ports entirely from host namespace IDs and Docker metadata;
+  workspace root cannot forge discovery by creating links inside its namespace.
+  Link events refresh recreated gateway/forwarder pins, and network-policy file
+  changes start a repeatable reload service instead of an already-active boot unit.
+- Admit only one running or queued home export per user, returning 429 for
+  overlapping exports. Enforce configured export limits against raw tar bytes
+  and cumulative logical member sizes, rejecting oversized sparse members
+  before reading their expanded body.
+- This is a **host firewall update**: update the host checkout, reapply the
+  firewall and restart the port watcher. Updating container images alone does
+  not install this protection. See [deployment](docs/deploy-alpha.md#host-source-identity-update).
+
 The stable release packages the native Open WebUI 0.13.0 + Open Terminal
 0.16.0 integration validated in 1.0.0-rc.4. Termiplus supplies per-user
 isolation, lifecycle, persistent homes, backups and access management without

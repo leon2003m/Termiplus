@@ -3,7 +3,7 @@ REVISION  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 REGISTRY  ?= ghcr.io/leon2003m
 BUILD_ARGS = --build-arg VERSION=$(VERSION) --build-arg REVISION=$(REVISION)
 
-.PHONY: help fmt fmt-check vet staticcheck test test-plugin cover lint check map build scan clean
+.PHONY: help fmt fmt-check vet staticcheck test test-plugin test-firewall cover lint check map build scan clean
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -28,6 +28,10 @@ test-plugin: ## Open WebUI plugin tests against the real mcp binary (needs pytho
 	  TERMIPLUS_MCP_BIN="$$bin" python3 -I -B integrations/openwebui/test_termiplus_workspaces.py; \
 	  rc=$$?; rm -rf "$$(dirname "$$bin")"; exit $$rc
 
+test-firewall: ## Unprivileged bridge source-identity and fail-closed regressions
+	python3 -I -B test/firewall/test_source_pins.py
+	python3 -I -B test/firewall/test_units.py
+
 cover: ## Tests with coverage report
 	go test -race -count=1 -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
@@ -45,7 +49,7 @@ lint: fmt-check vet staticcheck ## Go linters
 	  cmp -s map/CLAUDE.md "$$f" || { echo "$$f differs from map/CLAUDE.md (run make map)"; exit 1; }; \
 	done
 
-check: lint test test-plugin ## Everything CI checks on code and config
+check: lint test test-plugin test-firewall ## Everything CI checks on code and config
 
 map: ## Regenerate map/AGENTS.md and map/routing.md from map/CLAUDE.md
 	cp map/CLAUDE.md map/AGENTS.md

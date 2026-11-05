@@ -10,6 +10,10 @@ produces: []
 
 A maintainer-pushed `v*` tag on `main` becomes signed, attested images on GHCR plus a GitHub release.
 
+The republished 1.0.0 security fix also needs the host checkout's firewall and systemd
+updates. Publishing or pulling its images does not install the source guards;
+follow [the host upgrade instructions](../../docs/deploy-alpha.md#host-source-identity-update).
+
 ## Input → Movement → Output
 
 The maintainer pushes `vX.Y.Z` or `vX.Y.Z-rc.N` on a commit already on `main`. `verify` checks that ancestry. `approve` waits in the protected `release` environment for a human. `images` then builds gateway, sockproxy, mcp, terminal and dns-forwarder for amd64 and arm64. `desktop` builds on the terminal image for amd64 only. Every image gets an SBOM, a provenance attestation and a cosign signature. The desktop package SBOM is generated with Trivy, attached with `cosign attest --type spdxjson`, and verified against the exact release workflow identity before publication; its inline file-level SBOM exceeds BuildKit's 80 MiB limit. Other images retain inline BuildKit SBOMs. `github-release` writes notes from `CHANGELOG.md`.

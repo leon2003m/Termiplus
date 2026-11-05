@@ -1,4 +1,39 @@
-# termiplus v0.1.0 live validation
+# Firewall validation
+
+## Current source-identity regression (2026-11-05)
+
+`source-pins.py` builds real Linux bridges and attacker/victim/gateway network
+namespaces with dummy addresses and an obviously fake bearer. It reproduces
+own-MAC/victim-IP ARP poisoning and HTTP credential interception before loading
+the actual source-guard functions, then checks prevention on both bridges,
+including forged victim MACs, idempotent refresh and unresolved mappings.
+
+```sh
+make test-firewall  # portable rule-state and injected-failure tests; also in CI
+sudo unshare --net python3 -I -B test/integration/source-pins.py
+```
+
+Run the kernel check only in a fresh isolated network namespace on a disposable
+Linux environment with Python, iproute2, util-linux and ebtables installed. It
+refuses a namespace containing any interface other than loopback and does not
+use Docker, real users or real keys. This test exercises actual bridge learning,
+ARP, HTTP and ebtables, but not Docker/sysfs port discovery or complete host
+firewall installation. It is separate from the historical acceptance below.
+
+On 2026-11-05, all 19 portable tests and the isolated kernel regression passed
+using ebtables-nft. The original interception was reproduced with a dummy key
+before the guard and prevented after it. The precise runner limits and tested
+discovery paths are recorded under Results below. Legacy ebtables and a complete
+Docker/Sysbox attack scenario were not exercised by this focused regression.
+
+A fresh DeepSeek security-review session was requested without test results.
+OpenCode rejected all three available routes before any review: V4.1 Flash Free
+returned HTTP 429 (free quota), OpenCode Go V4.1 Flash returned HTTP 429 (weekly
+quota), and the paid V4.1 Flash route returned HTTP 402 (insufficient funds).
+**No DeepSeek security review of this patch has completed.** Prior native-tool
+functional review is not a security audit of bridge isolation.
+
+## Historical termiplus v0.1.0 live validation
 
 This is the historical runtime/firewall acceptance record. Its results do not
 establish current native Desktop/Browser compatibility; see
@@ -184,6 +219,25 @@ work. If ebtables negation syntax differs on the host's ebtables build
 ---
 
 ## Results
+
+### 2026-11-05, isolated source-identity regression
+
+`source-pins.py` passed on Linux 6.18.60-1-lts with ebtables 1.8.13
+(`nf_tables`), in disposable user/PID/network/mount namespaces. Docker metadata
+was stubbed; host veth discovery, `lsns NETNSID`, bridge rules, ARP and HTTP
+were real. Both `ot-sandbox` and `ot-offline` reproduced victim-IP takeover
+and interception of an obviously fake bearer before enforcement. After applying
+the source guards, own-MAC/victim-IP and combined MAC/IP forgery were blocked,
+the gateway reached the actual victim, and unresolved mappings stayed denied.
+Host namespace discovery also ignored forged links inside the attacker namespace.
+
+The runner used no external network, Docker daemon or real identities. Source
+and tools were read-only; writable scratch was capped at 64 MiB, with 1 GiB RAM,
+one CPU, 64 tasks, a 90-second deadline and mount syscalls denied after setup.
+This validates the source guards and namespace discovery, not the entire Docker,
+Sysbox, DNS or systemd deployment. `make map` and `make check` also passed in a
+separate bounded offline sandbox, including Go race tests, 30 plugin tests and
+19 unprivileged firewall tests.
 
 ### 2026-10-13, throwaway VM
 
