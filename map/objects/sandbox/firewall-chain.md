@@ -26,9 +26,18 @@ A terminal has root inside its sandbox. So isolation cannot depend on anything i
 
 ## Shape
 
+- Compose `ip_range` reserves the low half of each sandbox subnet for static
+  services. A workspace at the forwarder address cannot gain DNS privileges:
+  `service_owned` requires the matching IP/MAC and trusted `dns-forwarder` Compose
+  label, rejects managed workspaces, and source guards require the resolved port.
 - Variables: `SANDBOX`, `GATEWAY=.2`, `FORWARDER=.3`, `BRIDGE=ot-sandbox`, `OFFLINE_BRIDGE=ot-offline`, `OFFLINE_SUBNET`, `OFFLINE_GATEWAY=172.30.1.2`, `EGRESS_RULES`, `DNS_UPSTREAM` (from the environment or `deploy/.env`).
 - `apply_ip_policy` renders and validates both families, then replaces only owned chains and their hooks using `iptables-restore` / `ip6tables-restore --noflush -w 10`. Each family commits atomically; Docker and unrelated chains survive. A failure leaves that family's previous complete policy and no completion marker, so the next timer retries. Static denies are installed without a running gateway; gateway allowances require resolved pins.
-- `--if-needed` checks the completion marker against the complete canonical L3 chain hash and a fingerprint of the script, egress file, upstreams and service identities. It also verifies first-position hooks and source tuples on both bridges. Missing/changed rules, an incomplete apply or a changed policy cannot pass the fast path.
+- `--if-needed` checks the completion marker against the complete canonical L3 and legacy service-pin chain hash and a fingerprint of the script, egress file, upstreams and service identities. It also verifies first-position hooks and source tuples on both bridges. Missing/changed rules, an incomplete apply or a changed policy cannot pass the fast path.
+- `snapshot_discovery` caches one resolved observation per bridge for a full apply
+  or `--if-needed` run. `snapshot_services` feeds the same identities into legacy
+  pins, rendering and `policy_fingerprint`; absent-to-present changes invalidate
+  the next run rather than marking unrendered identities current. Watchers refresh
+  discovery each iteration. The script hash follows the actual invoked filename.
 - `policy_destination_ok` accepts canonical IPv4 CIDRs only, rejects host bits and overlaps with fixed never-allowed ranges, and validates plain upstream IPv4 addresses.
 - Port lock: `sync_all` (both bridges, under `flock`) runs at the end of every full apply and inside `--if-needed`; `--lock-ports` runs one pass (exit 0 all done, 1 cannot lock, 2 some MAC unknown yet); `--watch-ports` follows `ip monitor link` and locks each new port as it joins a bridge, then a worker fills its FDB entry.
 - Bridge netfilter must be on (`deploy/sysctl.d/90-termiplus-bridge.conf`, `ensure_bridge_netfilter`).

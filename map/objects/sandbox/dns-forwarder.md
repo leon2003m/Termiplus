@@ -16,7 +16,9 @@ A dnsmasq container at 172.30.0.3 on `ot-sandbox`, the only resolver terminals m
 Terminals must resolve names without reaching internal resolvers directly, and DNS must never be bypassed to a public resolver. So there is one forwarder:
 
 - Its upstream is required and is the operator's own resolver. It is never hard-coded and never public.
-- Its address is MAC-pinned in the firewall.
+- Its address is MAC/IP/host-port pinned in the firewall. The trusted Compose
+  `dns-forwarder` label is required; a managed workspace at `.3` receives no
+  forwarder privileges. Compose reserves low addresses outside the dynamic pool.
 - The sockproxy refuses any container DNS setting other than exactly this address (`ALLOWED_DNS`).
 - The admin's DNS entries reach it as a rendered hosts dir. dnsmasq reloads on change via inotify, so no sidecar is needed.
 

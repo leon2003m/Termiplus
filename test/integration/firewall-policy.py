@@ -5,16 +5,26 @@ tools. No Docker, external interfaces, production addresses or traffic probes.
 The trusted launcher must provide resource limits and read-only source mounts.
 """
 import importlib.util
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+BACKEND = sys.argv[1] if len(sys.argv) > 1 else "nft"
+assert BACKEND in ("nft", "legacy"), "expected nft or legacy"
+
+
+def backend_tool(name):
+    for prefix in ("iptables", "ip6tables"):
+        if name.startswith(prefix):
+            return prefix + "-" + BACKEND + name[len(prefix):]
+    return name
 
 
 def command(args, **kwargs):
-    return subprocess.run(args, text=True, capture_output=True, timeout=10, **kwargs)
+    return subprocess.run([backend_tool(args[0])] + args[1:], text=True, capture_output=True, timeout=10, **kwargs)
 
 
 def checked(args, **kwargs):
@@ -43,21 +53,41 @@ def main():
     for tool in ("iptables", "ip6tables"):
         checked([tool, "-w", "10", "-N", "OTHER"])
         checked([tool, "-w", "10", "-A", "OTHER", "-j", "DROP"])
+    for table, chain in (("filter", "TERMIPLUS-AS"), ("nat", "TERMIPLUS-PORT")):
+        checked(["ebtables", "-t", table, "-N", chain, "-P", "RETURN"])
+    service_pin = ["ebtables", "-t", "filter", "-A", "TERMIPLUS-AS", "-p", "IPv4",
+                   "--ip-src", "172.30.0.2", "-s", "!", "02:00:00:00:00:02", "-j", "DROP"]
+    checked(service_pin)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "firewall.sh").write_text(policy.SOURCE)
         (root / "egress.rules").write_text("10.2.0.0/16 443 tcp\n")
-        env = {"PATH": "/usr/bin:/bin", "SCRIPT_DIR": tmp, "PORTLOCK_DIR": tmp,
+        tools = root / "bin"
+        tools.mkdir()
+        for family in ("iptables", "ip6tables"):
+            for suffix in ("", "-restore", "-save"):
+                name = family + suffix
+                (tools / name).symlink_to("/usr/bin/" + backend_tool(name))
+        env = {"PATH": str(tools) + ":/usr/bin:/bin", "SCRIPT_DIR": tmp, "PORTLOCK_DIR": tmp,
                "EGRESS_RULES": str(root / "egress.rules")}
 
         def shell(code, success=True):
-            p = command(["/bin/sh"], input="set -eu\n" + policy.VARIABLES + policy.FUNCTIONS + "\n" + code, env=env)
+            p = command(["/bin/sh"], input="set -eu\n" + policy.VARIABLES + policy.FUNCTIONS +
+                        '\nebtables() { command ebtables "$@"; }\n' + code, env=env)
             assert (p.returncode == 0) == success, p.stderr
             return p.stdout
 
         shell("apply_ip_policy; rules_current")
         checked(["iptables", "-w", "10", "-C", "DOCKER-USER", "-j", "RETURN"])
         original = snapshot()
+        # Actual canonical ebtables output, including MAC formatting, is part of
+        # the completion hash. Removing a pin must invalidate the fast path.
+        deleted_pin = list(service_pin)
+        deleted_pin[3] = "-D"
+        checked(deleted_pin)
+        shell("rules_current", success=False)
+        checked(service_pin)
+        shell("rules_current")
         for tool in ("iptables", "ip6tables"):
             checked([tool, "-w", "10", "-C", "OTHER", "-j", "DROP"])
 
@@ -69,7 +99,7 @@ def main():
         assert snapshot() == original, "failed restore changed live policy"
 
         # Terminate after feeding a full replacement without COMMIT: no live gap.
-        p = subprocess.Popen(["iptables-restore", "-w", "10", "--noflush"],
+        p = subprocess.Popen([backend_tool("iptables-restore"), "-w", "10", "--noflush"],
                              stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, text=True)
         try:
@@ -99,7 +129,7 @@ def main():
         assert "-i ot-offline -j DROP" in text
         for tool in ("iptables", "ip6tables"):
             checked([tool, "-w", "10", "-C", "OTHER", "-j", "DROP"])
-    print("PASS: real-kernel failed/interrupted restore retained complete policy; "
+    print("PASS (" + BACKEND + "): real-kernel failed/interrupted restore retained complete policy; "
           "retry repaired missing rule; absent gateway retained denies; unrelated chains preserved.")
 
 

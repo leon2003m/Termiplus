@@ -31,6 +31,12 @@ func NewDesktopHandler(srv *Server, _ *IdentityStore, gatewayBase, controlKey st
 	return &DesktopHandler{srv: srv, gateway: u.String(), controlKey: controlKey}, nil
 }
 
+var shareScreens preview.ScreenBudget
+
+// Count owners separately: recipients cannot fill all four response slots just
+// by opening links to one slow workspace. Two viewers may still share an owner.
+var shareOwners = preview.NewScreenBudget(4, 2)
+
 var shareClient = &http.Client{Transport: newRelayTransport(15e9), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +78,32 @@ func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><title>Shared screen</title><h1>Shared screen · view only</h1><p>Updates every five seconds. Keyboard, mouse, clipboard and audio are not shared.</p><img id="screen" alt="Shared desktop"><p id="status"></p><script src="`+sharePathPrefix+token+`/viewer.js" defer></script>`)
 	case "viewer.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		_, _ = io.WriteString(w, `const image=document.getElementById("screen"); const status=document.getElementById("status"); function refresh(){if(document.hidden)return; image.src=location.pathname.replace(/\/?$/, "/")+"screen.png?t="+Date.now();} image.onload=()=>status.textContent=""; image.onerror=()=>{image.removeAttribute("src");status.textContent="Screen unavailable, share expired or revoked.";}; refresh(); setInterval(refresh,5000); document.addEventListener("visibilitychange",refresh);`)
+		_, _ = io.WriteString(w, `const image=document.getElementById("screen"); const status=document.getElementById("status"); function refresh(){if(document.hidden)return; image.src=location.pathname.replace(/\/?$/, "/")+"screen.png?t="+Date.now();} image.onload=()=>status.textContent=""; image.onerror=()=>{image.removeAttribute("src");status.textContent="Screen unavailable, busy, expired or revoked.";}; refresh(); setInterval(refresh,5000); document.addEventListener("visibilitychange",refresh);`)
 	case "screen.png":
 		relayCtx, done := d.srv.shares.relayContext(r.Context(), sh)
 		defer done()
 		ctx, cancel := context.WithTimeout(relayCtx, 15*time.Second)
 		defer cancel()
+		response, err := preview.BoundResponse(ctx, w)
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		defer response.Close()
+		work, ok := shareScreens.Begin(p.UserID)
+		if !ok {
+			w.Header().Set("Retry-After", "1")
+			forwardError(w, http.StatusTooManyRequests, "Screen busy. Try again shortly.")
+			return
+		}
+		defer work.Close()
+		ownerWork, ok := shareOwners.Begin(sh.Owner)
+		if !ok {
+			w.Header().Set("Retry-After", "1")
+			forwardError(w, http.StatusTooManyRequests, "Screen busy. Try again shortly.")
+			return
+		}
+		defer ownerWork.Close()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.gateway+"/control/v1/screen/"+url.PathEscape(sh.Session), nil)
 		if err != nil {
 			forwardError(w, 502, "Screen unavailable.")
@@ -91,9 +117,21 @@ func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusGatewayTimeout {
+				forwardError(w, 504, "Screen fetch timed out.")
+			} else {
+				forwardError(w, 502, "Screen unavailable.")
+			}
+			return
+		}
 		data, err := io.ReadAll(io.LimitReader(resp.Body, preview.MaxScreenBytes+1))
-		if err != nil || resp.StatusCode != 200 {
+		if err != nil {
 			forwardError(w, 502, "Screen unavailable.")
+			return
+		}
+		if !work.BeginImage(ctx) {
+			forwardError(w, http.StatusGatewayTimeout, "Screen processing timed out.")
 			return
 		}
 		data, err = preview.Screen(data)
@@ -101,9 +139,14 @@ func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			forwardError(w, 502, "Invalid screen.")
 			return
 		}
+		work.ImageReady()
 		// Revocation/expiry also wins over a response that arrived during cancellation.
 		if _, ok := d.srv.shares.Lookup(token); !ok || ctx.Err() != nil {
 			forwardError(w, 404, "Share expired or revoked.")
+			return
+		}
+		if err := response.StartWrite(len(data)); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "image/png")

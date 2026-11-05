@@ -27,13 +27,26 @@ expiry and optional named recipient, and serves its own HTML plus normalized
 PNG only. The image comes from `/control/v1/screen/<session>` as the owner;
 `internal/gateway/preview.go:serveScreen` checks ownership and running state.
 Images refresh every five seconds. Input, clipboard, audio and all WebSocket
-upgrades are refused. Revoke/expiry cancels active reads; reads have time and
-byte/dimension bounds. This is periodic viewing, not full-motion streaming.
+upgrades are refused. Revoke/expiry cancels active reads and interrupts blocked
+socket writes. Reads have time and byte/dimension bounds; encoding stops at its
+output limit. Request deadlines are 15 seconds for screens and five for previews. Workspace
+headers/body fetches have an independent three-second deadline. Normalized
+image writes get two to four seconds, capped by the request/share deadline and
+covering the final HTTP flush. This is periodic viewing, not full-motion
+streaming.
 
 Console previews use the same native `/desktop/screenshot` with `X-User-Id`,
 320-pixel normalization and the existing 30-second cache. They do not start a
 stopped container. `internal/preview/image.go` rejects invalid/oversized images
 and re-encodes pixels. See [Share](../objects/control-plane/share.md).
+`internal/preview/response.go` provides socket cancellation and per-service
+admission: four MCP responses (one per viewer, at most two per owner), eight
+gateway responses (four
+per user), and one decoder/encoder per service. Workspace fetches, cache hits
+and preview mutex waits never hold that image slot. Admitted decoder waiters
+are bounded by the response limit and context. Excess responses return 429.
+Fetch/decoder timeouts select 504; write-start failures select 503, never an
+implicit empty 200. Cancelled sockets may prevent delivery of that status.
 
 Changes affect the desktop overlay, image smoke tests, MCP/gateway share tests
 and OIDC fixtures. They must preserve tenant routing and read-only recipient

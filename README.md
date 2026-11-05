@@ -432,7 +432,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `ADMIN_API_KEY` / `_FILE` | gateway | empty (admin API off); min. 32 chars, must differ from `GATEWAY_API_KEY` |
 | `NETPOLICY_FILE`, `NETPOLICY_DNSMASQ_FILE`, `NETPOLICY_EGRESS_FILE` | gateway | under `/data/netpolicy/` |
 | `DNS_UPSTREAM` | dns-forwarder | required with the overlay; your resolver(s), comma-separated, never public |
-| `FORWARDER_IP` | overlay | `172.30.0.3` (must be inside `172.30.0.0/24`) |
+| `FORWARDER_IP` | overlay | `172.30.0.3`; static service address outside the dynamic `172.30.0.128/25` pool |
 
 ## Testing
 

@@ -118,6 +118,26 @@ the host's `link-netnsid` to Docker's PID namespace using `lsns`; workspace-owne
 interface names, indices and MAC addresses are not trusted. Failed or ambiguous
 discovery leaves the affected ports denied.
 
+Docker must use its **iptables firewall backend**, with `DOCKER-USER` present.
+The iptables tools may use either the legacy or nft compatibility implementation;
+Docker's native nftables backend is unsupported. Without `DOCKER-USER`, validation
+fails before any L3 transaction, including the static denies, commits. Docker may
+also move its IPv6 jump above `TERMIPLUS6` on restart; the next timer apply restores
+Termiplus's first-position hook.
+
+Both Compose networks allocate workspace addresses only from their upper `/25`
+(`172.30.0.128/25` and `172.30.1.128/25`). Low addresses are reserved for static
+services, including the gateway `.2` and DNS forwarder `.3`, even when those
+services are stopped. **Updating Compose does not change an existing network's
+IPAM.** During maintenance, stop/remove the attached containers, recreate both
+sandbox networks with the new ranges, then recreate services and workspaces.
+Preserve all home volumes; do not use `down -v`. Existing low-address workspaces
+must be recreated. The forwarder allowance additionally requires the Docker
+Compose service label `com.docker.compose.service=dns-forwarder`, matching IP/MAC
+and a resolved host port. A `termiplus.managed=true` container never qualifies.
+An absent or unverified forwarder receives neither DNS allowances nor a special
+source-address DROP; it remains subject to ordinary terminal isolation rules.
+
 During a maintenance window, stop untrusted workspace workloads, update the host
 checkout to the fixed revision and use that checkout's paths below (adjust the
 installed unit's `ExecStart` if necessary):
@@ -147,7 +167,11 @@ committing each family atomically. An interrupted update retains that family's
 previous complete rules. Only Termiplus chains and hooks are replaced; Docker
 and unrelated rules are preserved. A completion marker in
 `/run/termiplus-portlock/policy.applied` binds full chain contents to the script,
-egress file, upstreams and service identities. Missing rules or changed policy
+egress file, upstreams and service identities. Each apply/current-state check
+uses one port-discovery snapshot per bridge for source guards, service pins,
+rendering and the marker. A service appearing during an apply changes the next
+check's fingerprint instead of certifying rules that omitted it. Legacy service
+pin chain contents are hashed too. Missing rules or changed policy
 inputs cause the timer to retry. Static denies remain installed when the gateway
 is absent. The DNS forwarder may reach only validated upstreams on TCP/UDP 53;
 admin exceptions do not widen its access.
@@ -191,6 +215,20 @@ The console manages lifecycle, backups, access and screen shares. It no longer
 opens its own interactive desktop or forwards arbitrary app ports. The retained
 `DESKTOP_STREAM_URL` setting now means the **screen-share origin**. Remove old
 forward-service settings and routes when upgrading. See [migration](mcp.md#migration-from-the-alpha-checkpoint).
+
+Screen-share requests have a 15-second deadline and console thumbnails five
+seconds. Workspace fetches have a separate three-second deadline, including
+headers and body, returning 504 on timeout. After normalization, writes have two
+seconds plus one second per 4 MiB
+(at most four seconds), capped by the request/share deadline. Revoking or
+expiring a share interrupts a blocked write. MCP accepts four image responses,
+one per viewer and at most two per owner; gateway accepts eight, at most four
+per user. Only decoding and
+encoding are serialized; slow workspace fetches and cache hits do not hold that
+slot. Excess responses return 429 with `Retry-After: 1`; the share viewer retries
+at its normal five-second interval. Decoder timeout/write-start errors select
+504/503 respectively; an already closed socket may prevent error delivery.
+These bounds also apply behind a proxy.
 
 ## Verification
 

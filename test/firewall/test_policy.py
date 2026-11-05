@@ -16,6 +16,8 @@ SOURCE = (ROOT / "deploy/firewall.sh").read_text()
 VALIDATION = SOURCE[SOURCE.index("policy_destination_ok() {"):SOURCE.index("# Bridge-netfilter")]
 CURRENT = SOURCE[SOURCE.index("policy_fingerprint() {"):SOURCE.index('if [ "${1:-}" = --if-needed ]')]
 RENDER = SOURCE[SOURCE.index("upstream_ok() {"):SOURCE.index("\napply_ip_policy\n")]
+DISCOVERY = SOURCE[SOURCE.index("mac_of() {"):SOURCE.index("# pin_ip IP")]
+PORT_DISCOVERY = SOURCE[SOURCE.index("port_macs() {"):SOURCE.index("# ebtables -C")]
 FUNCTIONS = VALIDATION + CURRENT + RENDER
 VARIABLES = """
 BRIDGE=ot-sandbox
@@ -29,6 +31,11 @@ DNS_UPSTREAM=192.0.2.53
 mac=02:00:00:00:00:02
 forwarder_mac=02:00:00:00:00:03
 offline_gateway_mac=02:00:00:00:01:02
+port=veth-gateway
+forwarder_port=veth-forwarder
+offline_gateway_port=veth-offline
+SCRIPT_FILE=$SCRIPT_DIR/firewall.sh
+ebtables() { printf '%s\\n' "${SERVICE_PINS:-service-pins}"; }
 mac_of() { echo 02:00:00:00:00:02; }
 port_of() { echo veth-service; }
 port_macs() { :; }
@@ -159,7 +166,7 @@ class Policy(unittest.TestCase):
         self.assertEqual(verdict(text, src="172.30.0.2", dst="172.30.0.150", outgoing="ot-sandbox"), "DROP")
         self.assertEqual(verdict(text, incoming="ot-offline", src="172.30.1.150"), "DROP")
         self.assertEqual(verdict(text, chain="TERMIPLUS-IN", incoming="ot-offline", state="ESTABLISHED"), "DROP")
-        self.assertEqual(verdict(text, src="172.30.0.3", dst="198.51.100.1"), "DROP")
+        self.assertEqual(verdict(text, src="172.30.0.3", dst="198.51.100.1"), "RETURN")
         self.assertEqual(verdict(text, dst="198.51.100.1"), "RETURN")
 
     def test_gateway_connections_and_terminal_dns_keep_working(self):
@@ -191,6 +198,75 @@ class Policy(unittest.TestCase):
         s["v4"]["DOCKER-USER"].insert(0, ["-A", "DOCKER-USER", "-j", "ACCEPT"])
         self.state.write_text(json.dumps(s))
         self.shell("rules_current", success=False)
+
+    def test_service_pin_contents_and_renamed_script_are_checked(self):
+        self.shell("apply_ip_policy; rules_current")
+        self.shell("SERVICE_PINS=missing-pin; rules_current", success=False)
+        (self.root / "installed-firewall").write_text(SOURCE)
+        self.shell('SCRIPT_FILE=$SCRIPT_DIR/installed-firewall; apply_ip_policy; rules_current')
+        with (self.root / "installed-firewall").open("a") as f:
+            f.write("\n# changed installed script\n")
+        self.shell('SCRIPT_FILE=$SCRIPT_DIR/installed-firewall; rules_current', success=False)
+
+    def test_workspace_at_forwarder_address_gets_no_service_privileges(self):
+        # Real service_owned checks Docker metadata, not merely the address.
+        docker = self.root / "docker"
+        docker.write_text("""#!/bin/sh
+if [ "$1" = network ]; then echo 'workspace-id 02:00:00:00:00:03 172.30.0.3/24'
+else echo 'dns-forwarder true'; fi
+""")
+        docker.chmod(0o755)
+        text = self.shell("""
+port_macs() { printf '%s\\n' 'veth-workspace 02:00:00:00:00:03 172.30.0.3'; }
+""" + DISCOVERY + """
+snapshot_services
+[ -z "$forwarder_mac" ] && [ -z "$forwarder_port" ]
+render_ipv4
+""")
+        for proto in ("udp", "tcp"):
+            self.assertEqual(verdict(text, dst="172.30.0.3", dport="53", proto=proto,
+                                     outgoing="ot-sandbox"), "DROP")
+        self.assertEqual(verdict(text, src="172.30.0.3", dst="198.51.100.1"), "RETURN")
+        self.assertNotIn("-s 172.30.0.3 -j DROP", text)
+        self.assertNotIn("-d 172.30.0.3 -p udp --dport 53 -j ACCEPT", text)
+
+    def test_absent_then_present_gateway_cannot_certify_unrendered_identity(self):
+        # One observation supplies service pins, rendered rules and marker.
+        # The next invocation observes the new gateway and must reapply.
+        code = PORT_DISCOVERY + DISCOVERY + """
+source_guard() { :; }
+ip() {
+  if [ "$2" = link ]; then
+    echo '7: veth-new@if2: <UP> master ot-sandbox link-netnsid 5'
+  fi
+}
+docker() {
+  if [ "$1" = network ]; then
+    n=0; [ ! -f "$PORTLOCK_DIR/discovery-count" ] || read -r n <"$PORTLOCK_DIR/discovery-count"
+    n=$((n+1)); echo "$n" >"$PORTLOCK_DIR/discovery-count"
+    if [ "$3" = ot-sandbox ] && [ "$n" -gt 1 ]; then
+      echo 'gateway 02:00:00:00:00:02 172.30.0.2/24'
+    fi
+  else echo 123; fi
+}
+lsns() { echo 5; }
+snapshot_discovery
+snapshot_services
+[ -z "$mac" ]
+apply_ip_policy
+rules_current
+render_ipv4
+unset PORT_SNAPSHOT_READY
+snapshot_discovery
+snapshot_services
+[ "$mac" = 02:00:00:00:00:02 ]
+! rules_current
+"""
+        text = self.shell(code)
+        self.assertNotIn("-s 172.30.0.2 -d 172.30.0.0/24 -j ACCEPT", text)
+        # Exactly one network discovery per bridge per snapshot, regardless of
+        # fingerprinting, rendering, rules_current or repeated service lookups.
+        self.assertEqual((self.root / "discovery-count").read_text().strip(), "4")
 
     def test_restore_failure_keeps_complete_old_policy_and_retry_repairs(self):
         self.shell("apply_ip_policy")
