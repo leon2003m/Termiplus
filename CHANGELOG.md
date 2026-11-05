@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- Complete native desktop workspace image with private Sysbox Docker,
+  scientific Python/notebooks, LibreOffice and standard development tools.
+
+### Changed
+
+- Ship Desktop and Temporary desktop profiles with Chromium, Dolphin, Kate,
+  XFCE Terminal and btop; retain persistent homes and existing resource limits.
+
+### Fixed
+
+- Restore native desktop theme/wallpaper and application defaults, hide session
+  controls, and recover malformed saved settings without losing their originals.
+- Bound native pointer synchronization and report unknown X11 keys as failed
+  actions with partial-batch progress instead of silently succeeding.
+
 ### Changed
 - Integrate Open WebUI 0.13 native workspaces with Open Terminal 0.16; route
   native Desktop, Browser, events, files, Git and app-preview protocols per user/chat.

@@ -1,12 +1,23 @@
 {
-  "default": { "label": "Terminal",
-               "description": "Your own Linux terminal. Files in your home folder are kept between sessions.",
-               "runtime": "runsc",       "memory_mb": 2048, "cpus": 2, "pids": 512 },
-  "scratch": { "label": "Temporary terminal",
-               "description": "A throwaway terminal for one chat. Everything is deleted after 15 minutes without use.",
-               "runtime": "runsc",       "memory_mb": 2048, "cpus": 2, "pids": 512,
-               "storage": "ephemeral", "idle_timeout": "15m", "max_per_user": 3 },
-  "sysbox":  { "label": "Terminal with Docker",
-               "description": "Like Terminal, but you can run Docker containers and services inside it, with more memory and CPU. Same home folder as Terminal.",
-               "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 4, "pids": 1024, "home": "default" }
+  "default": {
+    "label": "Desktop",
+    "description": "Your Linux workspace with desktop, browser, files and terminal. Files in your home folder are kept between sessions.",
+    "runtime": "sysbox-runc",
+    "memory_mb": 2048,
+    "cpus": 2,
+    "pids": 512,
+    "desktop": true
+  },
+  "scratch": {
+    "label": "Temporary desktop",
+    "description": "A fresh desktop workspace for one chat. Everything is deleted after 15 minutes without use.",
+    "runtime": "sysbox-runc",
+    "memory_mb": 2048,
+    "cpus": 2,
+    "pids": 512,
+    "storage": "ephemeral",
+    "idle_timeout": "15m",
+    "max_per_user": 3,
+    "desktop": true
+  }
 }

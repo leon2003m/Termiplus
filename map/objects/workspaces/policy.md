@@ -57,3 +57,11 @@ Citations: `internal/gateway/lifecycle.go:23-60` (Policy), `internal/gateway/lif
 ## Native integration update (2026-11-04)
 
 Desktop now enables native OPEN_TERMINAL_ENABLE_DESKTOP and OPEN_TERMINAL_ENABLE_BROWSER. Plain policies explicitly disable both. Discovery separates runtime, image, egress and feature flags; no added Docker capability, endpoint, mount or network. Source: internal/gateway/lifecycle.go and gateway.go:specPolicies.
+
+## Desktop defaults (2026-11-04)
+
+`deploy/policies.json` now ships only `default` and `scratch`, both Sysbox with
+desktop/browser enabled. The original `default` home group stays unchanged;
+legacy `desk`/`sysbox` share that home and are retired from the shipped picker.
+Custom policies may still disable capabilities explicitly. Resource limits are
+unchanged from the original default/scratch policies.

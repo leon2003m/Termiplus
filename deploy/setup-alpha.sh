@@ -148,7 +148,7 @@ Next steps
    $DESKTOP_PUBLIC_URL -> 127.0.0.1:4181 (desk-auth, console),
    $DESKTOP_STREAM_URL -> 127.0.0.1:4183 (desk-stream-auth, screen shares).
    Open WebUI and the oauth2-proxies must reach $ISSUER under that same URL.
-2. Start (TERMINAL_IMAGE = the desktop image if you want desktops; the
+2. Start (TERMINAL_IMAGE = the complete desktop image; the
    mcp-users overlay enables human administration of group membership):
      docker compose -f docker-compose.yml -f docker-compose.mcp.yml \\
        -f docker-compose.desktop.yml -f docker-compose.keycloak.yml \\

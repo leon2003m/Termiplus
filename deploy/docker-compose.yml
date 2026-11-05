@@ -2,7 +2,7 @@
 # For the recommended setup on a dedicated VM see docker-compose.separate-vm.yml.
 #
 # Required environment (e.g. in deploy/.env, which is gitignored):
-#   TERMINAL_IMAGE  terminal image, ideally pinned: ghcr.io/leon2003m/termiplus-terminal@sha256:...
+#   TERMINAL_IMAGE  complete workspace image, ideally pinned: ghcr.io/leon2003m/termiplus-desktop@sha256:...
 #   DOCKER_GID      group id owning /var/run/docker.sock:  stat -c %g /var/run/docker.sock
 # Optional:
 #   TERMIPLUS_VERSION  gateway/sockproxy image tag (default: latest release you pulled)
