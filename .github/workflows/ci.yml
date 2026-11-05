@@ -63,7 +63,7 @@ jobs:
           exit "$rc"
       - name: shellcheck
         if: success() || failure()
-        run: shellcheck --format=gcc deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/alpha-e2e.sh test/integration/oidc/run.sh test/integration/oidc/desktop.sh image/desktop/start-desktop.sh .github/scripts/*.sh
+        run: shellcheck --format=gcc deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/run.sh test/integration/alpha-e2e.sh test/integration/oidc/run.sh test/integration/oidc/desktop.sh .github/scripts/*.sh
       - name: hadolint
         if: success() || failure()
         run: hadolint --format tty Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
@@ -151,7 +151,7 @@ jobs:
 
   desktop:
     # The desktop image builds on the terminal image, so both are built here
-    # with the local Docker daemon, then smoke-tested with a real KasmVNC.
+    # with the local Docker daemon, then smoke-tested with native Open Terminal.
     name: desktop image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -163,12 +163,25 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
+      - name: Install Sysbox for sandboxed Chromium
+        env:
+          SYSBOX_VERSION: 0.7.1
+          # https://github.com/nestybox/sysbox/releases/tag/v0.7.1
+          SYSBOX_SHA256: 9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5
+        run: |
+          package="$RUNNER_TEMP/sysbox-ce.deb"
+          curl --fail --location --retry 3 --output "$package" \
+            "https://github.com/nestybox/sysbox/releases/download/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}.linux_amd64.deb"
+          printf '%s  %s\n' "$SYSBOX_SHA256" "$package" | sha256sum --check -
+          sudo apt-get update
+          sudo apt-get install -y "$package"
+          sudo systemctl is-active sysbox
       - name: Build terminal and desktop images
         run: |
           docker build -q -t termiplus-terminal:ci image
           docker build -q --build-arg BASE=termiplus-terminal:ci -t termiplus-desktop:ci image/desktop
-      - name: Smoke test (Open Terminal, KasmVNC, gateway stream route)
-        run: .github/scripts/desktop-smoke.sh termiplus-desktop:ci
+      - name: Smoke test (native Desktop, Browser and authentication)
+        run: .github/scripts/desktop-smoke.sh termiplus-desktop:ci sysbox-runc
 
   oidc-integration:
     name: OIDC proxy integration

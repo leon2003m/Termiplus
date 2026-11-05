@@ -1,6 +1,6 @@
 # Opt-in overlay: lets termiplus-admin users manage group membership (who is
-# in termiplus-users / -persist / -admin) through the MCP tools manage_user and
-# manage_group. Needs the bundled Keycloak and the MCP overlay:
+# in termiplus-users / -persist / -admin) through human administration; internal manage_user and
+# manage_group dispatch is not exposed to models. Needs the bundled Keycloak and the MCP overlay:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
 #     -f docker-compose.keycloak.yml -f docker-compose.mcp-users.yml up -d

@@ -204,32 +204,15 @@ AS="owui-alice-2"
 expect "bindings survive an mcp restart" "200 -32003" "$(rpc "$A" list_sessions '{}')"
 AS="owui-alice"
 
-# User management through Keycloak's admin API (service account of
-# termiplus-mcp-admin). carol is the only member of termiplus-admin.
+# Even an administrator's MCP token cannot perform human administration.
 C="$(token owui owui-secret-it carol carol-pw)"
 AS="owui-carol"
-expect "admin lists the termiplus groups" '200 ok {"groups":["termiplus-admin","termiplus-persist"]}' \
-  "$(rpc "$C" manage_group '{"action":"list"}')"
-expect "a group outside the prefix is refused" '200 ok group "ops-admins" is not managed' \
-  "$(rpc "$C" manage_user '{"action":"add_to_group","username":"bob","group":"ops-admins","_confirmed":true}')"
-expect "membership changes need confirmation" "200 -32010" \
-  "$(rpc "$C" manage_user '{"action":"add_to_group","username":"bob","group":"termiplus-persist"}')"
-AS="owui-bob"
-expect "a non-admin cannot manage users" "200 -32003" "$(rpc "$B" manage_user '{"action":"show","username":"bob"}')"
-AS="owui-carol"
-expect "admin adds bob to termiplus-persist" '200 ok {"changed":true' \
-  "$(rpc "$C" manage_user '{"action":"add_to_group","username":"bob","group":"termiplus-persist","_confirmed":true}')"
-AS="owui-bob"
-expect "bob's next token carries the new role" "200 ok" \
-  "$(rpc "$(token owui owui-secret-it bob bob-pw)" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
-AS="owui-carol"
-expect "the last admin cannot be removed" '200 ok refusing to remove the last enabled member' \
-  "$(rpc "$C" manage_user '{"action":"remove_from_group","username":"carol","group":"termiplus-admin","_confirmed":true}')"
-expect "admin removes bob again" '200 ok {"changed":true' \
-  "$(rpc "$C" manage_user '{"action":"remove_from_group","username":"bob","group":"termiplus-persist","_confirmed":true}')"
-AS="owui-bob"
-expect "bob's next token no longer carries it" "200 -32003" \
-  "$(rpc "$(token owui owui-secret-it bob bob-pw)" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}')"
+for tool in manage_group manage_user manage_departed get_network_policy set_network_policy get_audit_log get_entitlements set_entitlements; do
+  expect "model cannot call $tool as admin" "200 -32003" "$(rpc "$C" "$tool" '{"action":"list","_confirmed":true}')"
+done
+for action in delete restore; do
+  expect "model cannot $action snapshots as admin" "200 -32003" "$(rpc "$C" manage_snapshots "{\"action\":\"$action\",\"workspace\":\"desk\",\"_confirmed\":true}")"
+done
 AS="owui-alice"
 
 # Expiry: shorten the realm's token lifespan, then outwait a fresh token.

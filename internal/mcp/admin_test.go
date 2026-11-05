@@ -18,13 +18,13 @@ func TestAdminToolsNeedRoleAndConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tool := range []string{"get_network_policy", "get_entitlements", "set_entitlements", "set_network_policy"} {
-		resp := toolCall(t, s, "persist-tok", tool, map[string]any{"_confirmed": true, "entitlements": map[string]any{}, "policy": map[string]any{}})
+		resp := consoleToolCall(t, s, "persist-tok", tool, map[string]any{"_confirmed": true, "entitlements": map[string]any{}, "policy": map[string]any{}})
 		if resp.Error == nil || resp.Error.Code != codeForbidden {
 			t.Errorf("%s without admin: %+v", tool, resp.Error)
 		}
 	}
 	set := map[string]any{"entitlements": map[string]any{"default": "deny", "workspaces": map[string]any{"desk": []any{"g"}}}}
-	if resp := toolCall(t, s, "admin-tok", "set_entitlements", set); resp.Error == nil || resp.Error.Code != codeConfirmRequired {
+	if resp := consoleToolCall(t, s, "admin-tok", "set_entitlements", set); resp.Error == nil || resp.Error.Code != codeConfirmRequired {
 		t.Fatalf("set_entitlements without confirmation: %+v", resp.Error)
 	}
 }
@@ -39,7 +39,7 @@ func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got struct{ Entitlements Entitlements }
-	result(t, toolCall(t, s, "admin-tok", "get_entitlements", nil), &got)
+	result(t, consoleToolCall(t, s, "admin-tok", "get_entitlements", nil), &got)
 	if got.Entitlements.Default != "allow" {
 		t.Fatalf("initial explicit allow policy changed: %+v", got)
 	}
@@ -50,7 +50,7 @@ func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 
 	// Invalid input is refused and changes nothing.
 	bad := map[string]any{"_confirmed": true, "entitlements": map[string]any{"default": "open"}}
-	if resp := toolCall(t, s, "admin-tok", "set_entitlements", bad); resp.Error != nil || !strings.Contains(string(resp.Result), "isError") {
+	if resp := consoleToolCall(t, s, "admin-tok", "set_entitlements", bad); resp.Error != nil || !strings.Contains(string(resp.Result), "isError") {
 		t.Fatalf("invalid entitlements: %+v %s", resp.Error, resp.Result)
 	}
 	after, err := os.ReadFile(path)
@@ -62,13 +62,13 @@ func TestSetEntitlementsPersistsAndApplies(t *testing.T) {
 	}
 
 	set := map[string]any{"_confirmed": true, "entitlements": map[string]any{"default": "deny", "workspaces": map[string]any{"desk": []any{RolePersist}}}}
-	result(t, toolCall(t, s, "admin-tok", "set_entitlements", set), &got)
+	result(t, consoleToolCall(t, s, "admin-tok", "set_entitlements", set), &got)
 	var ws []Workspace
-	result(t, toolCall(t, s, "user-tok", "list_workspaces", nil), &ws)
+	result(t, consoleToolCall(t, s, "user-tok", "list_workspaces", nil), &ws)
 	if len(ws) != 0 {
 		t.Fatalf("deny default not applied: %+v", ws)
 	}
-	result(t, toolCall(t, s, "persist-tok", "list_workspaces", nil), &ws)
+	result(t, consoleToolCall(t, s, "persist-tok", "list_workspaces", nil), &ws)
 	if len(ws) != 1 || ws[0].Name != "desk" {
 		t.Fatalf("desk entitlement not applied: %+v", ws)
 	}

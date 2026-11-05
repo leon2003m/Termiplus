@@ -1,0 +1,51 @@
+#!/usr/bin/python3
+"""Bound native pointer synchronization, including moves to its current point.
+
+Open Terminal issues these pointer command shapes. xdotool's --sync can wait
+indefinitely when TigerVNC reports no pointer movement. Flush the native move,
+then query its actual position instead. Also surface unknown key names as
+failures: libxdo otherwise warns and exits successfully without sending a key.
+Other xdotool commands pass through.
+"""
+import os
+import subprocess
+import sys
+import time
+
+
+def main(args):
+    if len(args) == 3 and args[:2] == ["key", "--clearmodifiers"]:
+        result = subprocess.run(
+            ["/usr/bin/xdotool", *args],
+            env={**os.environ, "LC_ALL": "C"}, stderr=subprocess.PIPE, check=False,
+        )
+        sys.stderr.buffer.write(result.stderr)
+        if b"No such key name" in result.stderr or b"Failure converting key sequence" in result.stderr:
+            return result.returncode or 1
+        return result.returncode
+    index = 0 if len(args) == 4 else 2 if len(args) == 6 and args[0] == "mousedown" else -1
+    if index < 0 or args[index:index + 2] != ["mousemove", "--sync"]:
+        os.execv("/usr/bin/xdotool", ["xdotool", *args])
+    try:
+        x, y = map(int, args[index + 2:index + 4])
+    except ValueError:
+        os.execv("/usr/bin/xdotool", ["xdotool", *args])
+    command = args[:index + 1] + args[index + 2:]
+    result = subprocess.run(["/usr/bin/xdotool", *command], check=False)
+    if result.returncode:
+        return result.returncode
+    deadline = time.monotonic() + 2
+    while True:
+        result = subprocess.run(["/usr/bin/xdotool", "getmouselocation", "--shell"],
+                                capture_output=True, text=True, timeout=2, check=True)
+        location = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        if location.get("X") == str(x) and location.get("Y") == str(y):
+            return 0
+        if time.monotonic() >= deadline:
+            print("Desktop pointer did not reach the requested pixel position", file=sys.stderr)
+            return 1
+        time.sleep(0.01)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

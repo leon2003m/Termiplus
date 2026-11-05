@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/identity/principal.md, ../objects/identity/entitlements.md, ../objects/control-plane/mcp-tools.md]
 produces: [../objects/control-plane/audit-log.md]
 ---
@@ -50,3 +50,7 @@ The model decides *what* to call, so nothing on the model's side may decide *whe
 
 - Objects: [MCP tools](../objects/control-plane/mcp-tools.md), [Principal](../objects/identity/principal.md), [Entitlements](../objects/identity/entitlements.md), [Service keys](../objects/identity/service-keys.md)
 - Source: `internal/mcp/server.go`, `integrations/openwebui/termiplus_workspaces.py`
+
+## Native integration update (2026-11-04)
+
+The external tools/list and tools/call paths now enforce modelTool independently of admin roles. Only the human console invokes administrative handlers. Snapshot model calls allow list/create and strip pruning confirmation. Source: internal/mcp/server.go:callTool and internal/mcp/ui.go.

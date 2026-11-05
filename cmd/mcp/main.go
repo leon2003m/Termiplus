@@ -33,13 +33,11 @@ func main() {
 	switch controlKey := config.Secret("CONTROL_API_KEY", false); {
 	case config.Get("MCP_STUB_BACKEND", "") == "1":
 		// Asked for explicitly; wins over CONTROL_API_KEY so that tests can
-		// combine it with the desktop stream proxy, which needs the key.
+		// combine it with the screen-share viewer, which needs the key.
 		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
 		backend = mcp.NewStubBackend(publicURL)
 	case controlKey != "":
-		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false)).
-			WithStreamBase(config.Get("STREAM_PUBLIC_URL", "")).
-			WithForwardBase(config.Get("FORWARD_PUBLIC_URL", ""))
+		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false))
 	default:
 		log.Fatal("CONTROL_API_KEY is required (or MCP_STUB_BACKEND=1 for local development)")
 	}
@@ -172,7 +170,7 @@ func main() {
 		log.Printf("management UI listening on %s", uiAddr)
 	}
 
-	// Desktops and share links: own listener, own origin, own sign-in proxy
+	// Image-only screen shares: own listener, own origin, own sign-in proxy
 	// (desk-stream-auth), never the console's.
 	if streamAddr := config.Get("STREAM_LISTEN_ADDR", ""); streamAddr != "" {
 		controlKey := config.Secret("CONTROL_API_KEY", false)
@@ -188,22 +186,7 @@ func main() {
 		}
 		ds := &http.Server{Addr: streamAddr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 		go func() { log.Fatal(ds.ListenAndServe()) }()
-		log.Printf("desktops listening on %s", streamAddr)
-	}
-
-	// Port forwards: own listener behind their own sign-in proxy (fwd-auth).
-	if fwdAddr := config.Get("FWD_LISTEN_ADDR", ""); fwdAddr != "" {
-		controlKey := config.Secret("CONTROL_API_KEY", false)
-		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil || controlKey == "" {
-			log.Fatal("FWD_LISTEN_ADDR needs MCP_AUTH=proxy, MCP_IDENTITY_FILE and CONTROL_API_KEY")
-		}
-		fwd, err := mcp.NewForwarder(ids, gatewayURL, controlKey, srv)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fs := &http.Server{Addr: fwdAddr, Handler: fwd, ReadHeaderTimeout: 10 * time.Second}
-		go func() { log.Fatal(fs.ListenAndServe()) }()
-		log.Printf("port forwards listening on %s", fwdAddr)
+		log.Printf("screen shares listening on %s", streamAddr)
 	}
 
 	log.Printf("termiplus mcp %s listening on %s, gateway %s, auth: %s, %s", version, addr, gatewayURL, authDesc, entDesc)

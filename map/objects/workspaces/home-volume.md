@@ -3,7 +3,7 @@ type: object
 cluster: workspaces
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/naming/naming.go
 ---
 
@@ -22,7 +22,7 @@ The container is disposable (it is recreated on any config change); the volume i
 - Ephemeral policies have no volume.
 - Operations: reset, snapshot, restore, export, import, remove. All go through the [archive helper](archive-helper.md).
 
-Citations: `internal/naming/naming.go:55`, `internal/gateway/lifecycle.go:436-446` (ownership check), `internal/gateway/homes.go:31` (homeOf), `:121` (exportHome), `:197` (importHome), `:224` (removeHome), `internal/gateway/userhomes.go:61` (reset), `:90` (snapshot), `internal/sockproxy/validate.go:262` (ValidateVolume)
+Citations: `internal/naming/naming.go:55`, `internal/gateway/lifecycle.go:483-492` (ownership check), `internal/gateway/homes.go:31` (homeOf), `:121` (exportHome), `:210` (importHome), `:237` (removeHome), `internal/gateway/userhomes.go:61` (reset), `:90` (snapshot), `internal/sockproxy/validate.go:262` (ValidateVolume)
 
 ## Connected to
 
@@ -47,3 +47,7 @@ Citations: `internal/naming/naming.go:55`, `internal/gateway/lifecycle.go:436-44
 ## See
 
 - Source: `internal/gateway/homes.go`, `internal/gateway/userhomes.go`
+
+## Native integration update (2026-11-04)
+
+Native terminal/desktop policies can still share a home profile; interactive display identity comes from the selected policy connection, not home sharing alone. Source: internal/gateway/lifecycle.go, internal/mcp/gateway_backend.go.

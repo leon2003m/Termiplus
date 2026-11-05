@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live security validation for v0.1.0 (test/integration/VALIDATION.md, V1-V15).
+# Live security validation for v0.1.0 (test/integration/VALIDATION.md, V1-V16).
 #
 #   sudo RUNTIME=sysbox-runc test/integration/validate.sh
 #   sudo RUNTIME=runsc       test/integration/validate.sh
@@ -206,6 +206,7 @@ for phase in "with firewall" "without firewall"; do
     iptables -D DOCKER-USER -j TERMIPLUS 2>/dev/null || true
     iptables -D INPUT -j TERMIPLUS-IN 2>/dev/null || true
     ebtables -t filter -D FORWARD -j TERMIPLUS-AS 2>/dev/null || true
+    ebtables -t nat -D PREROUTING -j TERMIPLUS-PORT 2>/dev/null || true
   fi
 done
 reapply
@@ -213,6 +214,7 @@ expect "gateway still reaches A" 0 test "$(gw GET /files/cwd val-a | grep -c cwd
 
 scenario V2 "gateway source-IP / ARP spoofing is blocked"
 expect "ebtables chain TERMIPLUS-AS exists" 0 ebtables -t filter -L TERMIPLUS-AS
+expect "gateway IP pinned to a bridge port" 0 bash -c "ebtables -t nat -L TERMIPLUS-PORT | grep -q -- '--ip-src 172.30.0.2 '"
 asroot "$B" "rm -f /tmp/got; (timeout 25 python3 -c '
 import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"0.0.0.0\", 9999))
 d, a = s.recvfrom(100); open(\"/tmp/got\",\"w\").write(a[0])' &) " || true
@@ -225,9 +227,44 @@ import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"172
 else
   pass "A cannot even add the gateway IP to its interface"
 fi
+# Forge the gateway's MAC as well: only the bridge-port pin stops this.
+GWMAC="$(docker network inspect ot-sandbox --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' | awk '$1 ~ /^172\.30\.0\.2\// {print $2}')"
+AMAC="$(asroot "$A" "cat /sys/class/net/eth0/address" 2>/dev/null || true)"
+if [ -n "$GWMAC" ] && [ -n "$AMAC" ] && asroot "$A" "ip link set eth0 address $GWMAC && ip addr add 172.30.0.2/24 dev eth0" 2>/dev/null; then
+  asroot "$A" "python3 -c '
+import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((\"172.30.0.2\", 0))
+[s.sendto(b\"x\", (\"$BIP\", 9999)) for _ in range(5)]'" >/dev/null 2>&1 || true
+  expect "A cannot reach B:8000 with the gateway's IP and MAC" 1 asroot "$A" "curl -s -m3 --interface 172.30.0.2 http://$BIP:8000/health"
+  asroot "$A" "ip addr del 172.30.0.2/24 dev eth0; ip link set eth0 address $AMAC" 2>/dev/null || true
+else
+  pass "A cannot change its MAC to the gateway's"
+fi
 sleep 2
 expect "B received no packet with the spoofed source" 1 asroot "$B" "test -s /tmp/got"
 expect "gateway -> terminal still works" 0 test "$(gw GET /files/cwd val-b | grep -c cwd)" -ge 1
+
+scenario V16 "a terminal cannot take over another terminal's MAC"
+# Terminals started after the stack: lock their ports like termiplus-portlock.service would.
+expect "firewall.sh --lock-ports locks and pins every terminal port" 0 "$WORK/deploy/firewall.sh" --lock-ports
+fdb_dev() { bridge fdb show br ot-sandbox | awk -v m="$1" 'tolower($1) == tolower(m) && / static/ && !/permanent/ {print $3; exit}'; }
+# Read the MAC via "ip link", not /sys/class/net/eth0/address: Sysbox's
+# virtualized /sys does not expose that sysfs file, so the cat returns empty.
+mac_of() { asroot "$1" "ip -o link show eth0" 2>/dev/null | grep -oE 'ether [0-9a-f:]{17}' | awk '{print $2}'; }
+BMAC="$(mac_of "$B")"
+AMAC="$(mac_of "$A")"
+APORT="$(fdb_dev "$AMAC")"
+BPORT="$(fdb_dev "$BMAC")"
+expect "A and B have static entries on different ports" 0 test -n "$APORT" -a -n "$BPORT" -a "$APORT" != "$BPORT"
+expect "every terminal port is locked with learning off" 0 bash -c "bridge -d link show dev $APORT | grep -q ' locked on ' && bridge -d link show dev $BPORT | grep -q ' learning off '"
+if [ -n "$BMAC" ] && asroot "$A" "ip link set eth0 address $BMAC && ip addr add $BIP/24 dev eth0" 2>/dev/null; then
+  asroot "$A" "ping -c3 -W1 -b 172.30.0.255; ping -c3 -W1 172.30.0.2" >/dev/null 2>&1 || true
+  expect "B's MAC is still bound to B's port" 0 test "$(fdb_dev "$BMAC")" = "$BPORT"
+  expect "gateway -> B still works while A forges B's MAC" 0 test "$(gw GET /files/cwd val-b | grep -c cwd)" -ge 1
+  asroot "$A" "ip addr del $BIP/24 dev eth0; ip link set eth0 address $AMAC" 2>/dev/null || true
+else
+  pass "A cannot change its MAC to B's"
+fi
+expect "gateway -> A works again with its own MAC" 0 test "$(gw GET /files/cwd val-a | grep -c cwd)" -ge 1
 
 scenario V3 "persistent volume owned by someone else is refused"
 gw GET /files/cwd val-c >/dev/null
@@ -377,7 +414,7 @@ expect "profile tools present (git, python3, node)" 0 asuser "$E2" "command -v g
 
 log "summary (runtime $RUNTIME)"
 rc=0
-for s in V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V12 V13 V14 V15; do
+for s in V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V12 V13 V14 V15 V16; do
   printf '%-4s %s\n' "$s" "${RESULT[$s]:-not run}"
   [ "${RESULT[$s]:-FAIL}" = PASS ] || rc=1
 done

@@ -4,9 +4,107 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-11-05
+
+Native Open WebUI workspaces replace the custom desktop and port-forwarding
+integration. This remains a release candidate.
+
+### Upgrade notes
+
+- Use Open WebUI 0.13.0 and Open Terminal 0.16.0 with the native integration
+  described in [the migration guide](docs/native-integration.md). Remove the
+  retired KasmVNC desktop and custom port-forwarding services and configuration.
+- The default and scratch policies now both use the complete Sysbox desktop
+  image. Chromium is the only browser; persistent home contents are preserved.
+- Reapply the sandbox firewall and install the host requirements described in
+  the Security entries below before accepting workspace traffic.
+- See [supported tools](docs/tool-support.md) for the exact native/plugin
+  inventory and the gateway/schema/image adaptations maintained by Termiplus.
+
 ### Added
 
+- Deterministic live verification of all 23 Open WebUI native tools, their
+  published parameters and every Desktop/Browser action, with independent GUI
+  observations and coverage checks for future upstream inventory changes.
+
+- Complete desktop image includes the standard Open Terminal workspace tools:
+  inner Docker with Compose/Buildx, scientific Python and Jupyter, LibreOffice,
+  document/PDF/media converters, scripting/build and session/network utilities.
+  User Python and notebook kernels share libraries in a venv separate from the API.
+  Tini reaps child processes. No host Docker socket or sandbox permissions added.
+
+- Terminal image includes fdfind, rsync, bc and pipx (about 10 MB additional image size); native workspace ownership and egress limits are documented.
+
+- Console dialogs replace browser prompts, with duration presets, an exact-name person picker and copyable share links. Terminal cards show observed activity and idle-deletion estimates; workspace help explains private access.
+
+- Owner-only desktop thumbnails in the console, refreshed every 30 seconds while visible. Stopped desktops show Offline without starting a container.
+
+- Workspaces can have a `label` and `description` in `policies.json`. The console and `list_workspaces` show them instead of the bare policy name; the default policies are now called Desktop and Temporary desktop. Changing them does not recreate containers.
 - Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
+- Offline workspaces: a policy with `"egress": "offline"` puts its terminals on an internal-only Docker network (`deploy/docker-compose.offline.yml`, `OFFLINE_NETWORK`) with no DNS, no internet, no LAN and no terminal-to-terminal traffic; only the gateway can reach them. `firewall.sh` adds host rules for that bridge. Without the overlay, the gateway refuses offline policies instead of falling back to the internet. The netpolicy deny-list now also covers the offline subnet `172.30.1.0/24`; a stored policy with a DNS or egress entry there stops the gateway at startup until that entry is removed.
+
+### Changed
+
+- Document the exact 23 native tools, seven MCP tools and plugin-only console
+  link, plus the maintained gateway/schema/image adaptations and drop-in scope.
+- Document the focus since Open WebUI 0.13 prominently in the README: native
+  workspace interaction upstream, isolation/lifecycle/storage/access in Termiplus.
+  Refresh deployment, security and map docs; label pre-migration analyses as historical.
+- Record the external DeepSeek review, its fixes and a separately authored,
+  executed native HTTP/PTY verification harness with explicit coverage limits.
+- Record frontend acceptance of text/image/PDF rendering, real model-to-viewer
+  delivery, PDF download and the native Desktop/Chrome UI.
+
+- Use Chromium as the only desktop browser and btop instead of htop; omit
+  Ristretto and ImageMagick. Keep LibreOffice and XFCE Terminal.
+- Offer Desktop and Temporary desktop as the two default workspace choices,
+  both with native Browser, files and terminal support under Sysbox. Keep the
+  persistent home volume and existing resource limits.
+- Integrate Open WebUI 0.13 native workspaces with Open Terminal 0.16; route
+  native Desktop, Browser, events, files, Git and app-preview protocols per user/chat.
+- Replace KasmVNC and the owner desktop player with the native Desktop; remove
+  custom port forwarding, its OIDC service and the `open_port` tool.
+- Remove administration from model tools, including direct MCP calls by admins.
+  Models may list/create snapshots but cannot delete, restore or prune backups.
+- Keep expiring/revocable view-only shares as native screen images refreshed
+  every five seconds, without keyboard, mouse, clipboard or audio access.
+
+- Record the alpha checkpoint and the decision to use Open WebUI's native
+  Desktop and Browser workspace, retaining termiplus isolation and storage.
+
+- Desktop defaults now use Dolphin, matching dark Qt/GTK settings, a green accent and a compact bottom dock with Chromium, Dolphin, terminal and Kate. Existing home-folder customizations remain in place.
+
+- MQTT discovery messages are off by default. Set `MQTT_DISCOVERY_PREFIX` to your hub's discovery prefix to keep sending them; the MQTT docs and examples no longer name a specific hub.
+
+### Fixed
+
+- Suppress inherited logout/lock/mail shortcuts in partial saved XFCE profiles.
+  Preserve malformed desktop configuration files before restoring usable defaults,
+  so damaged persistent settings do not prevent the desktop from starting.
+- Report unknown X11 key names as failed Desktop actions, with partial-batch
+  progress, instead of returning a successful screenshot after ignoring input.
+- Prevent native Desktop input timeouts when clicking the current pointer position;
+  confirm pointer movement with a bounded position check.
+- Repair saved default applications and obsolete launchers; seed the configured
+  dock before XFCE generates stock panels. Hide unsupported mail/TeX GUI entries
+  and session-ending controls, including logout keyboard shortcuts.
+- Announce the shared graphical desktop explicitly in native model context,
+  including raw pixel coordinates for its 1280×800 screenshots.
+- Explain native Desktop action coordinates in OpenAPI field descriptions and
+  upstream system context; release abandoned managed Chromium profile locks after recreation.
+- Restore Dolphin, Chromium, Kate, the Termiplus theme, app dock and wallpaper
+  in the native desktop image. Initialize the wallpaper on TigerVNC displays
+  while preserving personal desktop preferences.
+- Run native Desktop/Browser CI tests under Sysbox so Chromium keeps its sandbox.
+
+### Security
+
+- The gateway's address on the sandbox bridge can no longer be taken over by a terminal that forges both the gateway's IP and its MAC. `firewall.sh` now also pins 172.30.0.2 (and the DNS forwarder and the offline gateway) to the container's own bridge port with ebtables in nat `PREROUTING` (chain `TERMIPLUS-PORT`), before the bridge learns MACs. The port is looked up in the container's network namespace. **Hosts now need `nsenter` (util-linux)**; without it, or without the gateway's port, `firewall.sh` refuses and keeps the previous pins. The watch timer re-pins a restarted gateway. (#13)
+- Terminals can no longer take over each other's MAC address on the sandbox or offline bridge. Before, a terminal with root could forge another terminal's MAC, the bridge moved that MAC to its own port, and the gateway's replies to the other terminal, including its API key, went to the forger. `firewall.sh` now turns MAC learning off and locks every terminal port, with a static FDB entry for the MAC Docker assigned. New terminals are locked within a second by the new `termiplus-portlock.service` (`firewall.sh --watch-ports`), and `firewall.sh --lock-ports` does one pass. **Hosts now need Linux and iproute2 6.2 or newer**; without them `firewall.sh` exits with an error after applying the other rules.
+- A running workspace that gains a network its policy does not allow (`docker network connect` on the host) is removed within a minute, and at gateway startup instead of being adopted. The check lists containers from Docker each time, so a removal or inspection that fails is retried on the next pass. Before, only containers checked on their next request were recreated.
+- Snapshots: a create that would delete the oldest snapshot now needs the human confirmation at the gateway too (`?prune=1` on the control API, 409 without it). Before, two overlapping unconfirmed `manage_snapshots create` calls could both pass the MCP check and delete it. The console is unchanged. (security audit run 2)
+- Health checks no longer follow redirects: a container whose `/health` answers 3xx is not ready, and the gateway never requests the redirect target, which may be on a network the terminal cannot reach. (security audit run 2)
+- Home downloads end at `EXPORT_TIMEOUT` even when the client stops reading. Before, a stalled download held the home's archive helper and an export slot until the client went away. (security audit run 2)
 
 ## [1.0.0-rc.2] - 2026-10-18
 

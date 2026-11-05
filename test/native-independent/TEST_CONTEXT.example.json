@@ -1,0 +1,7 @@
+{
+  "base_url": "https://chat.example.test",
+  "terminal_id": "termiplus-scratch",
+  "chat_id": "replace-with-disposable-chat-id",
+  "workspace_http_prefix": "/api/v1/terminals/termiplus-scratch/chats/replace-with-disposable-chat-id",
+  "token_file": ".test-token"
+}

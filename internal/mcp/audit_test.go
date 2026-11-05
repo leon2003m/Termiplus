@@ -21,24 +21,24 @@ func newAuditedServer(t *testing.T) (*Server, string) {
 func auditEntries(t *testing.T, s *Server, args map[string]any) []AuditEntry {
 	t.Helper()
 	var out struct{ Entries []AuditEntry }
-	result(t, toolCall(t, s, "admin-tok", "get_audit_log", args), &out)
+	result(t, consoleToolCall(t, s, "admin-tok", "get_audit_log", args), &out)
 	return out.Entries
 }
 
 func TestAuditRecordsChangesNotReads(t *testing.T) {
 	s, path := newAuditedServer(t)
-	toolCall(t, s, "user-tok", "list_workspaces", nil)
-	toolCall(t, s, "user-tok", "list_sessions", nil)
+	consoleToolCall(t, s, "user-tok", "list_workspaces", nil)
+	consoleToolCall(t, s, "user-tok", "list_sessions", nil)
 	// waiting for confirmation: nothing happened yet
-	toolCall(t, s, "user-tok", "destroy_session", map[string]any{"session_id": "x"})
+	consoleToolCall(t, s, "user-tok", "destroy_session", map[string]any{"session_id": "x"})
 	var sess struct {
 		SessionID string `json:"session_id"`
 	}
-	result(t, toolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"}), &sess)
-	toolCall(t, s, "user-tok", "destroy_session", map[string]any{"session_id": "nope", "_confirmed": true})
+	result(t, consoleToolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"}), &sess)
+	consoleToolCall(t, s, "user-tok", "destroy_session", map[string]any{"session_id": "nope", "_confirmed": true})
 	// refused: alice is not an admin
-	toolCall(t, s, "user-tok", "set_entitlements", map[string]any{"entitlements": map[string]any{}, "_confirmed": true})
-	toolCall(t, s, "admin-tok", "get_audit_log", nil) // reads are not recorded
+	consoleToolCall(t, s, "user-tok", "set_entitlements", map[string]any{"entitlements": map[string]any{}, "_confirmed": true})
+	consoleToolCall(t, s, "admin-tok", "get_audit_log", nil) // reads are not recorded
 
 	got := auditEntries(t, s, nil)
 	want := []string{
@@ -72,8 +72,8 @@ func TestAuditRecordsChangesNotReads(t *testing.T) {
 func TestAuditManageUserShowIsNotRecorded(t *testing.T) {
 	s, _ := newAuditedServer(t)
 	s.dir = nil
-	toolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "show", "username": "dave"})
-	toolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "add_to_group", "username": "dave", "group": "termiplus-users", "_confirmed": true})
+	consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "show", "username": "dave"})
+	consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "add_to_group", "username": "dave", "group": "termiplus-users", "_confirmed": true})
 	got := auditEntries(t, s, nil)
 	if len(got) != 1 || got[0].Args["action"] != "add_to_group" || got[0].Outcome != "error" {
 		t.Fatalf("got %+v", got)
@@ -83,14 +83,14 @@ func TestAuditManageUserShowIsNotRecorded(t *testing.T) {
 func TestAuditLogIsAdminOnlyAndFilters(t *testing.T) {
 	s, _ := newAuditedServer(t)
 	for _, tok := range []string{"user-tok", "persist-tok"} {
-		if resp := toolCall(t, s, tok, "get_audit_log", nil); resp.Error == nil || resp.Error.Code != codeForbidden {
+		if resp := consoleToolCall(t, s, tok, "get_audit_log", nil); resp.Error == nil || resp.Error.Code != codeForbidden {
 			t.Fatalf("%s: want forbidden, got %+v", tok, resp.Error)
 		}
 	}
 	for i := 0; i < 3; i++ {
-		toolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"})
+		consoleToolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"})
 	}
-	toolCall(t, s, "persist-tok", "request_session", map[string]any{"workspace": "default"})
+	consoleToolCall(t, s, "persist-tok", "request_session", map[string]any{"workspace": "default"})
 
 	// The two denied get_audit_log calls are not recorded (read-only tool).
 	if got := auditEntries(t, s, nil); len(got) != 4 || got[0].Actor != "bob" {
@@ -107,7 +107,7 @@ func TestAuditLogIsAdminOnlyAndFilters(t *testing.T) {
 		t.Fatalf("since: %+v", got)
 	}
 	for _, bad := range []map[string]any{{"limit": 0}, {"limit": 501}, {"since": "yesterday"}} {
-		if text, isErr := toolText(t, toolCall(t, s, "admin-tok", "get_audit_log", bad)); !isErr {
+		if text, isErr := toolText(t, consoleToolCall(t, s, "admin-tok", "get_audit_log", bad)); !isErr {
 			t.Errorf("%v accepted: %s", bad, text)
 		}
 	}
@@ -115,8 +115,8 @@ func TestAuditLogIsAdminOnlyAndFilters(t *testing.T) {
 
 func TestAuditWithoutFile(t *testing.T) {
 	s := newTestServer()
-	toolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"})
-	text, isErr := toolText(t, toolCall(t, s, "admin-tok", "get_audit_log", nil))
+	consoleToolCall(t, s, "user-tok", "request_session", map[string]any{"workspace": "default"})
+	text, isErr := toolText(t, consoleToolCall(t, s, "admin-tok", "get_audit_log", nil))
 	if !isErr || !strings.Contains(text, "not configured") {
 		t.Fatalf("got %q", text)
 	}

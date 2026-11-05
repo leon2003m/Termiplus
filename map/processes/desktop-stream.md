@@ -1,46 +1,84 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/identity/principal.md, ../objects/identity/identity-store.md, ../objects/control-plane/share.md]
 produces: []
 ---
 
-# desktop-stream
+# Native Desktop and screen shares
 
-A signed-in browser gets the KasmVNC desktop of its own desktop container, or a view-only one through a share link. The browser never sees a VNC password.
+The owner uses Open WebUI's native Desktop tab and tools on the selected
+terminal connection. HTTP `/desktop/*` uses the gateway bearer and user/chat
+headers; Desktop stream/audio use first-frame authentication. The gateway
+substitutes the derived container key and relays frames. Browser capability
+WebSockets instead authenticate with the gateway bearer in the upgrade headers,
+on the three narrowly matched native view endpoints. Other sockets retain
+first-frame auth. Source: `internal/gateway/ws.go:serveWebSocket`,
+`internal/gateway/gateway.go:ServeHTTP`, `internal/gateway/native_test.go`.
 
-## Input → Movement → Output
+The image uses Open Terminal 0.16, XFCE and TigerVNC's Unix socket. No second
+Kasm server, VNC password, owner stream listener, player or port 6901 exists.
+Source: `image/Dockerfile`, `image/desktop/Dockerfile`.
 
-The browser opens `<desktop origin>/stream/<session>/...` (or `/share/<token>/...`). It is signed in by `desk-stream-auth` (oauth2-proxy). The MCP desktop handler maps the OIDC subject to the Open WebUI user, checks the session is entitled, and calls the gateway's `/control/v1/stream/<session>/...` with the control key and the owner's `X-User-Id`. The gateway finds that user's running desktop, fills in KasmVNC basic auth (owner or `viewer`) and proxies.
+Signed-in recipients may open `/share/<token>/` on the separate share origin.
+`internal/mcp/stream.go:DesktopHandler` authenticates the OIDC subject, checks
+expiry and optional named recipient, and serves its own HTML plus normalized
+PNG only. The image comes from `/control/v1/screen/<session>` as the owner;
+`internal/gateway/preview.go:serveScreen` checks ownership and running state.
+Images refresh every five seconds. Input, clipboard, audio and all WebSocket
+upgrades are refused. Revoke/expiry cancels active reads; reads have time and
+byte/dimension bounds. This is periodic viewing, not full-motion streaming.
 
-## Why this shape
+Console previews use the same native `/desktop/screenshot` with `X-User-Id`,
+320-pixel normalization and the existing 30-second cache. They do not start a
+stopped container. `internal/preview/image.go` rejects invalid/oversized images
+and re-encodes pixels. See [Share](../objects/control-plane/share.md).
 
-KasmVNC knows only basic auth, and the desktop serves arbitrary user-controlled content. So the desktops live on their own origin (never the console's). The gateway injects the per-container password, so it never reaches a browser. Cookies, `Set-Cookie`, service workers and `Clear-Site-Data` are dropped, so one desktop cannot plant state for the origin. Cross-origin WebSocket upgrades are refused. Unknown, stopped and foreign sessions all return the same 404. The gateway never *starts* a container for a stream request.
+Changes affect the desktop overlay, image smoke tests, MCP/gateway share tests
+and OIDC fixtures. They must preserve tenant routing and read-only recipient
+access. Native image tests and real Open WebUI testing are separate gates.
 
-## Steps
+The image also packages the Termiplus applications and theme: Dolphin, Chromium,
+Kate and wallpaper. `image/desktop/files/usr/local/bin/startxfce4` is invoked
+by Open Terminal inside its display/D-Bus session; it seeds missing preferences
+and sets the wallpaper for the connected monitor only if its current image is
+absent. `image/desktop/defaults.py` seeds the dock before XFCE creates stock
+panels, migrates removed Firefox/Ristretto/htop and mail launchers on saved homes,
+sets Chromium and Dolphin as defaults, removes panel actions and disables
+logout/lock/mail keyboard shortcuts, including inherited bindings absent from
+partial saved profiles. Malformed MIME/panel/shortcut files are preserved as
+`.invalid-*` backups and replaced with valid defaults so startup can recover.
+Hidden desktop entries omit unsupported
+mail, TeX documentation GUI and logout; XFCE kiosk settings disable shutdown
+and saved sessions. These are UI guards, not a restriction against the user
+with sudo. Other personal settings remain on the existing home volume. The native smoke
+test checks the running XFCE wallpaper selection and Dolphin folder association.
 
-1. `DesktopHandler`: refuse `Service-Worker`, route `/stream/` and `/share/`: `internal/mcp/stream.go:64-80`.
-2. Authenticate the proxy headers, look up the Open WebUI id (unlinked → 403), check entitlement: `stream.go:86-108`.
-3. Share path: look up the token hash, check expiry and the optional named viewer, set `view`: `stream.go:114`, `internal/mcp/shares.go:58`.
-4. `proxy`: same-origin check on upgrades, strip the identity headers, set `X-User-Id` = owner, `view_only` if view, drop `untrustedResponseHeaders`: `stream.go:84`, `:142-190`.
-5. Gateway `serveStream`: `streamTarget` (running desktop of that user, else 404), then basic auth as `user` or `viewer`: `internal/gateway/stream.go:41-58`, `:97`.
+`image/desktop/prepare.py` acquires native Chromium profile leases before
+removing abandoned singleton symlinks after container recreation. Managed homes
+survive but PIDs are reused; active leases and unmanaged profiles stay intact.
+The desktop Dockerfile's `OPEN_TERMINAL_INFO` adds coordinate examples through
+the upstream `/system` prompt. Click/move require `x/y`; `to_x/to_y` are drag
+destinations. Open WebUI model vision capability must be enabled for image tools.
+`internal/gateway/native_schema.go` adds these requirements to native OpenAPI
+operation and field descriptions as well; runtime action validation is unchanged.
+The Linux screenshot is 1280×800; native schema descriptions explain raw pixels
+and conversion from normalized vision coordinates. The smoke test checks its size.
+`image/desktop/files/usr/local/bin/xdotool` intercepts only the two native
+synchronous pointer-move command shapes, then checks actual pointer position
+with a deadline. This avoids TigerVNC waits on repeated clicks at the current
+position, including drag starts. It also turns unknown-key warnings from the
+native `key --clearmodifiers` command into a nonzero exit, preserving native
+partial-batch failure reporting. Other xdotool commands pass through unchanged.
+The smoke test repeats native clicks at the same point to catch input timeouts.
+User Python and the explicitly installed notebook kernel use `/opt/workspace`;
+the API retains `/opt/open-terminal`. Inner Docker starts through `image/start`
+under Sysbox, using its own socket, and Tini is PID 1.
 
-## If you change this
-
-- **Hits:** `deploy/docker-compose.desktop.yml` (origins, `desk-stream-auth`), `image/desktop/start-desktop.sh` (the two passwords), `internal/gateway/stream_test.go`, `test/integration/oidc/desktop.sh`. Browser isolation is a security boundary.
-- **Does not hit:** non-desktop policies
-
-## Surfaces
-
-| Surface | Role |
-|---|---|
-| browser | views |
-| desk-stream-auth | signs in |
-| MCP desktop listener (`STREAM_LISTEN_ADDR`) | maps and checks |
-| gateway control API | proxies with VNC credentials |
-
-## See
-
-- Objects: [Share](../objects/control-plane/share.md), [Terminal container](../objects/workspaces/terminal-container.md), [Service keys](../objects/identity/service-keys.md)
-- Source: `internal/mcp/stream.go`, `internal/gateway/stream.go`
+Live model-tool contract verification uses `.github/scripts/native-tool-contract.py`
+and `.github/scripts/native-tool-fixture.py` to observe actual DOM input from
+shared Desktop Chromium and native Browser. It covers all published actions,
+repeated clicks, batch preflight and Desktop/Browser partial failures through the actual
+Open WebUI callables. It also asserts the live published coordinate descriptions;
+this is separate from model inference and recipient shares.

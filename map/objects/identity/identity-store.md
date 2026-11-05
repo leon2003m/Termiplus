@@ -3,7 +3,7 @@ type: object
 cluster: identity
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/identities.go
 ---
 
@@ -27,12 +27,12 @@ Citations: `internal/mcp/identities.go:1-38` (doc and fields), `cmd/mcp/main.go:
 
 - **owns:** the subject ↔ user-id pairs
 - **owned-by:** the MCP server process
-- **joins:** [Principal](principal.md), [Departed](../control-plane/departed.md) (directory users are matched through it), the console, stream and forward listeners (each needs it; `cmd/mcp/main.go:155-197`)
+- **joins:** [Principal](principal.md), [Departed](../control-plane/departed.md) (directory users are matched through it), the console and share listener (each needs it; `cmd/mcp/main.go:155-197`)
 - **looks-like-but-is-not:** Keycloak's user list ([Directory](directory.md))
 
 ## If you change this
 
-- **Hits:** who owns which home, departed-user cleanup, console sign-in, desktop and forward access checks
+- **Hits:** who owns which home, departed-user cleanup, console sign-in, console and share access checks
 - **Does not hit:** the gateway (it only ever sees the Open WebUI user id)
 
 ## Surfaces
@@ -45,3 +45,7 @@ Citations: `internal/mcp/identities.go:1-38` (doc and fields), `cmd/mcp/main.go:
 ## See
 
 - Source: `internal/mcp/identities.go`
+
+## Native integration update (2026-11-04)
+
+The console maps OIDC subjects to Open WebUI ids as before. Native owner Desktop/Browser uses Open WebUI routing directly. Shares authorize their stored owner/recipient; there is no owner stream or custom port-forward identity listener. Source: internal/mcp/stream.go, cmd/mcp/main.go.

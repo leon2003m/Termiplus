@@ -5,14 +5,15 @@
 1. Branch from `dev` (`feat/...`, `fix/...`).
 2. Make your change with tests.
 3. Run `make check`.
-4. Open a pull request against `dev`.
+4. Push to `origin`, the maintainer's primary Git server, and open a pull request
+   against `dev` there. GitHub is a push mirror; do not push or open PRs there.
 5. `dev` is merged into `main` by the maintainer. Releases are tagged on `main` as `vMAJOR.MINOR.PATCH`.
 
 AI agents: follow [AGENTS.md](AGENTS.md).
 
 ## Development
 
-Requirements: Go 1.24+, Docker. For `make check` also `staticcheck`, `shellcheck`, `hadolint`, `actionlint` and `gitleaks` (CI installs pinned versions; locally use your package manager).
+Requirements: Go 1.24+, Docker. For `make check` also `staticcheck`, `shellcheck`, `hadolint`, `actionlint` (CI installs pinned versions; locally use your package manager).
 
 ```bash
 make test       # go test -race ./...
@@ -20,6 +21,10 @@ make check      # everything CI runs on code and config
 make build      # build gateway, sockproxy and terminal images
 make scan       # gitleaks + govulncheck + trivy (if installed)
 ```
+
+`make scan` additionally uses `gitleaks`, `govulncheck` and Trivy. Native desktop
+changes also need the Sysbox image smoke test; model-tool changes need the
+[live contract checks](docs/native-tool-validation.md).
 
 Optional local hooks: `pre-commit install` (see `.pre-commit-config.yaml`).
 

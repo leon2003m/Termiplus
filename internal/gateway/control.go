@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/naming"
@@ -37,30 +38,49 @@ const maxControlBody = 16 << 10
 const controlSessionPrefix = "mcp-"
 
 type workspaceInfo struct {
-	Name       string `json:"name"`
-	Runtime    string `json:"runtime"`
-	Persistent bool   `json:"persistent"`
-	Desktop    bool   `json:"desktop,omitempty"`
+	IdleSeconds int64  `json:"idle_seconds,omitempty"`
+	Name        string `json:"name"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Runtime     string `json:"runtime"`
+	Persistent  bool   `json:"persistent"`
+	Desktop     bool   `json:"desktop,omitempty"`
 }
 
 type sessionInfo struct {
-	ID         string `json:"session_id"` // container name
-	Workspace  string `json:"workspace"`
-	Persistent bool   `json:"persistent"`
-	Running    bool   `json:"running"`
+	StartedAt     string `json:"started_at,omitempty"`
+	LastActivity  string `json:"last_activity,omitempty"`
+	IdleExpiresAt string `json:"idle_expires_at,omitempty"`
+	IdleSeconds   int64  `json:"idle_seconds,omitempty"`
+	ID            string `json:"session_id"` // container name
+	Workspace     string `json:"workspace"`
+	Persistent    bool   `json:"persistent"`
+	Running       bool   `json:"running"`
 	// TerminalPath is the gateway path that reaches the session; for an
 	// ephemeral session TerminalSession must be sent as X-Session-Id.
 	TerminalPath    string `json:"terminal_path,omitempty"`
 	TerminalSession string `json:"terminal_session,omitempty"`
-	// StreamPath is the desktop of a "desktop" policy, relative to the public
-	// desktop origin (the MCP server's stream proxy, see stream.go).
-	StreamPath string `json:"stream_path,omitempty"`
+	Desktop         bool   `json:"desktop,omitempty"`
 }
 
-// withStream fills the desktop stream handle for desktop policies.
-func (m *manager) withStream(s sessionInfo, pol Policy) sessionInfo {
+// withActivity adds observed activity and the native desktop capability.
+func (m *manager) withActivity(s sessionInfo, pol Policy) sessionInfo {
+	s.IdleSeconds = int64(m.idleFor(pol) / time.Second)
+	m.mu.Lock()
+	if inst := m.instances[s.ID]; inst != nil && s.Running {
+		if !inst.startedAt.IsZero() {
+			s.StartedAt = inst.startedAt.UTC().Format(time.RFC3339)
+		}
+		if !inst.lastUsed.IsZero() {
+			s.LastActivity = inst.lastUsed.UTC().Format(time.RFC3339)
+			if inst.ephemeral && inst.conns == 0 && inst.idle > 0 {
+				s.IdleExpiresAt = inst.lastUsed.Add(inst.idle).UTC().Format(time.RFC3339)
+			}
+		}
+	}
+	m.mu.Unlock()
 	if pol.Desktop {
-		s.StreamPath = "/" + streamPrefix + s.ID + "/"
+		s.Desktop = true
 	}
 	return s
 }
@@ -156,10 +176,10 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 		default:
 			writeJSON(w, http.StatusOK, s)
 		}
-	case strings.HasPrefix(rest, forwardPrefix):
-		g.serveForward(w, r, userID, strings.TrimPrefix(rest, forwardPrefix))
-	case strings.HasPrefix(rest, streamPrefix):
-		g.serveStream(w, r, userID, strings.TrimPrefix(rest, streamPrefix))
+	case strings.HasPrefix(rest, "preview/"):
+		g.servePreview(w, r, userID, strings.TrimPrefix(rest, "preview/"))
+	case strings.HasPrefix(rest, "screen/"):
+		g.serveScreen(w, r, userID, strings.TrimPrefix(rest, "screen/"))
 	case rest == "sessions" && r.Method == http.MethodGet:
 		list, err := g.mgr.listUser(r.Context(), userID)
 		if err != nil {
@@ -192,7 +212,7 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 func (g *Gateway) workspaces() []workspaceInfo {
 	out := make([]workspaceInfo, 0, len(g.cfg.Policies))
 	for name, p := range g.cfg.Policies {
-		out = append(out, workspaceInfo{Name: name, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop})
+		out = append(out, workspaceInfo{Name: name, Label: p.Label, Description: p.Description, Runtime: p.Runtime, Persistent: !p.ephemeral(), Desktop: p.Desktop, IdleSeconds: int64(g.mgr.idleFor(p) / time.Second)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -234,7 +254,7 @@ func (g *Gateway) createSession(w http.ResponseWriter, r *http.Request, userID s
 		g.ensureError(w, userID, req.Workspace, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, g.mgr.withStream(sessionInfo{
+	writeJSON(w, http.StatusCreated, g.mgr.withActivity(sessionInfo{
 		ID:              inst.name,
 		Workspace:       req.Workspace,
 		Persistent:      !pol.ephemeral(),
@@ -268,7 +288,7 @@ func (m *manager) listUser(ctx context.Context, userID string) ([]sessionInfo, e
 			continue
 		}
 		policy := c.Labels[naming.LabelPolicy]
-		out = append(out, m.withStream(sessionInfo{
+		out = append(out, m.withActivity(sessionInfo{
 			ID:              name,
 			Workspace:       policy,
 			Persistent:      c.Labels[naming.LabelStorage] != storageEphemeral,

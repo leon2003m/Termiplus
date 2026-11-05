@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"termiplus/internal/naming"
 	"termiplus/internal/netpolicy"
@@ -155,6 +156,7 @@ func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, hom
 	// The reader paces the export and the helper lock is held meanwhile;
 	// manager.exportHome adds the deadline and the byte cap.
 	err := g.mgr.exportHome(r.Context(), userID, home, sw)
+	_ = sw.SetWriteDeadline(time.Time{}) // the error response may still need writing
 	switch {
 	case err == nil && !sw.started:
 		sw.header()
@@ -185,6 +187,12 @@ func (s *startWriter) Write(p []byte) (int, error) {
 		s.w.WriteHeader(http.StatusOK)
 	}
 	return s.w.Write(p)
+}
+
+// SetWriteDeadline lets exportHome's deadline end a write the client does
+// not read.
+func (s *startWriter) SetWriteDeadline(t time.Time) error {
+	return http.NewResponseController(s.w).SetWriteDeadline(t)
 }
 
 func methodNotAllowed(w http.ResponseWriter, allow string) {

@@ -83,11 +83,11 @@ func (g *Gateway) reset(ctx context.Context, userID, name string) (*sessionInfo,
 	if err != nil {
 		return nil, err
 	}
-	s := g.mgr.withStream(sessionInfo{ID: inst.name, Workspace: ws, Persistent: true, Running: true, TerminalPath: "/p/" + ws + "/"}, pol)
+	s := g.mgr.withActivity(sessionInfo{ID: inst.name, Workspace: ws, Persistent: true, Running: true, TerminalPath: "/p/" + ws + "/"}, pol)
 	return &s, nil
 }
 
-func (g *Gateway) snapshot(ctx context.Context, userID, ws string) (Backup, error) {
+func (g *Gateway) snapshot(ctx context.Context, userID, ws string, prune bool) (Backup, error) {
 	if g.backups == nil {
 		return Backup{}, errNoBackups
 	}
@@ -98,7 +98,7 @@ func (g *Gateway) snapshot(ctx context.Context, userID, ws string) (Backup, erro
 	if _, err := g.mgr.ownedVolume(ctx, userID, home); err != nil {
 		return Backup{}, err
 	}
-	return g.backups.create(kindSnapshot, naming.Volume(userID, home), func(w io.Writer) error {
+	return g.backups.create(kindSnapshot, naming.Volume(userID, home), prune, func(w io.Writer) error {
 		return g.mgr.exportHome(ctx, userID, home, w)
 	})
 }
@@ -139,7 +139,7 @@ func (g *Gateway) archiveUser(ctx context.Context, userID string) ([]ArchivedHom
 		} else if err != nil {
 			return out, err
 		}
-		b, err := g.backups.create(kindArchived, naming.Volume(userID, home), func(w io.Writer) error {
+		b, err := g.backups.create(kindArchived, naming.Volume(userID, home), false, func(w io.Writer) error {
 			return g.mgr.exportHome(ctx, userID, home, w)
 		})
 		if err != nil {
@@ -199,7 +199,7 @@ func (g *Gateway) restoreUser(ctx context.Context, userID string) ([]RestoredHom
 //
 //	GET    archive                    the current home as a tar
 //	GET    snapshots                  list
-//	POST   snapshots                  create
+//	POST   snapshots                  create (?prune=1 may delete the oldest)
 //	GET    snapshots/<id>             download (.tar.gz)
 //	POST   snapshots/<id>/restore     restore (stops the workspaces of the home)
 //	DELETE snapshots/<id>             delete
@@ -226,8 +226,11 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"home": home, "snapshots": list, "keep": g.backups.keep})
 	case rest == "snapshots" && r.Method == http.MethodPost:
-		b, err := g.snapshot(r.Context(), userID, ws)
+		b, err := g.snapshot(r.Context(), userID, ws, r.URL.Query().Get("prune") == "1")
 		switch {
+		case errors.Is(err, errWouldPrune):
+			log.Printf("snapshot %q/%q: %q", userID, home, err)
+			httpError(w, http.StatusConflict, err.Error()+"; it needs a confirmation")
 		case errors.Is(err, errNoHome):
 			httpError(w, http.StatusNotFound, "this workspace has no home yet: start it once")
 		case errors.Is(err, errExportTooLarge):

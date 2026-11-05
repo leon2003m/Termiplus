@@ -31,8 +31,8 @@ You will get an acknowledgement within 7 days. Fixes for confirmed issues are re
 - reaching another user's container, files or sessions
 - using the socket proxy to do anything outside its allowlist
 - bypassing gateway authentication or impersonating another user
-- bypassing the MCP server's sign-in, roles, entitlements or confirmations, or acting as another user through the console, desktops, share links or port forwards
-- script from a desktop, a share link or a forwarded app acting on the console's origin
+- bypassing the MCP server's sign-in, roles, entitlements or confirmations, or acting as another user through the console, native workspaces or share links
+- script from a desktop, a share link or a native app preview acting on the console's origin
 - reaching private networks or the host from a terminal despite `deploy/firewall.sh`
 
 ## Out of scope
@@ -48,7 +48,9 @@ You will get an acknowledgement within 7 days. Fixes for confirmed issues are re
 - gVisor or Sysbox runtimes; `runc` is refused
 - sandbox network without access to private ranges, other terminals or the host
 - non-root, read-only service containers with all capabilities dropped
-- sign-in only through oauth2-proxy in front of every browser- and plugin-facing listener; the console, desktops and port forwards each on an origin of their own
+- native Desktop/Browser authenticated by Open WebUI and its trusted terminal relay; container keys stay server-side
+- oauth2-proxy sign-in for the MCP plugin, human console and separate screen-share origin; share recipients receive periodic images without desktop input or clipboard access
+- administrative tools are excluded from model discovery and calls, including for administrators
 - CI: secret scanning (gitleaks), Go vulnerability scanning (govulncheck), image and configuration scanning (Trivy), CodeQL, all third-party actions pinned to commit SHAs
 - `main` changes only through pull requests with all checks green; releases are published only after the maintainer's approval
 

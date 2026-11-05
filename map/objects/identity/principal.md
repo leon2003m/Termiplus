@@ -3,7 +3,7 @@ type: object
 cluster: identity
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/mcp.go
 ---
 
@@ -42,9 +42,13 @@ Citations: `internal/mcp/mcp.go:22` (Principal), `internal/mcp/mcp.go:104-105` (
 |---|---|
 | oauth2-proxy | writes the identity headers |
 | Open WebUI plugin | names the Open WebUI user, with the plugin key |
-| MCP tools, console, stream, forward listeners | read |
+| MCP tools, console and share listener | read |
 
 ## See
 
 - Source: `internal/mcp/auth.go`, `internal/mcp/mcp.go`
 - Rule: [../../../AGENTS.md](../../../AGENTS.md). Auth code is never hand-rolled; use oauth2-proxy.
+
+## Native integration update (2026-11-04)
+
+MCP administrative actions are unavailable to models even with RoleAdmin. Native interactive Desktop/Browser authenticates through Open WebUI; the share listener authenticates the recipient OIDC subject. Source: internal/mcp/server.go and stream.go.

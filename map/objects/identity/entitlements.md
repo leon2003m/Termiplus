@@ -3,7 +3,7 @@ type: object
 cluster: identity
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/entitlements.go
 ---
 
@@ -46,3 +46,7 @@ Citations: `internal/mcp/entitlements.go:1-26` (doc), `internal/mcp/entitlements
 ## See
 
 - Source: `internal/mcp/entitlements.go`, `deploy/entitlements.example.json`
+
+## Native integration update (2026-11-04)
+
+Administrative reads/writes remain human-only and are excluded from model discovery/calls. Apply matching access rules to Open WebUI connections: gateway data-plane routing trusts that relay and does not read the MCP entitlement file. Source: internal/mcp/server.go:modelTool, ui.go.

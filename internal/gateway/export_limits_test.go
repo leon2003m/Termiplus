@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,4 +98,53 @@ func TestExportDeadlineAppliesToManager(t *testing.T) {
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("export past the deadline: err=%v after %s", err, time.Since(start))
 	}
+}
+
+// A download whose client stops reading must still end at the export
+// deadline: a blocked write would otherwise hold the helper lock and the
+// export slot until the client goes away (security audit run 2).
+func TestExportDeadlineEndsBlockedWrite(t *testing.T) {
+	h := newHarness(t, func(o *harnessOpts) {
+		o.gateway = func(c *Config) {
+			c.ControlKey = testControlKey
+			c.ExportTimeout = 300 * time.Millisecond
+			c.ExportConcurrency = 1
+		}
+	})
+	h.get(t, "/files/cwd", "alice", testAPIKey)
+	vol := naming.Volume("alice", "default")
+	h.docker.mu.Lock()
+	h.docker.files[vol] = map[string]string{"big": strings.Repeat("x", 64<<20)} // far beyond socket buffers
+	h.docker.mu.Unlock()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(h.gw.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close() // never read: the gateway's write blocks
+	fmt.Fprintf(conn, "GET /control/v1/workspaces/default/home/archive HTTP/1.1\r\nHost: gw\r\n%s: %s\r\nX-User-Id: alice\r\n\r\n", controlKeyHeader, testControlKey)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.g.mgr.exportLimits.slots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond) // wait for the download to take the slot
+	}
+	if len(h.g.mgr.exportLimits.slots) == 0 {
+		t.Fatal("the stalled download never took the export slot")
+	}
+	for len(h.g.mgr.exportLimits.slots) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the stalled download still holds the export slot")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// The next export proves that both the slot and helper lock were released.
+	// Keep its fixture small: the short deadline is intended to interrupt the
+	// stalled client, not to benchmark a second 64 MiB transfer under -race.
+	h.docker.mu.Lock()
+	h.docker.files[vol] = map[string]string{"small": "after the stalled download"}
+	h.docker.mu.Unlock()
+	if err := h.g.mgr.exportHome(context.Background(), "alice", "default", io.Discard); err != nil {
+		t.Fatalf("export after the stalled one: %v", err)
+	}
+	h.noHelpersLeft(t)
 }

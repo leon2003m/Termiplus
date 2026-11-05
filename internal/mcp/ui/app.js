@@ -45,14 +45,55 @@ function safeURL(u) {
   }
 }
 
+// Native modal dialogs contain keyboard focus, close on Escape and restore focus.
+let activeDialog = null;
+function ask(title, content, accept = "Continue", read = () => true) {
+  if (activeDialog) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const previous = document.activeElement;
+    const dialog = el("dialog", { "aria-labelledby": "dialog-title" });
+    activeDialog = dialog;
+    const form = el("form", {});
+    const error = el("p", { class: "error", role: "alert" });
+    const cancel = el("button", { type: "button", text: "Cancel", autofocus: "autofocus" });
+    const submit = el("button", { class: "primary", type: "submit", text: accept });
+    form.append(el("h2", { id: "dialog-title", text: title }), ...content, error,
+      el("div", { class: "dialog-actions" }, [cancel, submit]));
+    dialog.append(form);
+    let value = null;
+    cancel.addEventListener("click", () => dialog.close());
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      submit.disabled = true;
+      try {
+        value = await read();
+        dialog.close();
+      } catch (e) { error.textContent = e.message; }
+      finally { submit.disabled = false; }
+    });
+    dialog.addEventListener("close", () => {
+      activeDialog = null;
+      dialog.remove();
+      if (previous && previous.isConnected) previous.focus();
+      resolve(value);
+    }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+}
+function confirmAction(message) {
+  return ask("Confirm action", [el("p", { text: message })]);
+}
+
 async function startWorkspace(ws, button) {
+  const title = ws.label || ws.name;
   const what = ws.persistent ? "a persistent session (your home is kept)" : "a temporary session";
-  if (!window.confirm("Start " + what + " of \"" + ws.name + "\"?")) return;
+  if (!await confirmAction("Start " + what + " of \"" + title + "\"?")) return;
   button.disabled = true;
-  status("Starting " + ws.name + " …");
+  status("Starting " + title + " …");
   try {
     await api("sessions", { method: "POST", body: JSON.stringify({ workspace: ws.name, persistent: ws.persistent }) });
-    status("Started " + ws.name + ".");
+    status("Started " + title + ".");
     await loadSessions();
   } catch (e) {
     status(e.message, true);
@@ -63,7 +104,7 @@ async function startWorkspace(ws, button) {
 
 async function removeSession(s, button) {
   const keep = s.persistent ? " Your home volume is kept." : "";
-  if (!window.confirm("Remove session " + s.session_id + "?" + keep)) return;
+  if (!await confirmAction("Remove session " + s.session_id + "?" + keep)) return;
   button.disabled = true;
   try {
     await api("sessions/" + encodeURIComponent(s.session_id), { method: "DELETE" });
@@ -81,14 +122,21 @@ async function loadWorkspaces() {
   const ul = $("workspaces");
   ul.replaceChildren();
   for (const ws of list) {
-    const button = el("button", { class: "primary", type: "button", text: "Start" });
+    const title = ws.label || ws.name;
+    const button = el("button", { class: "primary", type: "button", text: "Start", "aria-label": "Start " + title });
     button.addEventListener("click", () => startWorkspace(ws, button));
-    const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "persistent" : "temporary"].join(", ");
-    ul.append(el("li", {}, [
-      el("span", { class: "name", text: ws.name }),
-      button,
-      el("span", { class: "meta", text: kind + (ws.description ? " · " + ws.description : "") }),
-    ]));
+    const purpose = ws.desktop ? "A Linux desktop for graphical apps." : ws.connection_name === "Terminal with Docker"
+      ? "A Linux shell that keeps your home folder and can also run Docker containers."
+      : ws.persistent
+      ? "A Linux shell that keeps your home folder between sessions."
+      : "A fresh Linux shell with nothing from your home folder. Deleted after " + (ws.idle_seconds ? Math.ceil(ws.idle_seconds / 60) + " minutes" : "the configured idle period") + " without use; useful for trying things or letting an AI run commands without touching your files.";
+    const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");
+    const text = [el("span", { class: "name", text: title })];
+    text.push(el("span", { class: "help", text: purpose }));
+    text.push(el("span", { class: "meta", text: "Open WebUI connection: " + (ws.connection_name || ws.label || ws.name) }));
+    if (ws.description) text.push(el("span", { class: "help", text: ws.description }));
+    text.push(el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }));
+    ul.append(el("li", { class: "workspace" }, [el("div", { class: "ws-text" }, text), button]));
   }
   $("workspaces-section").hidden = false;
 }
@@ -102,44 +150,94 @@ async function loadSessions() {
     const remove = el("button", { class: "danger", type: "button", text: "Remove" });
     remove.addEventListener("click", () => removeSession(s, remove));
     const items = [el("span", { class: "name", text: s.label || s.session_id }), remove];
-    const url = s.stream_url && safeURL(s.stream_url);
-    if (url) {
-      items.splice(1, 0, el("a", { class: "button", href: url, target: "_blank", rel: "noopener noreferrer", text: "Open desktop" }));
-    }
-    const fwd = s.forward_url && safeURL(s.forward_url);
-    if (fwd && s.running) {
-      const port = el("input", { class: "port", type: "number", min: "1", max: "65535", placeholder: "port", "aria-label": "Port to open" });
-      const open = el("button", { type: "button", text: "Open port" });
-      open.addEventListener("click", () => {
-        const n = Number(port.value);
-        if (!Number.isInteger(n) || n < 1 || n > 65535) {
-          status("Enter a port between 1 and 65535.", true);
-          return;
-        }
-        window.open(fwd + n + "/", "_blank", "noopener,noreferrer");
-      });
-      items.splice(items.length - 1, 0, port, open);
-    }
+    const desktop = s.desktop === true;
+    items.push(el("span", { class: "help", text: "Use the " + s.workspace + " connection in Open WebUI. Desktop, browser, files and app previews are available there." }));
     const reset = el("button", { type: "button", text: "Reset" });
     reset.addEventListener("click", () => resetSession(s, reset));
     items.splice(items.length - 1, 0, reset);
-    if (url && sharesEnabled) {
+    if (desktop && sharesEnabled) {
       const share = el("button", { type: "button", text: "Share (view only)" });
       share.addEventListener("click", () => shareDesktop(s, share));
       items.splice(items.length - 1, 0, share);
     }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
     items.push(el("span", { class: "meta", text: meta }));
-    ul.append(el("li", {}, items));
+    const card = el("li", { "data-session": s.session_id }, items);
+    if (desktop) card.prepend(desktopPreview(s));
+    else card.prepend(terminalPreview(s));
+    ul.append(card);
   }
+  refreshPreviews();
   $("sessions-section").hidden = false;
 }
+
+function terminalPreview(session) {
+  const box = el("div", { class: "terminal-preview" });
+  box.append(el("strong", { text: session.running ? "Terminal running" : "Offline" }));
+  const date = (value) => value ? new Date(value).toLocaleString() : "not recorded";
+  box.append(el("span", { text: "Running since: " + (session.running ? date(session.started_at) : "—") }));
+  box.append(el("span", { text: "Last activity observed by gateway: " + date(session.last_activity) }));
+  if (!session.persistent && session.running) {
+    const remaining = session.idle_expires_at ? Math.max(0, Math.ceil((new Date(session.idle_expires_at) - Date.now()) / 60000)) : null;
+    box.append(el("span", { text: remaining === null ? (session.last_activity ? "Idle deletion paused while connected" : "Idle deletion time unavailable") : remaining > 0 ? "Idle deletion in about " + remaining + " min" : "Idle deletion pending" }));
+  }
+  return box;
+}
+
+// Images are fetched only for running desktops while this tab is visible.
+// A failed/stopped preview loses its src so an old screen is never shown offline.
+function desktopPreview(session) {
+  const box = el("div", { class: "desktop-preview" });
+  const label = el("span", { text: session.running ? "Loading preview…" : "Offline" });
+  box.append(label);
+  if (session.running) {
+    const image = el("img", { alt: "Current desktop screen", hidden: "hidden", "data-preview": encodeURIComponent(session.session_id) });
+    image.addEventListener("load", () => { image.hidden = false; label.hidden = true; });
+    image.addEventListener("error", () => {
+      image.hidden = true;
+      image.removeAttribute("src");
+      label.textContent = "Preview unavailable";
+      label.hidden = false;
+    });
+    box.append(image);
+  }
+  return box;
+}
+
+function refreshPreviews() {
+  if (document.visibilityState !== "visible") return;
+  for (const image of document.querySelectorAll("img[data-preview]")) {
+    image.src = "api/desktops/" + image.dataset.preview + "/preview?t=" + Math.floor(Date.now() / 30000);
+  }
+}
+let refreshingSessions = false;
+async function refreshVisibleSessions() {
+  if (document.visibilityState !== "visible" || refreshingSessions || $("sessions-section").hidden) return;
+  refreshingSessions = true;
+  try {
+    const sessions = await api("sessions");
+    const current = new Map(sessions.map((s) => [s.session_id, s]));
+    for (const card of $("sessions").children) {
+      const session = current.get(card.dataset.session) || { running: false };
+      const terminal = card.querySelector(".terminal-preview");
+      if (terminal) { terminal.replaceWith(terminalPreview(session)); continue; }
+      const box = card.querySelector(".desktop-preview");
+      if (!box) continue;
+      const running = Boolean(box.querySelector("img[data-preview]"));
+      if (running !== Boolean(session.running)) box.replaceWith(desktopPreview(session));
+    }
+    refreshPreviews();
+  } catch (e) { status(e.message, true); }
+  finally { refreshingSessions = false; }
+}
+setInterval(refreshVisibleSessions, 30000);
+document.addEventListener("visibilitychange", refreshVisibleSessions);
 
 async function resetSession(s, button) {
   const what = s.persistent
     ? "Start " + s.session_id + " over from a fresh container? Everything in /home/user is kept; programs installed elsewhere are lost."
     : "Remove the temporary sandbox " + s.session_id + "? The next use starts a fresh one.";
-  if (!window.confirm(what)) return;
+  if (!await confirmAction(what)) return;
   button.disabled = true;
   status("Resetting " + s.session_id + " …");
   try {
@@ -158,23 +256,75 @@ async function resetSession(s, button) {
 let sharesEnabled = false;
 
 async function shareDesktop(s, button) {
-  const minutes = window.prompt("Share this desktop for how many minutes (5-1440)? Viewers can watch, not type or click.", "60");
-  if (minutes === null) return;
-  const n = Number(minutes);
-  if (!Number.isInteger(n) || n < 5 || n > 1440) {
-    status("Enter a number of minutes between 5 and 1440.", true);
-    return;
-  }
-  const forUser = window.prompt("Only for one user? Enter their user name, or leave empty for anyone who can sign in and has the link.", "");
-  if (forUser === null) return;
+  const duration = el("select", { id: "share-duration" }, [
+    ...[[15, "15 minutes"], [60, "1 hour"], [480, "8 hours"], [1440, "24 hours"], ["custom", "Custom"]].map(
+      ([value, text]) => el("option", { value, text })),
+  ]);
+  duration.value = "60";
+  const custom = el("input", { id: "share-custom", type: "number", min: "5", max: "1440", value: "60" });
+  const customLabel = el("label", { for: "share-custom", text: "Custom duration (minutes)", hidden: "hidden" });
+  customLabel.append(custom);
+  custom.disabled = true;
+  duration.addEventListener("change", () => { customLabel.hidden = duration.value !== "custom"; custom.disabled = customLabel.hidden; });
+  const audience = el("select", { id: "share-audience" }, [
+    el("option", { value: "anyone", text: "Anyone signed in with the link" }),
+    el("option", { value: "person", text: "One person" }),
+  ]);
+  const query = el("input", { id: "share-person", type: "search", autocomplete: "off", maxlength: "255", placeholder: "Exact user name" });
+  const find = el("button", { type: "button", text: "Find person" });
+  const results = el("div", { class: "person-results", role: "status" });
+  const picker = el("div", { hidden: "hidden" }, [el("label", { for: "share-person", text: "Find a person by user name" }), query, find, results]);
+  let selected = "";
+  query.addEventListener("input", () => { selected = ""; results.replaceChildren(); });
+  audience.addEventListener("change", () => { picker.hidden = audience.value !== "person"; });
+  find.addEventListener("click", async () => {
+    selected = "";
+    const searched = query.value.trim();
+    find.disabled = true;
+    results.textContent = "Searching…";
+    try {
+      const response = await api("desktops/" + encodeURIComponent(s.session_id) + "/people?q=" + encodeURIComponent(searched));
+      if (query.value.trim() !== searched) return;
+      results.replaceChildren();
+      if (!response.people.length) results.textContent = "No matching person.";
+      for (const person of response.people) {
+        const choose = el("button", { type: "button", text: person.username, "aria-pressed": "false" });
+        choose.addEventListener("click", () => {
+          selected = person.username;
+          choose.setAttribute("aria-pressed", "true");
+          choose.textContent = person.username + " — selected";
+        });
+        results.append(choose);
+      }
+    } catch (e) { results.textContent = e.message; }
+    finally { find.disabled = false; }
+  });
+  const choice = await ask("Share desktop", [
+    el("p", { text: "Viewers see a screen image updated every five seconds. Keyboard, mouse, clipboard and audio are not shared." }),
+    el("label", { for: "share-duration", text: "Expires after" }), duration, customLabel,
+    el("label", { for: "share-audience", text: "Who can watch" }), audience, picker,
+  ], "Create link", () => {
+    const minutes = Number(duration.value === "custom" ? custom.value : duration.value);
+    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 1440) throw new Error("Choose 5–1440 minutes.");
+    if (audience.value === "person" && !selected) throw new Error("Find and select a person first.");
+    return { minutes, for_user: audience.value === "person" ? selected : "" };
+  });
+  if (!choice) return;
   button.disabled = true;
   try {
-    const res = await api("shares", { method: "POST", body: JSON.stringify({ session_id: s.session_id, minutes: n, for_user: forUser.trim() }) });
+    const res = await api("shares", { method: "POST", body: JSON.stringify({ session_id: s.session_id, minutes: choice.minutes, for_user: choice.for_user }) });
     const link = safeURL(res.url);
     $("share-link").replaceChildren(
       el("span", { text: "Share link (" + res.who + ", until " + new Date(res.expires).toLocaleString() + "): " }),
       el("input", { class: "secret", type: "text", readonly: "readonly", value: link || "", "aria-label": "Share link" }),
     );
+    const copy = el("button", { type: "button", text: "Copy link" });
+    copy.addEventListener("click", async () => {
+      const input = $("share-link").querySelector("input");
+      try { await navigator.clipboard.writeText(input.value); copy.textContent = "Copied"; }
+      catch (e) { input.focus(); input.select(); status("Select and copy the link from the field."); }
+    });
+    $("share-link").append(copy);
     $("share-link").hidden = false;
     status("Shared " + s.session_id + ". Copy the link below.");
     await loadShares();
@@ -266,7 +416,7 @@ async function loadBackups(workspaces) {
     for (const sn of res.snapshots) {
       const restore = el("button", { type: "button", text: "Restore" });
       restore.addEventListener("click", async () => {
-        if (!window.confirm("Restore the snapshot of " + new Date(sn.created).toLocaleString() + "? The workspace stops, the snapshot's files are written back (overwriting newer versions); files created since then stay.")) return;
+        if (!await confirmAction("Restore the snapshot of " + new Date(sn.created).toLocaleString() + "? The workspace stops, the snapshot's files are written back (overwriting newer versions); files created since then stay.")) return;
         restore.disabled = true;
         status("Restoring …");
         try {
@@ -281,7 +431,7 @@ async function loadBackups(workspaces) {
       });
       const del = el("button", { class: "danger", type: "button", text: "Delete" });
       del.addEventListener("click", async () => {
-        if (!window.confirm("Delete this snapshot?")) return;
+        if (!await confirmAction("Delete this snapshot?")) return;
         del.disabled = true;
         try {
           await api("snapshots/" + encodeURIComponent(ws.name) + "/" + encodeURIComponent(sn.id), { method: "DELETE" });
@@ -352,7 +502,7 @@ function saver(button, field, path, what) {
       status(what + ": not valid JSON (" + e.message + ")", true);
       return;
     }
-    if (!window.confirm("Replace the " + what + " for everyone?")) return;
+    if (!await confirmAction("Replace the " + what + " for everyone?")) return;
     $(button).disabled = true;
     try {
       await api(path, { method: "PUT", body: JSON.stringify(body) });

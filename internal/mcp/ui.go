@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"termiplus/internal/naming"
+	"sync"
+	"time"
 )
 
 // The management UI is a small web console on its own listener (UI_LISTEN_ADDR)
@@ -18,7 +18,7 @@ import (
 // subject is mapped to the Open WebUI user via the IdentityStore. Every action
 // goes through the same tools, RBAC and entitlements as the MCP server. The
 // person clicking is the human in the loop, so consequential actions are sent
-// as confirmed after the page has asked them (window.confirm).
+// as confirmed after the page has asked them (an in-page dialog).
 //
 // Cross-site request forgery: the session cookie is SameSite=Lax, and every
 // non-GET request must carry X-Termiplus-UI and a same-origin Origin header,
@@ -34,9 +34,11 @@ const uiCSRFHeader = "X-Termiplus-UI"
 
 // UI serves the management console.
 type UI struct {
-	srv    *Server
-	ids    *IdentityStore
-	static http.Handler
+	lookupMu sync.Mutex
+	lookups  map[string]time.Time
+	srv      *Server
+	ids      *IdentityStore
+	static   http.Handler
 }
 
 // NewUI returns the management UI for srv. ids maps browser identities (OIDC
@@ -165,8 +167,10 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		u.run(w, r, p, "share_desktop", args)
 	case strings.HasPrefix(rest, "shares/") && r.Method == http.MethodDelete:
 		u.run(w, r, p, "share_desktop", map[string]any{"action": "revoke", "share_id": strings.TrimPrefix(rest, "shares/")})
-	case strings.HasPrefix(rest, "desktops/") && r.Method == http.MethodGet:
-		u.desktop(w, r, p, strings.TrimPrefix(rest, "desktops/"))
+	case strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/people") && r.Method == http.MethodGet:
+		u.people(w, r, p, strings.TrimSuffix(strings.TrimPrefix(rest, "desktops/"), "/people"))
+	case strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/preview") && r.Method == http.MethodGet:
+		u.preview(w, r, p, strings.TrimSuffix(strings.TrimPrefix(rest, "desktops/"), "/preview"))
 	case strings.HasPrefix(rest, "sessions/") && r.Method == http.MethodDelete:
 		u.run(w, r, p, "destroy_session", map[string]any{
 			"session_id": strings.TrimPrefix(rest, "sessions/"), "_confirmed": true,
@@ -176,50 +180,6 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 	}
 }
 
-// desktop describes the user's desktop id for the page shown in place of a
-// desktop that does not answer (ui/desktop.js): the session, or a persistent
-// desktop whose container is gone but can be started again (same name).
-func (u *UI) desktop(w http.ResponseWriter, r *http.Request, p Principal, id string) {
-	var sessions []Session
-	if !u.invokeJSON(w, r, p, "list_sessions", &sessions) {
-		return
-	}
-	for _, s := range sessions {
-		if s.ID == id {
-			uiJSON(w, http.StatusOK, s)
-			return
-		}
-	}
-	var ws []Workspace
-	if !u.invokeJSON(w, r, p, "list_workspaces", &ws) {
-		return
-	}
-	for _, x := range ws {
-		if x.Desktop && x.Persistent && naming.Container(p.UserID, x.Name) == id {
-			uiJSON(w, http.StatusOK, Session{ID: id, Workspace: x.Name, Persistent: true})
-			return
-		}
-	}
-	uiError(w, http.StatusNotFound, "no such desktop")
-}
-
-// invokeJSON runs a read-only tool and decodes its result into out, or writes
-// the error.
-func (u *UI) invokeJSON(w http.ResponseWriter, r *http.Request, p Principal, tool string, out any) bool {
-	res, rerr := u.srv.invoke(r.Context(), p, tool, map[string]any{})
-	switch {
-	case rerr != nil:
-		uiError(w, http.StatusBadRequest, rerr.Message)
-	case res.IsError:
-		uiError(w, http.StatusBadRequest, res.Content[0].Text)
-	case json.Unmarshal([]byte(res.Content[0].Text), out) != nil:
-		uiError(w, http.StatusBadGateway, "unexpected "+tool+" result")
-	default:
-		return true
-	}
-	return false
-}
-
 // admin serves admin/netpolicy and admin/entitlements (GET shows, PUT
 // replaces) and admin/audit (GET only). The tools check the admin role.
 func (u *UI) admin(w http.ResponseWriter, r *http.Request, p Principal, what string) {
@@ -227,6 +187,27 @@ func (u *UI) admin(w http.ResponseWriter, r *http.Request, p Principal, what str
 		"netpolicy":    {"get_network_policy", "set_network_policy", "policy"},
 		"entitlements": {"get_entitlements", "set_entitlements", "entitlements"},
 		"audit":        {"get_audit_log", "", ""},
+	}
+	if what == "departed" {
+		args := map[string]any{"action": "list"}
+		if r.Method == http.MethodPost {
+			var req struct {
+				Action   string `json:"action"`
+				Username string `json:"username"`
+			}
+			dec := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&req); err != nil {
+				uiError(w, 400, "invalid request")
+				return
+			}
+			args = map[string]any{"action": req.Action, "username": req.Username, "_confirmed": true}
+		} else if r.Method != http.MethodGet {
+			uiError(w, 405, "method not allowed")
+			return
+		}
+		u.run(w, r, p, "manage_departed", args)
+		return
 	}
 	t, ok := tools[what]
 	switch {

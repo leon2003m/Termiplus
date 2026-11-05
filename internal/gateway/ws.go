@@ -15,9 +15,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"termiplus/internal/naming"
 )
 
 // Open WebUI's terminal WebSocket uses first-message auth: the first client
@@ -25,6 +28,10 @@ import (
 // that frame, checks the token against its own key, then opens the upstream
 // connection itself and sends the same message with the container's key.
 // After that, frames are copied unchanged in both directions.
+
+// Open WebUI authenticates capability-backed Browser relays with the gateway
+// bearer in the upgrade headers. Their first frame is application data, not auth.
+var nativeBrowserSocket = regexp.MustCompile(`^/browser/view/[A-Za-z0-9_-]{1,128}/[A-Za-z0-9_-]{1,256}/(ws|stream|vnc)$`)
 
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -36,6 +43,11 @@ func acceptKey(key string) string {
 func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID, sessionID, policyName string, pol Policy, rest string) {
 	if r.Method != http.MethodGet || r.Header.Get("Sec-WebSocket-Version") != "13" {
 		httpError(w, http.StatusBadRequest, "unsupported websocket request")
+		return
+	}
+	headerAuth := nativeBrowserSocket.MatchString(rest)
+	if headerAuth && !g.checkBearer(r) {
+		httpError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	clientKey := r.Header.Get("Sec-WebSocket-Key")
@@ -61,23 +73,40 @@ func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID,
 		return
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	payload, err := readClientTextFrame(brw.Reader, 4096)
-	if err != nil {
-		writeClose(conn, 4001, "Auth timeout or invalid payload")
-		return
-	}
-	_ = conn.SetReadDeadline(time.Time{})
-
 	var auth map[string]any
-	if json.Unmarshal(payload, &auth) != nil || auth["type"] != "auth" {
-		writeClose(conn, 4001, "Invalid auth message")
-		return
-	}
-	tok, _ := auth["token"].(string)
-	if !g.tokenOK(tok) {
-		writeClose(conn, 4001, "Invalid API key")
-		return
+	if !headerAuth {
+		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		payload, err := readClientTextFrame(brw.Reader, 4096)
+		if err != nil {
+			writeClose(conn, 4001, "Auth timeout or invalid payload")
+			return
+		}
+		_ = conn.SetReadDeadline(time.Time{})
+
+		if json.Unmarshal(payload, &auth) != nil || auth["type"] != "auth" {
+			writeClose(conn, 4001, "Invalid auth message")
+			return
+		}
+		tok, _ := auth["token"].(string)
+		if !g.tokenOK(tok) {
+			writeClose(conn, 4001, "Invalid API key")
+			return
+		}
+
+		if chat, exists := auth["chat_id"]; exists && chat != nil && chat != "" {
+			id, ok := chat.(string)
+			if !ok || !naming.UserID.MatchString(id) {
+				writeClose(conn, 4001, "Invalid chat id")
+				return
+			}
+			if headerID := r.Header.Get("X-Session-Id"); headerID != "" && headerID != id {
+				writeClose(conn, 4001, "Conflicting chat id")
+				return
+			}
+			sessionID = id
+			r.Header.Set("X-Session-Id", id)
+		}
+
 	}
 
 	// Only now, after authentication, may a container be started.
@@ -88,7 +117,13 @@ func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID,
 		return
 	}
 
-	up, upReader, err := dialUpstream(inst.addr, rest, r.URL.RawQuery, r.Header)
+	headers := r.Header.Clone()
+	if headerAuth {
+		headers.Set("Authorization", "Bearer "+inst.key)
+	} else {
+		headers.Del("Authorization")
+	}
+	up, upReader, err := dialUpstream(inst.addr, rest, r.URL.RawQuery, headers)
 	if err != nil {
 		log.Printf("ws dial %q: %q", inst.name, err)
 		g.mgr.invalidate(inst.name)
@@ -97,13 +132,15 @@ func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID,
 	}
 	defer up.Close()
 
-	auth["token"] = inst.key
-	msg, _ := json.Marshal(auth)
-	if err := writeMaskedText(up, msg); err != nil {
-		writeClose(conn, 1011, "Terminal unavailable")
-		return
-	}
+	if !headerAuth {
+		auth["token"] = inst.key
+		msg, _ := json.Marshal(auth)
+		if err := writeMaskedText(up, msg); err != nil {
+			writeClose(conn, 1011, "Terminal unavailable")
+			return
+		}
 
+	}
 	g.mgr.touch(inst, +1)
 	defer g.mgr.touch(inst, -1)
 
@@ -126,7 +163,7 @@ func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID,
 	}
 }
 
-var forwardHeaders = []string{"X-User-Id", "X-Session-Id", "X-Terminal-Context-Id"}
+var forwardHeaders = []string{"Authorization", "X-User-Id", "X-Session-Id", "X-Terminal-Context-Id"}
 
 func dialUpstream(addr, path, rawQuery string, in http.Header) (net.Conn, *bufio.Reader, error) {
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)

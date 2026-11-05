@@ -9,6 +9,7 @@ Before changing code, open [map/CLAUDE.md](map/CLAUDE.md), the system map. It na
 ## Branches and releases
 
 - Work on `dev` or on a feature branch created from `dev`. Push only to those.
+- The primary repository is the maintainer's own Git server (remote `origin`). GitHub is a push mirror of it: never push to GitHub, and do not open pull requests or issues there.
 - Never push to `main`. Changes reach `main` only through a pull request from `dev` that the maintainer approves.
 - Never force-push, never rewrite published history, never delete branches you did not create.
 - Never create, move or delete tags. Releases are tagged by the maintainer.

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -130,10 +131,15 @@ func TestMCPSnapshots(t *testing.T) {
 	}
 	c.setFiles(vol, map[string]string{"a": "2", "b": "new"})
 
-	if code := c.code(t, "bob-tok", "manage_snapshots", map[string]any{"action": "restore", "workspace": "default", "snapshot_id": snap.ID}); code != -32010 {
-		t.Fatalf("restore without confirmation: %d", code)
+	for _, confirm := range []bool{false, true} {
+		if code := c.code(t, "bob-tok", "manage_snapshots", map[string]any{"action": "restore", "workspace": "default", "snapshot_id": snap.ID, "_confirmed": confirm}); code != -32003 {
+			t.Fatalf("model restore: %d", code)
+		}
 	}
-	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "restore", "workspace": "default", "snapshot_id": snap.ID, "_confirmed": true}, nil)
+	if code, body := c.console(t, "bob", "POST", "snapshots/default/"+snap.ID+"/restore", "", false); code != 200 {
+		t.Fatalf("human restore: %d %s", code, body)
+	}
+
 	if f := c.files(vol); f["a"] != "1" || f["b"] != "new" {
 		t.Fatalf("after restore: %v", f)
 	}
@@ -170,21 +176,14 @@ func TestMCPSnapshots(t *testing.T) {
 		t.Fatal("alice downloaded bob's snapshot")
 	}
 
-	// Only the newest `keep` (3) stay. Below keep a create needs no
-	// confirmation; once it would push out the oldest snapshot it does, like
-	// delete (security audit run 1).
-	created := 1
-	for i := 0; i < 4; i++ {
-		args := map[string]any{"action": "create", "workspace": "default"}
-		if created >= 3 {
-			if code := c.code(t, "bob-tok", "manage_snapshots", args); code != -32010 {
-				t.Fatalf("pruning create without confirmation: %d", code)
-			}
-			args["_confirmed"] = true
-		}
-		c.ok(t, "bob-tok", "manage_snapshots", args, nil)
-		created++
+	// A model create must never prune, even with a forged confirmation flag.
+	for i := 0; i < 2; i++ {
+		c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "create", "workspace": "default"}, nil)
 	}
+	if code := c.code(t, "bob-tok", "manage_snapshots", map[string]any{"action": "create", "workspace": "default", "_confirmed": true, "prune": true}); code != 1 {
+		t.Fatalf("model pruning not refused: %d", code)
+	}
+
 	var list struct {
 		Snapshots []struct{ ID string } `json:"snapshots"`
 		Current   string                `json:"current_home_download_url"`
@@ -193,15 +192,28 @@ func TestMCPSnapshots(t *testing.T) {
 	if len(list.Snapshots) != 3 || list.Current != "https://desk.example/ui/api/workspaces/default/home/archive" {
 		t.Fatalf("list: %+v", list)
 	}
+	found := false
+	for _, x := range list.Snapshots {
+		found = found || x.ID == snap.ID
+	}
+	if !found {
+		t.Fatal("model create pruned the oldest snapshot")
+	}
+	if code := c.code(t, "bob-tok", "manage_snapshots", map[string]any{"action": "delete", "workspace": "default", "snapshot_id": snap.ID, "_confirmed": true}); code != -32003 {
+		t.Fatalf("model delete: %d", code)
+	}
+	if code, body := c.console(t, "bob", "POST", "snapshots/default", "", false); code != 200 {
+		t.Fatalf("human prune: %d %s", code, body)
+	}
+	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "list", "workspace": "default"}, &list)
 	for _, x := range list.Snapshots {
 		if x.ID == snap.ID {
-			t.Fatal("the oldest snapshot should have been pruned")
+			t.Fatal("human confirmed create did not prune")
 		}
 	}
-	if code := c.code(t, "bob-tok", "manage_snapshots", map[string]any{"action": "delete", "workspace": "default", "snapshot_id": list.Snapshots[0].ID}); code != -32010 {
-		t.Fatalf("delete without confirmation: %d", code)
+	if code, body := c.console(t, "bob", "DELETE", "snapshots/default/"+list.Snapshots[0].ID, "", false); code != 200 {
+		t.Fatalf("human delete: %d %s", code, body)
 	}
-	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "delete", "workspace": "default", "snapshot_id": list.Snapshots[0].ID, "_confirmed": true}, nil)
 	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "list", "workspace": "default"}, &list)
 	if len(list.Snapshots) != 2 {
 		t.Fatalf("after delete: %+v", list)
@@ -224,7 +236,7 @@ func TestMCPShareDesktop(t *testing.T) {
 	auth := mcp.NewStaticAuthenticator(map[string]mcp.Principal{
 		"alice-tok": {UserID: "alice", Roles: []string{mcp.RolePersist}},
 	})
-	backend := mcp.NewGatewayBackend(h.gw.URL, "", testControlKey, "").WithStreamBase("https://desk.example")
+	backend := mcp.NewGatewayBackend(h.gw.URL, "", testControlKey, "")
 	dir := &fakeDir{users: []mcp.DirUser{{ID: "kc-bob", Username: "bob", Enabled: true}, {ID: "kc-carol", Username: "carol", Enabled: true}}}
 	sharesPath := filepath.Join(t.TempDir(), "shares.json")
 	shares, err := mcp.OpenShareStore(sharesPath)
@@ -287,31 +299,45 @@ func TestMCPShareDesktop(t *testing.T) {
 	p2 := strings.TrimPrefix(onlyBob.URL, "https://desk.example")
 	tok1 := strings.TrimSuffix(strings.TrimPrefix(p1, "/share/"), "/")
 
-	// The page gets the WebSocket path below the share, view only.
-	if code, _, hdr := get("kc-carol", p1, nil); code != http.StatusFound ||
-		hdr.Get("Location") != p1+"?path=share%2F"+tok1+"%2Fwebsockify&view_only=1" {
-		t.Fatalf("share page: %d %q", code, hdr.Get("Location"))
+	if code, body, hdr := get("kc-carol", p1, nil); code != 200 || !strings.Contains(body, "view only") || !strings.Contains(hdr.Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Fatalf("share page: %d %s", code, body)
 	}
-	// Any signed-in user (carol is not even linked to Open WebUI) watches as
-	// KasmVNC's view-only user; client attempts to switch to the owner fail.
-	code, body, _ := get("kc-carol", p1+"app.js", map[string]string{"X-Stream-View": "0", "Authorization": "Basic dXNlcjp4"})
-	if code != 200 || !strings.Contains(body, `"as":"viewer"`) {
-		t.Fatalf("viewer: %d %s", code, body)
+	frame := nativeScreen(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/desktop/screenshot" || r.Header.Get("X-User-Id") != "alice" || r.Header.Get("Authorization") != "Bearer "+h.g.mgr.containerKey(s.ID) {
+			t.Error("share escaped native screenshot capability")
+		}
+		_, _ = w.Write(frame)
+	}))
+	defer up.Close()
+	original := h.g.mgr.addrFor
+	h.g.mgr.addrFor = func(name string, port int) string {
+		if name == s.ID {
+			return strings.TrimPrefix(up.URL, "http://")
+		}
+		return original(name, port)
 	}
-	if code, _, _ := get("", p1+"app.js", nil); code != http.StatusUnauthorized {
-		t.Fatalf("not signed in: %d", code)
+	if code, body, _ := get("kc-carol", p1+"screen.png", map[string]string{"X-Stream-View": "0", "Authorization": "Basic dXNlcjp4"}); code != 200 || !strings.HasPrefix(body, "\x89PNG") {
+		t.Fatalf("viewer: %d", code)
 	}
-	// The named share only for bob.
-	if code, _, _ := get("kc-carol", p2+"app.js", nil); code != http.StatusForbidden {
-		t.Fatalf("carol on bob's share: %d", code)
+	if code, _, _ := get("", p1+"screen.png", nil); code != 401 {
+		t.Fatalf("unsigned viewer: %d", code)
 	}
-	if code, body, _ := get("kc-bob", p2+"app.js", nil); code != 200 || !strings.Contains(body, `"as":"viewer"`) {
-		t.Fatalf("bob: %d %s", code, body)
+	if code, _, _ := get("kc-carol", p2+"screen.png", nil); code != 403 {
+		t.Fatalf("wrong recipient: %d", code)
 	}
-	// Cross-origin WebSockets are refused here too.
-	if code, _, _ := get("kc-bob", p2+"websockify", map[string]string{"Connection": "Upgrade", "Upgrade": "websocket", "Origin": "https://evil.example"}); code != http.StatusForbidden {
-		t.Fatalf("cross-origin ws: %d", code)
+	if code, _, _ := get("kc-bob", p2+"screen.png", nil); code != 200 {
+		t.Fatalf("recipient: %d", code)
 	}
+	for _, path := range []string{"desktop/action", "desktop/stream", "websockify", "clipboard", "app.js"} {
+		if code, _, _ := get("kc-bob", p2+path, nil); code != 404 {
+			t.Fatalf("share control path %s: %d", path, code)
+		}
+	}
+	if code, _, _ := get("kc-bob", p2+"screen.png", map[string]string{"Connection": "Upgrade", "Upgrade": "websocket", "Origin": "https://evil.example"}); code != 403 {
+		t.Fatalf("upgrade: %d", code)
+	}
+
 	// Unknown or guessed tokens.
 	for _, p := range []string{"/share/" + strings.Repeat("0", 64) + "/app.js", "/share/x/app.js", "/share/" + tok1[:63] + "/app.js"} {
 		if code, _, _ := get("kc-bob", p, nil); code != http.StatusNotFound {
@@ -329,28 +355,13 @@ func TestMCPShareDesktop(t *testing.T) {
 		t.Fatalf("list: %+v", list)
 	}
 	c.ok(t, "alice-tok", "share_desktop", map[string]any{"action": "revoke", "share_id": any1.ID}, nil)
-	if code, _, _ := get("kc-carol", p1+"app.js", nil); code != http.StatusNotFound {
+	if code, _, _ := get("kc-carol", p1+"screen.png", nil); code != http.StatusNotFound {
 		t.Fatalf("revoked share still works: %d", code)
 	}
-	// The owner's own stream is unchanged: full user, even if a client asks
-	// for view mode.
-	ids2, _ := mcp.OpenIdentityStore(filepath.Join(t.TempDir(), "ids2.json"))
-	_ = ids2.Record("kc-alice", "alice")
-	ui2, _ := mcp.NewDesktopHandler(srv, ids2, h.gw.URL, testControlKey)
-	front2 := httptest.NewServer(ui2)
-	t.Cleanup(front2.Close)
-	req, _ := http.NewRequest(http.MethodGet, front2.URL+"/stream/"+s.ID+"/app.js", nil)
-	req.Header.Set("X-Forwarded-User", "kc-alice")
-	req.Header.Set("X-Stream-View", "1")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	if code, _, _ := get("kc-alice", "/stream/"+s.ID+"/", nil); code != 404 {
+		t.Fatalf("obsolete owner viewer still exists: %d", code)
 	}
-	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(b), `"as":"user"`) {
-		t.Fatalf("owner stream: %s", b)
-	}
+
 }
 
 // fakeDir is a Directory for the departed-user and share tests.
@@ -434,7 +445,11 @@ func TestDepartedUsers(t *testing.T) {
 	var none struct {
 		Departed []mcp.DepartedEntry `json:"departed"`
 	}
-	c.ok(t, "root-tok", "manage_departed", map[string]any{"action": "list"}, &none)
+	if code, body := c.console(t, "root", "GET", "admin/departed", "", true); code != 200 {
+		t.Fatalf("human departed list: %d %s", code, body)
+	} else if err := json.Unmarshal([]byte(body), &none); err != nil {
+		t.Fatal(err)
+	}
 	if len(none.Departed) != 0 {
 		t.Fatalf("empty listing marked users departed: %+v", none.Departed)
 	}
@@ -447,7 +462,11 @@ func TestDepartedUsers(t *testing.T) {
 	var list struct {
 		Departed []mcp.DepartedEntry `json:"departed"`
 	}
-	c.ok(t, "root-tok", "manage_departed", map[string]any{"action": "list"}, &list)
+	if code, body := c.console(t, "root", "GET", "admin/departed", "", true); code != 200 {
+		t.Fatalf("human departed list: %d %s", code, body)
+	} else if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatal(err)
+	}
 	reasons := map[string]string{}
 	for _, e := range list.Departed {
 		reasons[e.Subject] = e.Reason
@@ -469,7 +488,11 @@ func TestDepartedUsers(t *testing.T) {
 	if c.h.ctr(s.ID) != nil || c.h.docker.volumes[vol] != nil {
 		t.Fatal("bob's workspace and home should be archived away")
 	}
-	c.ok(t, "root-tok", "manage_departed", map[string]any{"action": "list"}, &list)
+	if code, body := c.console(t, "root", "GET", "admin/departed", "", true); code != 200 {
+		t.Fatalf("human departed list: %d %s", code, body)
+	} else if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatal(err)
+	}
 	for _, e := range list.Departed {
 		if e.Subject == "kc-bob" && (e.ArchivedAt == nil || e.Error != "") {
 			t.Fatalf("bob: %+v", e)
@@ -490,14 +513,14 @@ func TestDepartedUsers(t *testing.T) {
 	}
 
 	// Admin tool: enabled users cannot be archived; non-admins see nothing.
-	if code := c.code(t, "root-tok", "manage_departed", map[string]any{"action": "archive", "username": "dave", "_confirmed": true}); code != 1 {
-		t.Fatalf("archiving an enabled user: %d", code)
+	if code := c.code(t, "root-tok", "manage_departed", map[string]any{"action": "archive", "username": "dave", "_confirmed": true}); code != -32003 {
+		t.Fatalf("model archiving an enabled user: %d", code)
 	}
 	if code := c.code(t, "bob-tok", "manage_departed", map[string]any{"action": "list"}); code != -32003 {
 		t.Fatalf("non-admin: %d", code)
 	}
-	if code := c.code(t, "root-tok", "manage_departed", map[string]any{"action": "restore", "username": "bob"}); code != -32010 {
-		t.Fatalf("restore without confirmation: %d", code)
+	if code := c.code(t, "root-tok", "manage_departed", map[string]any{"action": "restore", "username": "bob"}); code != -32003 {
+		t.Fatalf("model restore: %d", code)
 	}
 
 	// The archive file is a gzip'd tar of the home.

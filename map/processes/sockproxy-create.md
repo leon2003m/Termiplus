@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 consumes: [../objects/workspaces/policy.md, ../objects/sandbox/sockproxy-rules.md]
 produces: [../objects/workspaces/terminal-container.md, ../objects/workspaces/home-volume.md]
 ---
@@ -20,7 +20,7 @@ The gateway is internet-facing (through Open WebUI) and parses user traffic. If 
 
 ## Steps
 
-1. Gateway builds the spec. For persistent policies it first checks the volume's owner label, then creates the volume: `internal/gateway/lifecycle.go:424-475`.
+1. Gateway builds the spec. For persistent policies it first checks the volume's owner label, then creates the volume: `internal/gateway/lifecycle.go:468-531`.
 2. Sockproxy: token check (`X-Proxy-Token`), path normalization, then the route switch: `internal/sockproxy/proxy.go:91-120`, `:429`.
 3. `/volumes/create` → `ValidateVolume` (no driver options; size from `HOME_VOLUME_SIZE`): `proxy.go:153`, `validate.go:262`.
 4. `/containers/create` → `ValidateCreate`: `proxy.go:142`, `internal/sockproxy/validate.go:134`.
@@ -49,3 +49,7 @@ The gateway is internet-facing (through Open WebUI) and parses user traffic. If 
 
 - Objects: [Sockproxy rules](../objects/sandbox/sockproxy-rules.md), [Terminal container](../objects/workspaces/terminal-container.md), [Home volume](../objects/workspaces/home-volume.md), [DNS forwarder](../objects/sandbox/dns-forwarder.md)
 - Source: `internal/sockproxy/validate.go`, `internal/sockproxy/proxy.go`
+
+## Native integration update (2026-11-04)
+
+Native desktop flags replace old desktop-password env values within the existing allowlist. Container hardening and Docker endpoint permissions are unchanged. Source: internal/gateway/lifecycle.go and image/desktop/Dockerfile.

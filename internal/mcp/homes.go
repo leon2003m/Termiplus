@@ -23,8 +23,9 @@ type HomeBackend interface {
 	// container (a persistent one keeps its home).
 	ResetSession(ctx context.Context, p Principal, id string) (json.RawMessage, error)
 	// Snapshots runs action (list, create, restore, delete) on the snapshots
-	// of the home of a persistent workspace.
-	Snapshots(ctx context.Context, p Principal, workspace, action, id string) (json.RawMessage, error)
+	// of the home of a persistent workspace. Only a create with prune may
+	// delete the oldest snapshot to stay within the limit.
+	Snapshots(ctx context.Context, p Principal, workspace, action, id string, prune bool) (json.RawMessage, error)
 	// HomeDownload streams the current home (id "") or a snapshot.
 	HomeDownload(ctx context.Context, p Principal, workspace, id string) (*http.Response, error)
 	// UserHomes archives, restores or lists the archived homes of userID.
@@ -76,7 +77,7 @@ func (b *GatewayBackend) ResetSession(ctx context.Context, p Principal, id strin
 	return b.raw(ctx, false, http.MethodPost, "sessions/"+seg+"/reset", p.UserID)
 }
 
-func (b *GatewayBackend) Snapshots(ctx context.Context, p Principal, workspace, action, id string) (json.RawMessage, error) {
+func (b *GatewayBackend) Snapshots(ctx context.Context, p Principal, workspace, action, id string, prune bool) (json.RawMessage, error) {
 	ws, err := pathSeg(workspace)
 	if err != nil {
 		return nil, err
@@ -89,6 +90,9 @@ func (b *GatewayBackend) Snapshots(ctx context.Context, p Principal, workspace, 
 	case "list":
 		return b.raw(ctx, false, http.MethodGet, base, p.UserID)
 	case "create":
+		if prune {
+			return b.raw(ctx, true, http.MethodPost, base+"?prune=1", p.UserID)
+		}
 		return b.raw(ctx, true, http.MethodPost, base, p.UserID)
 	case "restore":
 		return b.raw(ctx, true, http.MethodPost, base+"/"+id+"/restore", p.UserID)
@@ -207,7 +211,10 @@ func (s *Server) manageSnapshots(ctx context.Context, p Principal, args map[stri
 		return nil, err
 	}
 	action := argString(args, "action")
-	raw, err := hb.Snapshots(ctx, p, ws, action, argString(args, "snapshot_id"))
+	// Pruning is allowed only with the human confirmation; the gateway
+	// enforces it at the commit, so overlapping unconfirmed creates cannot
+	// both slip past snapshotWouldPrune.
+	raw, err := hb.Snapshots(ctx, p, ws, action, argString(args, "snapshot_id"), confirmed(args))
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +312,7 @@ func (s *Server) snapshotWouldPrune(ctx context.Context, p Principal, args map[s
 	if err != nil {
 		return false // the handler reports that create is unavailable
 	}
-	raw, err := hb.Snapshots(ctx, p, argString(args, "workspace"), "list", "")
+	raw, err := hb.Snapshots(ctx, p, argString(args, "workspace"), "list", "", false)
 	if err != nil {
 		return true
 	}

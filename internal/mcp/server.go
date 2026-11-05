@@ -286,10 +286,18 @@ func (s *Server) initialize() map[string]any {
 func (s *Server) listTools() []toolSpec {
 	out := make([]toolSpec, 0, len(s.tools))
 	for _, t := range s.tools {
+		if !modelTool(t.name) {
+			continue
+		}
+		schema, description := t.inputSchema, t.description
+		if t.name == "manage_snapshots" {
+			schema = `{"type":"object","properties":{"action":{"type":"string","enum":["list","create"]},"workspace":{"type":"string"}},"required":["action","workspace"],"additionalProperties":false}`
+			description = "List or create home snapshots. Creation never deletes an older snapshot; use the human console when the limit is reached."
+		}
 		out = append(out, toolSpec{
 			Name:        t.name,
-			Description: t.description,
-			InputSchema: json.RawMessage(t.inputSchema),
+			Description: description,
+			InputSchema: json.RawMessage(schema),
 			Annotations: toolAnnotations{
 				ReadOnlyHint:         t.readOnly,
 				DestructiveHint:      t.destructive,
@@ -329,7 +337,38 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
+	delete(params.Arguments, "_model")
+	if !modelTool(params.Name) {
+		reason := errors.New("this operation is available only in the human management console")
+		log.Printf("model tool %q by %q denied: %s", params.Name, p.UserID, reason)
+		if t := s.findTool(params.Name); t != nil {
+			s.audit(p, t, params.Arguments, "denied", reason)
+		}
+		return nil, &rpcError{Code: codeForbidden, Message: reason.Error()}
+	}
+	if params.Name == "manage_snapshots" {
+		action := argString(params.Arguments, "action")
+		if action != "list" && action != "create" {
+			reason := errors.New("the model may only list or create snapshots; use the human console to restore or delete")
+			log.Printf("model snapshot action %q by %q denied: %s", action, p.UserID, reason)
+			s.audit(p, s.findTool(params.Name), params.Arguments, "denied", reason)
+			return nil, &rpcError{Code: codeForbidden, Message: reason.Error()}
+		}
+		// A caller cannot turn creation into deletion by supplying confirmation.
+		delete(params.Arguments, "_confirmed")
+		params.Arguments["_model"] = true
+	}
 	return s.invoke(r.Context(), p, params.Name, params.Arguments)
+}
+
+// modelTool is deliberately an allowlist. New console operations are never
+// exposed to models automatically, even for an administrator's chat.
+func modelTool(name string) bool {
+	switch name {
+	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "manage_snapshots", "share_desktop":
+		return true
+	}
+	return false
 }
 
 // invoke runs one tool for an authenticated principal through the RBAC,
@@ -345,7 +384,7 @@ func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[
 		s.audit(p, t, args, "denied", gerr)
 		return nil, &rpcError{Code: codeForbidden, Message: gerr.Error()}
 	}
-	if !needConfirm && t.confirmIf != nil && !confirmed(args) {
+	if !argBool(args, "_model") && !needConfirm && t.confirmIf != nil && !confirmed(args) {
 		needConfirm = t.confirmIf(ctx, p, args)
 	}
 	if needConfirm && !confirmed(args) {

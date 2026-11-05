@@ -139,6 +139,11 @@ func (m *manager) exportHome(ctx context.Context, userID, home string, w io.Writ
 			return err
 		}
 		defer rc.Close()
+		if dw, ok := w.(deadlineWriter); ok {
+			if d, ok := ctx.Deadline(); ok {
+				_ = dw.SetWriteDeadline(d)
+			}
+		}
 		if lim.maxBytes <= 0 {
 			_, err = io.Copy(w, rc)
 			return err
@@ -157,6 +162,14 @@ type exportLimits struct {
 	timeout  time.Duration
 	maxBytes int64
 	slots    chan struct{}
+}
+
+// deadlineWriter is a destination whose blocked writes can be cut off. The
+// deadline only stops reads from Docker; a client that stops reading would
+// otherwise hold the helper lock and an export slot forever (security audit
+// run 2).
+type deadlineWriter interface {
+	SetWriteDeadline(time.Time) error
 }
 
 // errExportTooLarge: the home's tar is larger than the export cap, usually
