@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-05
+
+The stable release packages the native Open WebUI 0.13.0 + Open Terminal
+0.16.0 integration validated in 1.0.0-rc.4. Termiplus supplies per-user
+isolation, lifecycle, persistent homes, backups and access management without
+an Open WebUI core fork. The project's existing security guidance still applies.
+
+### Included
+
+- Desktop and Temporary desktop both provide the native Desktop, Browser,
+  files, Git, terminals and app previews under Sysbox. Chromium is the sole
+  browser; Dolphin, LibreOffice, Kate, XFCE Terminal, btop, scientific Python,
+  Jupyter and inner Docker with Compose/Buildx are included.
+- All 23 native model tools and eight optional Workspaces plugin methods are
+  documented in [the supported tool inventory](docs/tool-support.md). Native
+  callables, Desktop/Browser actions and error paths have deterministic live
+  coverage, with separate independent protocol and frontend acceptance checks.
+- Six signed container images include provenance, SPDX SBOMs and vulnerability
+  reports. The five base/service images support amd64 and arm64; the complete
+  desktop currently supports amd64. The desktop package SBOM is separately
+  signed and its attestation verified before publication.
+
+### Upgrade notes
+
+- Deploy the published `1.0.0` images, preferably pinned to the digest files
+  attached to the release, using [the deployment guide](docs/deploy-alpha.md).
+- Follow [the native migration guide](docs/native-integration.md). Remove the
+  retired KasmVNC desktop and custom port-forwarding integration. Keep existing
+  home volumes, connection credentials and access grants. Back up ephemeral
+  workspace contents before recreating them.
+- Reapply the sandbox firewall whenever the gateway is recreated. Install the
+  host requirements and firewall watchers described under the 1.0.0-rc.3
+  Security entries. Keep Sysbox and the existing container limits.
+- See 1.0.0-rc.3 and 1.0.0-rc.4 below for the complete integration changes and
+  the release SBOM fix.
+
 ## [1.0.0-rc.4] - 2026-11-05
 
 Packages native Desktop, Browser, files, Git, terminals and app previews for

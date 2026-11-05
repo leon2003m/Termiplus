@@ -1,9 +1,10 @@
-# Deploying the alpha features
+# Deploying Termiplus
 
-The alpha track adds the MCP control plane, desktop workspaces and the
-management console on top of the hardened terminal stack. Everything is
-opt-in through compose overlays; the base stack (`deploy/docker-compose.yml`)
-is unchanged.
+Release **1.0.0** includes the MCP control plane, native desktop workspaces and
+management console on top of the hardened terminal stack. These components
+are enabled through Compose overlays. This guide and `setup-alpha.sh` retain
+their historical filenames for compatibility; they also apply to the stable
+release. Follow the security guidance in the repository README.
 
 | Overlay | Adds |
 |---|---|
@@ -48,8 +49,18 @@ issuers are compared literally.
 
 ## 3. Desktop workspaces
 
-Build `image/` first, then `image/desktop` with that base. Set `TERMINAL_IMAGE`
-to the complete desktop image; the socket proxy must allow that image.
+For the published amd64 desktop, set the following in `deploy/.env` after
+running setup:
+
+```dotenv
+TERMIPLUS_VERSION=1.0.0
+TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.0.0
+```
+
+Prefer digest references from the release assets when pinning deployed images.
+Alternatively, build `image/` first, then `image/desktop` with that base and set
+`TERMINAL_IMAGE` to that complete desktop image. The socket proxy must allow
+the same image; do not change connection keys or rename home volumes.
 The shipped `deploy/policies.json` offers **Desktop** (`default`, persistent)
 and **Temporary desktop** (`scratch`, per chat). Both use Sysbox and enable
 native Desktop and Browser. Their memory/CPU/PID limits remain in effect.
@@ -73,7 +84,11 @@ credentials and access grants. No home volume needs renaming or deletion.
 ```sh
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
-  -f docker-compose.desktop.yml -f docker-compose.keycloak.yml up -d
+  -f docker-compose.desktop.yml -f docker-compose.keycloak.yml pull
+# Use the same overlay list, including existing host/network policy overlays.
+docker compose -f docker-compose.yml -f docker-compose.mcp.yml \
+  -f docker-compose.desktop.yml -f docker-compose.keycloak.yml up -d --no-build
+cd ..
 sudo deploy/firewall.sh   # as for the base stack
 ```
 

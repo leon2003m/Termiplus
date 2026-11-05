@@ -76,6 +76,25 @@ deploy/                     docker-compose.yml, policies.json, daemon.json, fire
 internal/netpolicy/         admin network policy: validation, persistence, config rendering
 ```
 
+## Release images
+
+The current stable release is **1.0.0** on `main`, targeting Open WebUI 0.13.0
+and Open Terminal 0.16.0. See [the changelog](CHANGELOG.md#100---2026-11-05)
+and [deployment guide](docs/deploy-alpha.md) for installation and upgrade notes.
+The project security warning above continues to apply.
+
+For an installation using the published images, set these in `deploy/.env`:
+
+```dotenv
+TERMIPLUS_VERSION=1.0.0
+TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.0.0
+```
+
+Pin images to the digest references attached to the release for reproducible
+rollouts. The complete desktop requires amd64 and Sysbox; service and base
+terminal images also support arm64. Use Compose with `--no-build` when deploying
+published images. The local builds below are an alternative for development.
+
 ## Quick start (dedicated VM)
 
 Requirements: Linux VM, Docker 25+ and Sysbox for the bundled desktop policies.
