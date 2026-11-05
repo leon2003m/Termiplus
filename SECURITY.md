@@ -54,6 +54,41 @@ You will get an acknowledgement within 7 days. Fixes for confirmed issues are re
 - CI: secret scanning (gitleaks), Go vulnerability scanning (govulncheck), image and configuration scanning (Trivy), CodeQL, all third-party actions pinned to commit SHAs
 - `main` changes only through pull requests with all checks green; releases are published only after the maintainer's approval
 
+## Workspace source identity
+
+The host firewall must bind every container's bridge port, Ethernet MAC and
+IPv4 address on **both** `ot-sandbox` and `ot-offline`. ARP sender IP and sender
+MAC are checked too. Unknown ports and other EtherTypes, including IPv6, are
+dropped before bridge learning. The port watcher refreshes bindings as ports
+appear; the firewall timer reconciles Docker state every 20 seconds. Rule
+replacements keep a source guard attached, including when an update fails.
+Docker lookup failures can therefore interrupt workspace connectivity while
+remaining closed. Keep both host services enabled.
+Port discovery uses Docker metadata and host namespace IDs, rather than links
+reported from inside the workspace. Ambiguous host-port mappings are denied.
+
+Version 1.0.0 pinned service IPs and workspace MACs, but **did not pin workspace
+source IPs**. Workspace root with raw-packet/network administration capabilities
+could claim another workspace's IPv4 address using its own MAC and redirect
+requests from the gateway, including the victim's per-container bearer key.
+The shipped Sysbox policies are affected. gVisor without `--net-raw` does not
+provide that raw-packet attack path; source pins are still required on the host.
+A per-container bearer key authenticates requests to the terminal; it does not
+prove the identity of the HTTP peer to the gateway. This fix adds host source
+pins, not a new terminal authentication handshake.
+
+Treat workspace source IPs as untrusted unless these pins are installed and
+current. Apply the [host update](docs/deploy-alpha.md#host-source-identity-update)
+before admitting untrusted workspaces. If interception is suspected, investigate
+and replace affected container keys by rotating `KEY_SECRET` and recreating the
+workspaces during a planned interruption. A firewall update does not revoke keys
+already disclosed or repair an already poisoned gateway neighbour entry.
+
+External egress proxies remain responsible for their own destination and
+identity checks. Termiplus does not contain the companion meter proxy; these
+host source pins do not validate TLS server names or HTTP Host headers inside
+that proxy's CONNECT tunnels.
+
 ## Verifying a release
 
 Every release image is signed keylessly with Sigstore cosign by this repository's release workflow and carries a build provenance attestation and an SBOM. Pin images by digest (the release notes list them) and verify before deploying:

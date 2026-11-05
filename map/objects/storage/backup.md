@@ -3,7 +3,7 @@ type: object
 cluster: storage
 universe: live
 status: verified
-verified: 2026-11-04 (native integration)
+verified: 2026-11-05 @ working tree
 entity: internal/gateway/backups.go
 ---
 
@@ -21,9 +21,10 @@ Homes are Docker volumes, so a reset or a departure would otherwise destroy data
 - Id: UTC creation time, `20261016T221500Z`, with a suffix `-001`… inside one second. Ids sort in creation order and are never reused.
 - A create that would prune the oldest snapshot is refused (409) unless it carries `?prune=1`. The MCP server sends that only after the human confirmation, and the gateway checks it under the store lock, so overlapping creates cannot both prune.
 - Tar entries are `user/...`, the `exportHome` format. Restores go back through the [archive helper](../workspaces/archive-helper.md), which filters uploaded tars.
+- Snapshots and departed archives share export admission and byte limits: one running or queued export per user, global export slots, a deadline, and (when configured) caps on raw tar bytes and cumulative logical member sizes. Oversized sparse members are refused before reading their body.
 - Without `BACKUP_DIR`, snapshots, user archives and departed handling answer "not configured". The MCP overlay sets it to `/data/backups`.
 
-Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:46` (Backup), `:52` (backupStore), `:59` (newBackupStore), `:71` (homeDir), `:113` (create), `internal/gateway/gateway.go:57-59`, `:191-192`, `cmd/gateway/main.go:76-77`, `internal/gateway/userhomes.go:107` (restoreBackup), `:121` (ArchivedHome), `:131` (archiveUser), `:177` (restoreUser), `deploy/docker-compose.mcp.yml:118`
+Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:46` (Backup), `:52` (backupStore), `:59` (newBackupStore), `:71` (homeDir), `:113` (create), `internal/gateway/gateway.go:57-59`, `:191-192`, `cmd/gateway/main.go:76-77`, `internal/gateway/userhomes.go`: `restoreBackup`, `archiveUser`, `restoreUser`; `internal/gateway/homes.go`: `exportHome`, `copyHomeArchive`; `deploy/docker-compose.mcp.yml:118`.
 
 ## Connected to
 

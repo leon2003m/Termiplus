@@ -46,6 +46,27 @@ verification dates. Lines may move; cited symbols are the stable anchor.
 | **key** | six different secrets (gateway, control, admin, proxy token, key secret, plugin key); never interchangeable | [Service keys](objects/identity/service-keys.md) |
 | **share** | an expiring view-only link to someone's desktop, not a file share | [Share](objects/control-plane/share.md) |
 
+## Sandbox source identity (2026-11-05)
+
+`deploy/firewall.sh` binds every resolved container on both sandbox bridges to
+its host port, Docker MAC and IPv4/ARP sender address before bridge learning.
+Unresolved ports drop. Alternating detached source chains keep enforcement
+attached throughout refreshes; existing static MAC port locks remain in place.
+Port discovery matches host `link-netnsid` to `lsns NETNSID` for Docker's PID;
+it does not inspect workspace-controlled links. `--watch-ports` refreshes on link
+events, including recreated service pins, and the timer reconciles state.
+Policy changes activate a separate repeatable firewall reload service. See the
+[firewall card](objects/sandbox/firewall-chain.md),
+[host update](../docs/deploy-alpha.md#host-source-identity-update) and
+[isolated kernel regression](../test/integration/source-pins.py). The gateway
+HTTP protocol is unchanged; a bearer key does not authenticate its peer.
+
+Home exports admit one running or queued operation per user. With
+`EXPORT_MAX_BYTES` configured, `copyHomeArchive` in `internal/gateway/homes.go`
+checks raw tar bytes and cumulative logical member sizes, refusing oversized
+sparse members before consuming their body. See [archive helper](objects/workspaces/archive-helper.md)
+and [backup](objects/storage/backup.md).
+
 ## Native workspace integration (2026-11-04)
 
 Open WebUI 0.13 + Open Terminal 0.16 own interactive Desktop, Browser, Git,

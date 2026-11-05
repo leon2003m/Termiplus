@@ -68,6 +68,7 @@ image/desktop/             complete default workspace image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
+                            termiplus-firewall-reload.service,
                             termiplus-portlock.service,
                             docker-compose.netpolicy.yml (opt-in), dns-forwarder/,
                             docker-compose.mcp-netpolicy.yml (opt-in: human console network policy),
@@ -143,11 +144,13 @@ cd deploy && GATEWAY_BIND=10.20.30.40:8080 \
 #    repo is not in /opt/termiplus):
 sudo ./firewall.sh
 sudo cp termiplus-firewall-watch.service termiplus-firewall-watch.timer /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable --now termiplus-firewall-watch.timer
-#    Terminal ports: lock each new terminal's bridge port to its own MAC as soon
-#    as it starts, so a terminal cannot forge another's MAC (needs Linux and
+#    Terminal identity: pin each port to its Docker MAC and IPv4/ARP source,
+#    deny unresolved ports, and keep MAC learning disabled (needs Linux and
 #    iproute2 >= 6.2):
 sudo cp termiplus-portlock.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable --now termiplus-portlock.service
 ```
 
@@ -317,7 +320,14 @@ Also rejected: `exec`, `attach`, any other image call, image pulls, builds, conn
 - terminals reach the internet
 - terminals cannot reach each other, private ranges (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16) or the VM itself
 - the gateway (172.30.0.2) can reach every terminal
+- every container on `ot-sandbox` and `ot-offline` is bound to its Docker-assigned
+  bridge port, MAC and IPv4/ARP sender address before bridge learning; unknown
+  ports are denied, preventing one workspace from claiming another's address
 - no IPv6: v6 is dropped on FORWARD, INPUT and (via the v6 bridge-netfilter sysctl) container-to-container, so terminals have no IPv6 to each other, the host or beyond
+
+The source guards require the host script and both firewall/port watcher services;
+container image updates alone do not install them. See the
+[host source-identity update](docs/deploy-alpha.md#host-source-identity-update).
 
 Host-wide effect: the script loads `br_netfilter` and sets `net.bridge.bridge-nf-call-iptables=1`, so traffic on **every** Linux bridge of the host (VM bridges, LAN bridges) passes iptables `FORWARD` from then on, not only `ot-sandbox`. That is why termiplus expects a dedicated VM. On a shared host check your `FORWARD` policy and other bridges first.
 
@@ -333,7 +343,7 @@ The egress model is unchanged for the internet and tightened for everything else
 How it fits together:
 
 - An internal **DNS forwarder** (`dnsmasq`) forwards to *your* resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the custom records. The gateway renders the records into the forwarder's watched `hostsdir`, which reloads automatically. Terminals are pinned to this forwarder via `HostConfig.Dns`; the socket proxy accepts no other resolver address. This is also what gives terminals a working resolver under gVisor.
-- The gateway renders the egress allowances into `deploy/netpolicy/egress.rules`; `firewall.sh` turns each validated line into a `RETURN` rule placed **after** the fixed deny-list drops, so no entry can reach a never-allowed range. `termiplus-firewall.path` reapplies the firewall when the file changes.
+- The gateway renders the egress allowances into `deploy/netpolicy/egress.rules`; `firewall.sh` turns each validated line into a `RETURN` rule placed **after** the fixed deny-list drops, so no entry can reach a never-allowed range. `termiplus-firewall.path` starts the repeatable `termiplus-firewall-reload.service` when the file changes; the boot service may already be active.
 
 Enable it (adds the overlay to either base compose):
 
@@ -345,8 +355,10 @@ echo "DNS_UPSTREAM=192.168.1.1" >> .env                       # your resolver
 
 docker compose -f docker-compose.yml -f docker-compose.netpolicy.yml up -d
 
-sudo cp termiplus-firewall.path /etc/systemd/system/
+sudo cp termiplus-firewall.path termiplus-firewall-reload.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable --now termiplus-firewall.path
+sudo systemctl restart termiplus-firewall.path   # reload an existing installation's target
 ```
 
 The admin API lives on the gateway and is gated by `ADMIN_API_KEY` on the `X-Admin-Key` header (never the connection key; it must differ). It returns 404 unless the key and store are configured.
@@ -401,8 +413,8 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `CONTAINER_ROOTFS_SIZE` | sockproxy | empty (no limit); cap on each terminal's container layer, e.g. `10G` |
 | `ALLOW_HOME_REMOVE` | sockproxy | empty; `1` lets the gateway delete home volumes |
 | `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, snapshot, archive) |
-| `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); largest tar one home export may stream, e.g. `25G`. Sparse files count at their full size in a tar but barely against the quota |
-| `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further ones wait within their deadline |
+| `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); caps both raw tar bytes and cumulative logical member sizes, e.g. `25G`. Oversized members are refused at their header; sparse holes count at full size despite barely charging the home quota |
+| `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further users wait within their deadline. Each user may have only one running or queued export; overlapping requests return 429 |
 | `METRICS_LISTEN_ADDR` | gateway | empty (off); Prometheus `/metrics` listener, e.g. `:9100` |
 | `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` / `_FILE`, `MQTT_CLIENT_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_DISCOVERY_PREFIX`, `MQTT_INTERVAL`, `MQTT_CA_FILE` | gateway | MQTT off unless `MQTT_URL` is set; defaults `termiplus-gateway`, `termiplus`, empty (no discovery), `30s` |
 | `HOME_VOLUME_SIZE` | sockproxy | empty (no limit); quota for new home volumes, e.g. `20G` (needs XFS project quotas, see *Disk quota for home volumes*) |

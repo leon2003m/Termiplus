@@ -69,5 +69,5 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends python3 >/dev/null
-      - name: make test test-plugin
-        run: make test test-plugin
+      - name: make test test-plugin test-firewall
+        run: make test test-plugin test-firewall

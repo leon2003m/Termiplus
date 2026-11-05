@@ -236,6 +236,8 @@ func (g *Gateway) serveHomeControl(w http.ResponseWriter, r *http.Request, userI
 		case errors.Is(err, errExportTooLarge):
 			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusRequestEntityTooLarge, "the home is larger than the export limit (EXPORT_MAX_BYTES); large sparse files count at their full size")
+		case errors.Is(err, errExportBusy):
+			httpError(w, http.StatusTooManyRequests, errExportBusy.Error())
 		case err != nil:
 			log.Printf("snapshot %q/%q: %q", userID, home, err)
 			httpError(w, http.StatusBadGateway, "could not take the snapshot")
