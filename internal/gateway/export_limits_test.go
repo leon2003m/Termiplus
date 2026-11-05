@@ -128,12 +128,21 @@ func TestExportDeadlineEndsBlockedWrite(t *testing.T) {
 	for len(h.g.mgr.exportLimits.slots) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond) // wait for the download to take the slot
 	}
+	if len(h.g.mgr.exportLimits.slots) == 0 {
+		t.Fatal("the stalled download never took the export slot")
+	}
 	for len(h.g.mgr.exportLimits.slots) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("the stalled download still holds the export slot")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// The next export proves that both the slot and helper lock were released.
+	// Keep its fixture small: the short deadline is intended to interrupt the
+	// stalled client, not to benchmark a second 64 MiB transfer under -race.
+	h.docker.mu.Lock()
+	h.docker.files[vol] = map[string]string{"small": "after the stalled download"}
+	h.docker.mu.Unlock()
 	if err := h.g.mgr.exportHome(context.Background(), "alice", "default", io.Discard); err != nil {
 		t.Fatalf("export after the stalled one: %v", err)
 	}
