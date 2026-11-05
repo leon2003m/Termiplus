@@ -28,9 +28,10 @@ test-plugin: ## Open WebUI plugin tests against the real mcp binary (needs pytho
 	  TERMIPLUS_MCP_BIN="$$bin" python3 -I -B integrations/openwebui/test_termiplus_workspaces.py; \
 	  rc=$$?; rm -rf "$$(dirname "$$bin")"; exit $$rc
 
-test-firewall: ## Unprivileged bridge source-identity and fail-closed regressions
+test-firewall: ## Unprivileged source identity and transactional firewall regressions
 	python3 -I -B test/firewall/test_source_pins.py
 	python3 -I -B test/firewall/test_units.py
+	python3 -I -B test/firewall/test_policy.py
 
 cover: ## Tests with coverage report
 	go test -race -count=1 -coverprofile=coverage.out ./...

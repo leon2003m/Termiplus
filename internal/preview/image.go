@@ -29,6 +29,16 @@ func Validate(data []byte) error {
 // MaxScreenBytes bounds encoded native desktop images before any decode.
 const MaxScreenBytes = 8 << 20
 
+// screenBuffer stops the encoder before its output can grow past the limit.
+type screenBuffer struct{ bytes.Buffer }
+
+func (b *screenBuffer) Write(p []byte) (int, error) {
+	if len(p) > MaxScreenBytes-b.Len() {
+		return 0, fmt.Errorf("screen too large")
+	}
+	return b.Buffer.Write(p)
+}
+
 func decodeScreen(data []byte) (image.Image, error) {
 	if len(data) > MaxScreenBytes {
 		return nil, fmt.Errorf("screen too large")
@@ -46,12 +56,10 @@ func Screen(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out bytes.Buffer
+	var out screenBuffer
+	out.Grow(MaxScreenBytes)
 	if err := png.Encode(&out, im); err != nil {
 		return nil, err
-	}
-	if out.Len() > MaxScreenBytes {
-		return nil, fmt.Errorf("screen too large")
 	}
 	return out.Bytes(), nil
 }

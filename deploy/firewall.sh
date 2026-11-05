@@ -19,12 +19,12 @@
 # deny-list below and re-checked here, so no entry can ever open a never-allowed
 # range (loopback, link-local/metadata, CGNAT, the sandbox subnet itself).
 #
-# Internal DNS forwarder (netpolicy overlay): if a container holds the
+# Internal DNS forwarder (netpolicy overlay): if the dns-forwarder service owns the
 # forwarder address (172.30.0.3) on the bridge, terminals may send DNS (udp/tcp
 # 53) to it and nothing else, the forwarder may send DNS to its upstream
 # (DNS_UPSTREAM from the environment or deploy/.env) and nothing else, and its
-# address is pinned to its MAC like the gateway's. Without the forwarder none
-# of these rules exist.
+# address is pinned to its MAC like the gateway's. Its address always has a
+# final DROP while that verified service is present.
 #
 # Offline network (offline overlay, "egress": "offline" policies): if the
 # ot-offline bridge exists, everything entering or leaving it is dropped, both
@@ -55,47 +55,56 @@ OFFLINE_SUBNET=172.30.1.0/24
 OFFLINE_GATEWAY=172.30.1.2
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_FILE=$SCRIPT_DIR/$(basename -- "$0")
 EGRESS_RULES=${EGRESS_RULES_FILE:-"$SCRIPT_DIR/netpolicy/egress.rules"}
 if [ -z "${DNS_UPSTREAM:-}" ] && [ -f "$SCRIPT_DIR/.env" ]; then
   DNS_UPSTREAM=$(sed -n 's/^DNS_UPSTREAM=//p' "$SCRIPT_DIR/.env" | tail -n 1 | tr -d "\"' ")
 fi
 DNS_UPSTREAM=${DNS_UPSTREAM:-}
+# Policy inputs use the same canonical plain IPv4 and overlap checks as the
+# Go renderer. Reject host bits, out-of-range octets/prefixes and supernets of
+# a never-allowed range before passing any token to iptables-restore.
+policy_destination_ok() {
+  case "$1" in '' | *[!0-9./]*) return 1 ;; esac
+  awk -v value="$1" -v host="${2:-0}" 'BEGIN {
+    n=split(value,p,"/"); if (n != (host ? 1 : 2)) exit 1
+    if (!host && (p[2] !~ /^[0-9]+$/ || p[2]+0 > 32 || p[2] != sprintf("%d",p[2]+0))) exit 1
+    if (split(p[1],a,".") != 4) exit 1
+    ip=0
+    for (i=1;i<=4;i++) {
+      if (a[i] !~ /^[0-9]+$/ || a[i]+0>255 || a[i] != sprintf("%d",a[i]+0)) exit 1
+      ip=ip*256+a[i]
+    }
+    size=2^(host ? 0 : 32-p[2]); if (ip % size) exit 1
+    last=ip+size-1
+    split("2130706432:16777216 2851995648:65536 1681915904:4194304 2887647232:512",deny," ")
+    for (i in deny) {
+      split(deny[i],d,":"); if (ip <= d[1]+d[2]-1 && last >= d[1]) exit 1
+    }
+    exit 0
+  }'
+}
 
-# apply_egress_allow turns each validated line of the rendered rules file into a
-# RETURN rule (sandbox -> CIDR [dport PORT] -p PROTO). It re-validates the shape
-# and refuses any clearly never-allowed destination even though the gateway
-# already validated it, because this file lives on the host and could be
-# tampered with. The deny DROP rules placed before this in the chain are the
-# real guarantee; these checks only skip malformed or hostile lines.
+# Render only validated tokens; never interpolate a policy line as shell code.
+filter_rule() { printf '%s\n' "$*"; }
+
 apply_egress_allow() {
-  [ -f "$EGRESS_RULES" ] || return 0
-  while read -r cidr port proto _; do
-    case "$cidr" in '' | '#'*) continue ;; esac
-    if ! echo "$cidr" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$'; then
-      echo "firewall: skipping malformed cidr '$cidr'" >&2
+  [ -f "${APPLY_RULES:-$EGRESS_RULES}" ] || return 0
+  while read -r ea_cidr ea_port ea_proto ea_extra || [ -n "${ea_cidr:-}" ]; do
+    case "$ea_cidr" in '' | '#'*) continue ;; esac
+    if [ -n "$ea_extra" ] || ! policy_destination_ok "$ea_cidr"; then
+      echo "firewall: skipping malformed or never-allowed destination '$ea_cidr'" >&2
       continue
     fi
-    case "$proto" in
-      tcp | udp) ;;
-      *)
-        echo "firewall: skipping bad proto '$proto' for $cidr" >&2
-        continue
-        ;;
-    esac
-    case "$cidr" in
-      127.* | 169.254.* | 172.30.0.* | 172.30.1.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*)
-        echo "firewall: refusing never-allowed destination '$cidr'" >&2
-        continue
-        ;;
-    esac
-    if [ "$port" = any ]; then
-      iptables -A TERMIPLUS -s "$SANDBOX" -d "$cidr" -p "$proto" -j RETURN
-    elif echo "$port" | grep -Eq '^[0-9]{1,5}$' && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
-      iptables -A TERMIPLUS -s "$SANDBOX" -d "$cidr" -p "$proto" --dport "$port" -j RETURN
+    case "$ea_proto" in tcp | udp) ;; *) continue ;; esac
+    if [ "$ea_port" = any ]; then
+      filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$ea_cidr" -p "$ea_proto" -j RETURN
+    elif echo "$ea_port" | grep -Eq '^[0-9]{1,5}$' && [ "$ea_port" -ge 1 ] && [ "$ea_port" -le 65535 ]; then
+      filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$ea_cidr" -p "$ea_proto" --dport "$ea_port" -j RETURN
     else
-      echo "firewall: skipping bad port '$port' for $cidr" >&2
+      echo "firewall: skipping bad port '$ea_port' for $ea_cidr" >&2
     fi
-  done <"$EGRESS_RULES"
+  done <"${APPLY_RULES:-$EGRESS_RULES}"
 }
 
 # Bridge-netfilter must be on BEFORE any DROP rule is installed. Same-bridge
@@ -128,15 +137,13 @@ ensure_bridge_netfilter
 # (IPv4 or ARP) claiming the gateway's IP from any other MAC, before iptables
 # sees it, and any frame on the bridge claiming the gateway's IP or MAC that
 # does not enter through the gateway's own bridge port (so forging both does
-# not help either). Needs ebtables, nsenter and the gateway container running;
+# not help either). Needs ebtables and trusted host-side port discovery;
 # fails closed (keeps the previous pins, adds nothing) if any is missing, since
 # the ACCEPT would be unsafe (#13).
-# mac_of prints the MAC of the container holding IP on the bridge (or on the
-# network named by the second argument), or nothing.
+# mac_of prints the unique MAC in this run's resolved port snapshot. MAC and
+# port must come from the same observation, including when a service is absent.
 mac_of() {
-  docker network inspect "${2:-$BRIDGE}" \
-    --format '{{range .Containers}}{{.IPv4Address}} {{.MacAddress}}{{"\n"}}{{end}}' 2>/dev/null \
-    | awk -v ip="$1" '{split($1, a, "/"); if (a[1] == ip) print $2}'
+  port_macs "${2:-$BRIDGE}" | awk -v ip="$1" '$3 == ip {mac=$2; n++} END {if (n == 1) print mac}'
 }
 
 # port_of prints the host-side bridge port (veth) of the container holding IP
@@ -159,17 +166,6 @@ pin_ip() {
   ebtables -t nat -A TERMIPLUS-PORT -s "$2" --logical-in "$3" ! -i "$4" -j DROP
 }
 
-# port_pinned LISTING IP NETWORK: the port pin for IP names the container's
-# current bridge port.
-port_pinned() {
-  pp=$(port_of "$2" "$3")
-  [ -n "$pp" ] || return 1
-  echo "$1" | grep -F -- "--ip-src $2 " | grep -qF -- "! -i $pp " || return 1
-}
-
-# offline_present: the offline overlay's bridge exists on this host.
-offline_present() { ip link show "$OFFLINE_BRIDGE" >/dev/null 2>&1; }
-
 # Locked bridge ports. The pins above protect the gateway's and forwarder's
 # addresses, but a sandboxed root could still forge another terminal's MAC:
 # the bridge would learn it on the attacker's port and deliver that terminal's
@@ -182,12 +178,13 @@ offline_present() { ip link show "$OFFLINE_BRIDGE" >/dev/null 2>&1; }
 # entry (no traffic): fail closed. Needs Linux >= 6.2 and iproute2 >= 6.2.
 PORTLOCK_DIR=/run/termiplus-portlock
 
-# port_flags_ok PORT: locked and not learning.
+# port_flags_ok PORT: locked, not learning, and no unknown unicast/multicast flooding.
 port_flags_ok() {
   link=$(bridge -d link show dev "$1" 2>/dev/null) || return 1
   case "$link" in *" locked on "*) ;; *) return 1 ;; esac
   case "$link" in *" learning off "*) ;; *) return 1 ;; esac
   case "$link" in *" flood off "*) ;; *) return 1 ;; esac
+  case "$link" in *" mcast_flood off "*) ;; *) return 1 ;; esac
 }
 
 # port_locked PORT [MAC]: locked, not learning, and holding a static entry
@@ -202,7 +199,7 @@ port_locked() {
 # lock_port PORT sets the flags, only if they are not set yet (setting them
 # raises a link event, which the watcher would otherwise answer forever).
 lock_port() {
-  port_flags_ok "$1" || bridge link set dev "$1" locked on learning off flood off 2>/dev/null
+  port_flags_ok "$1" || bridge link set dev "$1" locked on learning off flood off mcast_flood off 2>/dev/null
 }
 
 # port_macs BRIDGE prints "PORT MAC IPv4" for every container on the network of the
@@ -211,6 +208,14 @@ lock_port() {
 # links with chosen indices/MACs there. Ambiguous namespaces or duplicate port
 # claims get no entry. Failed discovery revokes the old bindings, fail closed.
 port_macs() {
+  if [ "${PORT_SNAPSHOT_READY:-0}" = 1 ]; then
+    case "$1" in
+      "$BRIDGE") printf '%s\n' "$SANDBOX_PORTS" ;;
+      "$OFFLINE_BRIDGE") printf '%s\n' "$OFFLINE_PORTS" ;;
+      *) return 1 ;;
+    esac
+    return 0
+  fi
   pm_br=$1
   pm_links=$(ip -o link show master "$pm_br" 2>/dev/null) || return 0
   pm_rows=$(docker network inspect "$pm_br" \
@@ -417,7 +422,7 @@ port_worker() {
     # allowances and legacy pins as soon as source discovery succeeds, rather
     # than waiting for the timer. Source guards remain attached on failure.
     if [ "$pw_rc" -ne 1 ]; then
-      "$SCRIPT_DIR/firewall.sh" --if-needed || return 1
+      "$SCRIPT_FILE" --if-needed || return 1
     fi
     if [ "$pw_rc" -ne 2 ] && [ ! -e "$PORTLOCK_DIR/dirty" ]; then
       return "$pw_rc"
@@ -493,55 +498,104 @@ flock 8 || exit 1
 
 # --if-needed (for the termiplus-firewall-watch timer): only (re)apply when the
 # rules are missing or a pinned MAC no longer matches the running gateway or
-# forwarder, e.g. after a reboot or a recreated gateway. A full run briefly
-# rebuilds the chains, so it is not repeated while everything is current.
+# forwarder, e.g. after a reboot or a recreated gateway. Full applies replace
+# each IP family atomically; unchanged policy skips unnecessary transactions.
+# Policy snapshot helpers. A completion marker binds every owned L3 chain to
+# the exact script, policy contents, upstreams and discovered service identities.
+# A partial apply or a removed/changed rule cannot pass the timer fast path.
+policy_fingerprint() {
+  pf_script=$(sha256sum <"$SCRIPT_FILE") || return 1
+  {
+    printf '%s\n' "$pf_script"
+    if [ -f "$EGRESS_RULES" ]; then sha256sum <"$EGRESS_RULES"; else echo no-egress-file; fi
+    printf '%s\n' "$DNS_UPSTREAM" "$GATEWAY" "$FORWARDER"
+    printf '%s %s\n' "$mac" "$port" "$forwarder_mac" "$forwarder_port" \
+      "$offline_gateway_mac" "$offline_gateway_port"
+  } | sha256sum | cut -d ' ' -f 1
+}
+
+policy_rules() {
+  iptables -w 10 -S TERMIPLUS || return 1
+  iptables -w 10 -S TERMIPLUS-IN || return 1
+  ip6tables -w 10 -S TERMIPLUS6 || return 1
+  ip6tables -w 10 -S TERMIPLUS6-IN || return 1
+  ebtables -t filter -L TERMIPLUS-AS --Lmac2 || return 1
+  ebtables -t nat -L TERMIPLUS-PORT --Lmac2 || return 1
+}
+
+hook_current() {
+  hc_listing=$("$1" -w 10 -S "$2") || return 1
+  hc_first=$(printf '%s\n' "$hc_listing" | awk '$1 == "-A" {print; exit}')
+  [ "$hc_first" = "-A $2 -j $3" ]
+}
+
 rules_current() {
+  [ -f "$PORTLOCK_DIR/policy.applied" ] || return 1
+  read -r rc_policy rc_rules <"$PORTLOCK_DIR/policy.applied" || return 1
+  [ "$rc_policy" = "$(policy_fingerprint)" ] || return 1
+  rc_actual=$(policy_rules) || return 1
+  [ "$rc_rules" = "$(printf '%s\n' "$rc_actual" | sha256sum | cut -d ' ' -f 1)" ] || return 1
+  hook_current iptables DOCKER-USER TERMIPLUS || return 1
+  hook_current iptables INPUT TERMIPLUS-IN || return 1
+  hook_current ip6tables FORWARD TERMIPLUS6 || return 1
+  hook_current ip6tables INPUT TERMIPLUS6-IN || return 1
   for rc_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
-    [ -d "/sys/class/net/$rc_br/brif" ] || continue
     source_pins_current "$rc_br" "$(port_macs "$rc_br")" || return 1
   done
-  iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || return 1
-  iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || return 1
-  pinned=$(ebtables -t filter -L TERMIPLUS-AS 2>/dev/null) || return 1
   eb_jump_exists filter FORWARD TERMIPLUS-AS || return 1
-  ports=$(ebtables -t nat -L TERMIPLUS-PORT 2>/dev/null) || return 1
   eb_jump_exists nat PREROUTING TERMIPLUS-PORT || return 1
-  for ip in "$GATEWAY" "$FORWARDER"; do
-    m=$(mac_of "$ip")
-    [ -z "$m" ] && continue
-    echo "$pinned" | grep -F -- "--ip-src $ip " | grep -qiF -- "$m" || return 1
-    port_pinned "$ports" "$ip" "$BRIDGE" || return 1
-  done
-  if offline_present; then
-    iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
-    iptables -C TERMIPLUS-IN -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
-    iptables -C TERMIPLUS -o "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
-    ip6tables -C FORWARD -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
-    ip6tables -C FORWARD -o "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
-    ip6tables -C INPUT -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || return 1
-    m=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
-    if [ -n "$m" ]; then
-      echo "$pinned" | grep -F -- "--ip-src $OFFLINE_GATEWAY " | grep -qiF -- "$m" || return 1
-      port_pinned "$ports" "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE" || return 1
-      iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_GATEWAY" -d "$OFFLINE_SUBNET" -j ACCEPT 2>/dev/null || return 1
-      iptables -C TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_SUBNET" -d "$OFFLINE_GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || return 1
-    fi
-  fi
 }
+# An address is not a service identity. Only an administrator-created Compose
+# service with the matching IP/MAC may receive special allowances. Workspaces
+# (termiplus.managed=true) never qualify, even if a service label is also present.
+service_owned() {
+  so_rows=$(docker network inspect "$2" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.MacAddress}} {{$c.IPv4Address}}{{"\n"}}{{end}}' 2>/dev/null) || return 1
+  so_id=$(printf '%s\n' "$so_rows" | awk -v ip="$1" -v mac="$3" '
+    {split($3,a,"/"); if (a[1] == ip && $2 == mac) {id=$1; n++}} END {if (n == 1) print id}')
+  [ -n "$so_id" ] || return 1
+  so_labels=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}} {{index .Config.Labels "termiplus.managed"}}' "$so_id" 2>/dev/null) || return 1
+  case "$so_labels" in "$4 " | "$4 <no value>") return 0 ;; *) return 1 ;; esac
+}
+
+# One discovery per bridge for a full apply/current-state check. Install guards
+# before discovery even on a first boot. The long-running watcher deliberately
+# takes fresh observations on each iteration instead of retaining this cache.
+snapshot_discovery() {
+  for sd_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    (flock 9 && source_guard "$sd_br" >/dev/null) 9>"$PORTLOCK_DIR/lock" || return 1
+  done
+  SANDBOX_PORTS=$(port_macs "$BRIDGE") || return 1
+  OFFLINE_PORTS=$(port_macs "$OFFLINE_BRIDGE") || return 1
+  PORT_SNAPSHOT_READY=1
+}
+
+snapshot_services() {
+  mac=$(mac_of "$GATEWAY")
+  port=$(port_of "$GATEWAY" "$BRIDGE")
+  forwarder_mac=$(mac_of "$FORWARDER")
+  forwarder_port=$(port_of "$FORWARDER" "$BRIDGE")
+  if [ -n "$forwarder_mac" ] && ! service_owned "$FORWARDER" "$BRIDGE" "$forwarder_mac" dns-forwarder; then
+    forwarder_mac=; forwarder_port=
+  fi
+  offline_gateway_mac=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
+  offline_gateway_port=$(port_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
+
+}
+
+prepare_policy_snapshot() {
+  snapshot_discovery || return 1
+  snapshot_services || return 1
+}
+
 if [ "${1:-}" = --if-needed ]; then
-  # Backstop for termiplus-portlock.service: cheap when every port is done.
+  prepare_policy_snapshot || exit 1
   lock_rc=0
   sync_all || lock_rc=$?
   if [ "$lock_rc" -eq 1 ]; then
     echo "firewall: source guards/bridge ports could not be synchronized" >&2
     exit 1
   fi
-  if [ -z "$(mac_of "$GATEWAY")" ]; then
-    exit 0 # gateway not (yet) running: nothing to pin, try again later
-  fi
-  if rules_current; then
-    exit 0
-  fi
+  if rules_current; then exit 0; fi
   echo "firewall: rules missing or outdated - applying"
 fi
 
@@ -554,51 +608,17 @@ ensure_gateway_antispoof() {
     echo "firewall: lsns not found - refusing, cannot pin the gateway to its bridge port (#13)" >&2
     exit 1
   fi
-  # Look everything up before touching a rule, so a refusal leaves the
-  # previous pins in place.
-  mac=$(mac_of "$GATEWAY")
+  # All identities were resolved once, before current-state checks. Do not
+  # rediscover here: the completion marker must describe exactly these pins.
   if [ -z "$mac" ]; then
-    echo "firewall: no MAC for gateway $GATEWAY on $BRIDGE - is the gateway running? refusing (#13)" >&2
-    exit 1
+    echo "firewall: gateway absent; installing static deny policy without gateway allowances" >&2
   fi
-  port=$(port_of "$GATEWAY" "$BRIDGE")
-  if [ -z "$port" ]; then
-    echo "firewall: no bridge port for gateway $GATEWAY on $BRIDGE - refusing (#13)" >&2
-    exit 1
-  fi
-  # The forwarder's address gets the same pins, so its DNS allowances below
-  # cannot be ridden by a terminal claiming to be the forwarder.
-  forwarder_mac=$(mac_of "$FORWARDER")
-  forwarder_port=""
-  if [ -n "$forwarder_mac" ]; then
-    forwarder_port=$(port_of "$FORWARDER" "$BRIDGE")
-    if [ -z "$forwarder_port" ]; then
-      echo "firewall: no bridge port for forwarder $FORWARDER on $BRIDGE - refusing" >&2
-      exit 1
-    fi
-  fi
-  # The gateway's address on the offline bridge, same reason. Without it the
-  # gateway gets no allow there and offline terminals are unreachable (closed).
-  offline_gateway_mac=""
-  offline_gateway_port=""
-  if offline_present; then
-    offline_gateway_mac=$(mac_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
-    if [ -n "$offline_gateway_mac" ]; then
-      offline_gateway_port=$(port_of "$OFFLINE_GATEWAY" "$OFFLINE_BRIDGE")
-      if [ -z "$offline_gateway_port" ]; then
-        echo "firewall: no bridge port for gateway $OFFLINE_GATEWAY on $OFFLINE_BRIDGE - refusing" >&2
-        exit 1
-      fi
-    else
-      echo "firewall: no gateway on $OFFLINE_BRIDGE - offline terminals stay unreachable" >&2
-    fi
-  fi
-
-  ebtables -t filter -N TERMIPLUS-AS 2>/dev/null || ebtables -t filter -F TERMIPLUS-AS
+  ebtables -t filter -N TERMIPLUS-AS -P RETURN 2>/dev/null || ebtables -t filter -F TERMIPLUS-AS
+  ebtables -t filter -P TERMIPLUS-AS RETURN
   # User chains in ebtables default to ACCEPT, which would end PREROUTING.
   ebtables -t nat -N TERMIPLUS-PORT -P RETURN 2>/dev/null || ebtables -t nat -F TERMIPLUS-PORT
   ebtables -t nat -P TERMIPLUS-PORT RETURN
-  pin_ip "$GATEWAY" "$mac" "$BRIDGE" "$port"
+  if [ -n "$mac" ]; then pin_ip "$GATEWAY" "$mac" "$BRIDGE" "$port"; fi
   if [ -n "$forwarder_mac" ]; then
     pin_ip "$FORWARDER" "$forwarder_mac" "$BRIDGE" "$forwarder_port"
   fi
@@ -610,6 +630,7 @@ ensure_gateway_antispoof() {
 }
 # Source guards are independent of the legacy service pins: full applies never
 # flush an attached source guard, including during gateway/forwarder recreation.
+[ "${PORT_SNAPSHOT_READY:-0}" = 1 ] || prepare_policy_snapshot || exit 1
 initial_lock_rc=0
 sync_all || initial_lock_rc=$?
 if [ "$initial_lock_rc" -eq 1 ]; then
@@ -620,108 +641,153 @@ ensure_gateway_antispoof
 
 # Each forwarder upstream (DNS_UPSTREAM, comma-separated) must be a plain IPv4
 # address outside the never-allowed ranges; anything else gets no rule.
-upstream_ok() {
-  echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || return 1
-  case "$1" in
-    127.* | 169.254.* | 172.30.0.* | 172.30.1.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-1][0-9].* | 100.12[0-7].*) return 1 ;;
-  esac
-}
+upstream_ok() { policy_destination_ok "$1" 1; }
 upstreams() { echo "$DNS_UPSTREAM" | tr -s ', ' '\n' | grep -v '^$' || true; }
 
-# Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
-iptables -N TERMIPLUS 2>/dev/null || iptables -F TERMIPLUS
-# Offline bridge first, by interface, so no rule below (all keyed on the
-# sandbox subnet or on admin allowances) can ever let its traffic through.
-if offline_present; then
+# Remove only our unconditional hooks and insert one at the front. These
+# operations and both owned chains commit together under the xtables lock.
+restore_hook() {
+  rh_listing=$("$1" -w 10 -S "$2") || return 1
+  rh_count=$(printf '%s\n' "$rh_listing" | awk -v rule="-A $2 -j $3" '$0 == rule {n++} END {print n+0}')
+  while [ "$rh_count" -gt 0 ]; do
+    filter_rule -D "$2" -j "$3"
+    rh_count=$((rh_count - 1))
+  done
+  filter_rule -I "$2" 1 -j "$3"
+}
+
+render_ipv4() {
+  # Forwarded traffic (container -> elsewhere). DOCKER-USER runs before Docker's own rules.
+  printf '%s\n' '*filter' ':TERMIPLUS - [0:0]' ':TERMIPLUS-IN - [0:0]'
   if [ -n "${offline_gateway_mac:-}" ]; then
-    iptables -A TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_GATEWAY" -d "$OFFLINE_SUBNET" -j ACCEPT
-    iptables -A TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_SUBNET" -d "$OFFLINE_GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    filter_rule -A TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_GATEWAY" -d "$OFFLINE_SUBNET" -j ACCEPT
+    filter_rule -A TERMIPLUS -i "$OFFLINE_BRIDGE" -o "$OFFLINE_BRIDGE" -s "$OFFLINE_SUBNET" -d "$OFFLINE_GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
   fi
-  iptables -A TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP
-  iptables -A TERMIPLUS -o "$OFFLINE_BRIDGE" -j DROP
-fi
-# The gateway->terminal allow is ACCEPT, not RETURN: ACCEPT terminates
-# traversal so Docker's enable_icc:false inter-container DROP (which runs in
-# FORWARD after DOCKER-USER) does not drop this required flow. Do not install a
-# broad ESTABLISHED,RELATED ACCEPT here: DOCKER-USER is global to Docker
-# forwarding, and that rule would bypass other networks' policy and current
-# egress restrictions for long-lived connections. Docker handles reply traffic;
-# outbound packets must continue through the current egress policy below.
-iptables -A TERMIPLUS -s "$GATEWAY" -d "$SANDBOX" -j ACCEPT
-# Replies on those connections. They are sandbox -> sandbox too, so without this
-# the terminal <-> terminal drop below would cut every gateway request. Scoped to
-# the gateway as destination and to connections conntrack has already seen
-# (opened by the gateway; a terminal's own new packets to it are never accepted),
-# unlike a global ESTABLISHED,RELATED rule.
-iptables -A TERMIPLUS -s "$SANDBOX" -d "$GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-# terminal -> forwarder DNS (only with the forwarder present). ACCEPT, as for the
-# gateway, to beat Docker's icc:false drop; the forwarder's address is MAC-pinned.
-if [ -n "${forwarder_mac:-}" ]; then
-  for p in udp tcp; do
-    iptables -A TERMIPLUS -s "$SANDBOX" -d "$FORWARDER" -p "$p" --dport 53 -j ACCEPT
-    # and its answers back to the terminal, only on those DNS connections
-    iptables -A TERMIPLUS -s "$FORWARDER" -d "$SANDBOX" -p "$p" --sport 53 -m conntrack --ctstate ESTABLISHED -j ACCEPT
+  filter_rule -A TERMIPLUS -i "$OFFLINE_BRIDGE" -j DROP
+  filter_rule -A TERMIPLUS -o "$OFFLINE_BRIDGE" -j DROP
+  # The gateway->terminal allow is ACCEPT, not RETURN: ACCEPT terminates
+  # traversal so Docker's enable_icc:false inter-container DROP (which runs in
+  # FORWARD after DOCKER-USER) does not drop this required flow. Do not install a
+  # broad ESTABLISHED,RELATED ACCEPT here: DOCKER-USER is global to Docker
+  # forwarding, and that rule would bypass other networks' policy and current
+  # egress restrictions for long-lived connections. Docker handles reply traffic;
+  # outbound packets must continue through the current egress policy below.
+  if [ -n "${mac:-}" ]; then
+    filter_rule -A TERMIPLUS -i "$BRIDGE" -o "$BRIDGE" -s "$GATEWAY" -d "$SANDBOX" -j ACCEPT
+  fi
+  # Replies on those connections. They are sandbox -> sandbox too, so without this
+  # the terminal <-> terminal drop below would cut every gateway request. Scoped to
+  # the gateway as destination and to connections conntrack has already seen
+  # (opened by the gateway; a terminal's own new packets to it are never accepted),
+  # unlike a global ESTABLISHED,RELATED rule.
+  if [ -n "${mac:-}" ]; then
+    filter_rule -A TERMIPLUS -i "$BRIDGE" -o "$BRIDGE" -s "$SANDBOX" -d "$GATEWAY" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  fi
+  # terminal -> forwarder DNS (only with the forwarder present). ACCEPT, as for the
+  # gateway, to beat Docker's icc:false drop; the forwarder's address is MAC-pinned.
+  if [ -n "${forwarder_mac:-}" ]; then
+    for p in udp tcp; do
+      filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$FORWARDER" -p "$p" --dport 53 -j ACCEPT
+      # and its answers back to the terminal, only on those DNS connections
+      filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$FORWARDER" -d "$SANDBOX" -p "$p" --sport 53 -m conntrack --ctstate ESTABLISHED -j ACCEPT
+    done
+    for up in $(upstreams); do
+      if upstream_ok "$up"; then
+        for p in udp tcp; do
+          filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
+        done
+      else
+        echo "firewall: DNS upstream '$up' unusable - the forwarder gets no rule for it" >&2
+      fi
+    done
+  fi
+  # The forwarder can reach only its validated DNS upstreams. This terminal
+  # DROP is before all admin exceptions and the public-egress fallthrough.
+  if [ -n "${forwarder_mac:-}" ]; then
+    filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$FORWARDER" -j DROP
+  fi
+  # terminal <-> terminal: dropped here (belt) and again by Docker's icc:false drop.
+  filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$SANDBOX" -j DROP
+  # Fixed deny-list: dropped before any admin allow rule can match it, so these
+  # ranges can never be opened by the network policy.
+  for net in 127.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.30.1.0/24; do
+    filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$net" -j DROP
   done
-  for up in $(upstreams); do
-    if upstream_ok "$up"; then
-      for p in udp tcp; do
-        iptables -A TERMIPLUS -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
-      done
-    else
-      echo "firewall: DNS upstream '$up' unusable - the forwarder gets no rule for it" >&2
-    fi
+  # Admin-set allowances for specific internal destinations (default-deny for
+  # private ranges; public egress stays allowed by the implicit RETURN below).
+  apply_egress_allow || return 1
+  # Everything else private stays denied unless an allow rule above returned first.
+  for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+    filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$net" -j DROP
   done
-fi
-# terminal <-> terminal: dropped here (belt) and again by Docker's icc:false drop.
-iptables -A TERMIPLUS -s "$SANDBOX" -d "$SANDBOX" -j DROP
-# Fixed deny-list: dropped before any admin allow rule can match it, so these
-# ranges can never be opened by the network policy.
-for net in 100.64.0.0/10 169.254.0.0/16; do
-  iptables -A TERMIPLUS -s "$SANDBOX" -d "$net" -j DROP
-done
-# Admin-set allowances for specific internal destinations (default-deny for
-# private ranges; public egress stays allowed by the implicit RETURN below).
-apply_egress_allow
-# Everything else private stays denied unless an allow rule above returned first.
-for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
-  iptables -A TERMIPLUS -s "$SANDBOX" -d "$net" -j DROP
-done
-iptables -C DOCKER-USER -j TERMIPLUS 2>/dev/null || iptables -I DOCKER-USER 1 -j TERMIPLUS
 
-# Traffic from terminals to the VM itself (INPUT): drop. DNS still works,
-# Docker's embedded resolver (127.0.0.11) lives inside each container's
-# network namespace and is not affected by this rule.
-iptables -N TERMIPLUS-IN 2>/dev/null || iptables -F TERMIPLUS-IN
-# Nothing on the offline bridge may talk to the host, not even on connections
-# that look established (checked before the ESTABLISHED,RELATED return).
-if offline_present; then
-  iptables -A TERMIPLUS-IN -i "$OFFLINE_BRIDGE" -j DROP
-fi
-iptables -A TERMIPLUS-IN -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-# An upstream resolver on this host itself: only the forwarder may ask it.
-if [ -n "${forwarder_mac:-}" ]; then
-  for up in $(upstreams); do
-    if upstream_ok "$up" && ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$up"; then
-      for p in udp tcp; do
-        iptables -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
-      done
-    fi
-  done
-fi
-iptables -A TERMIPLUS-IN -i "$BRIDGE" -j DROP
-iptables -C INPUT -j TERMIPLUS-IN 2>/dev/null || iptables -I INPUT 1 -j TERMIPLUS-IN
 
-# No IPv6 for the sandbox (the network is IPv4 only). Block all three paths,
-# mirroring the IPv4 rules: routed egress (FORWARD), terminal->host (INPUT),
-# and same-bridge terminal<->terminal (needs the v6 bridge sysctl set above).
-# A blanket drop is correct here because terminals have no legitimate IPv6.
-ip6tables -C FORWARD -i "$BRIDGE" -j DROP 2>/dev/null || ip6tables -I FORWARD 1 -i "$BRIDGE" -j DROP
-ip6tables -C INPUT -i "$BRIDGE" -j DROP 2>/dev/null || ip6tables -I INPUT 1 -i "$BRIDGE" -j DROP
-if offline_present; then
-  ip6tables -C FORWARD -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || ip6tables -I FORWARD 1 -i "$OFFLINE_BRIDGE" -j DROP
-  ip6tables -C FORWARD -o "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || ip6tables -I FORWARD 1 -o "$OFFLINE_BRIDGE" -j DROP
-  ip6tables -C INPUT -i "$OFFLINE_BRIDGE" -j DROP 2>/dev/null || ip6tables -I INPUT 1 -i "$OFFLINE_BRIDGE" -j DROP
-fi
+  # Traffic from terminals to the VM itself (INPUT): drop. DNS still works,
+  # Docker's embedded resolver (127.0.0.11) lives inside each container's
+  # network namespace and is not affected by this rule.
+
+  # Nothing on the offline bridge may talk to the host, not even on connections
+  # that look established (checked before the ESTABLISHED,RELATED return).
+  filter_rule -A TERMIPLUS-IN -i "$OFFLINE_BRIDGE" -j DROP
+  # An upstream resolver on this host itself: only the forwarder may ask it.
+  if [ -n "${forwarder_mac:-}" ]; then
+    for up in $(upstreams); do
+      if upstream_ok "$up" && ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$up"; then
+        for p in udp tcp; do
+          filter_rule -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
+        done
+      fi
+    done
+  fi
+  if [ -n "${forwarder_mac:-}" ]; then
+    filter_rule -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -j DROP
+  fi
+  filter_rule -A TERMIPLUS-IN -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+  filter_rule -A TERMIPLUS-IN -i "$BRIDGE" -j DROP
+  restore_hook iptables DOCKER-USER TERMIPLUS || return 1
+  restore_hook iptables INPUT TERMIPLUS-IN || return 1
+  printf '%s\n' COMMIT
+
+}
+
+render_ipv6() {
+  printf '%s\n' '*filter' ':TERMIPLUS6 - [0:0]' ':TERMIPLUS6-IN - [0:0]'
+  for v6_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    filter_rule -A TERMIPLUS6 -i "$v6_br" -j DROP
+    filter_rule -A TERMIPLUS6 -o "$v6_br" -j DROP
+    filter_rule -A TERMIPLUS6-IN -i "$v6_br" -j DROP
+  done
+  restore_hook ip6tables FORWARD TERMIPLUS6 || return 1
+  restore_hook ip6tables INPUT TERMIPLUS6-IN || return 1
+  printf '%s\n' COMMIT
+}
+
+# Generate and validate both complete snapshots before changing either family.
+# --noflush preserves Docker/unrelated chains; declaring our chains replaces
+# their contents inside the restore transaction, never in a live flush window.
+# If one family fails, its previous policy remains and no completion is recorded.
+apply_ip_policy() {
+  umask 077
+  ap_dir=$(mktemp -d "$PORTLOCK_DIR/apply.XXXXXX") || return 1
+  trap 'rm -rf "$ap_dir"' EXIT
+  ap_fingerprint=$(policy_fingerprint) || return 1
+  APPLY_RULES=$ap_dir/egress.rules
+  if [ -f "$EGRESS_RULES" ]; then cp "$EGRESS_RULES" "$APPLY_RULES" || return 1; else : >"$APPLY_RULES" || return 1; fi
+  rm -f "$PORTLOCK_DIR/policy.applied"
+  render_ipv4 >"$ap_dir/ipv4" || return 1
+  render_ipv6 >"$ap_dir/ipv6" || return 1
+  iptables-restore -w 10 --noflush --test <"$ap_dir/ipv4" || return 1
+  ip6tables-restore -w 10 --noflush --test <"$ap_dir/ipv6" || return 1
+  iptables-restore -w 10 --noflush <"$ap_dir/ipv4" || return 1
+  ip6tables-restore -w 10 --noflush <"$ap_dir/ipv6" || return 1
+  [ "$ap_fingerprint" = "$(policy_fingerprint)" ] || return 1
+  ap_rules=$(policy_rules) || return 1
+  printf '%s %s\n' "$ap_fingerprint" "$(printf '%s\n' "$ap_rules" | sha256sum | cut -d ' ' -f 1)" >"$ap_dir/completed"
+  mv "$ap_dir/completed" "$PORTLOCK_DIR/policy.applied" || return 1
+  rm -rf "$ap_dir"
+  trap - EXIT
+}
+apply_ip_policy
 
 echo "termiplus firewall rules applied"
 

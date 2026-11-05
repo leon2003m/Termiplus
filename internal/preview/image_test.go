@@ -68,3 +68,19 @@ func TestNativeScreenAndThumbnail(t *testing.T) {
 		}
 	}
 }
+
+func TestScreenEncodingStopsAtByteLimit(t *testing.T) {
+	var out screenBuffer
+	if _, err := out.Write(make([]byte, MaxScreenBytes-1)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := out.Write([]byte{1, 2}); err == nil || n != 0 || out.Len() != MaxScreenBytes-1 {
+		t.Fatal("oversized encoded chunk was retained")
+	}
+	if _, err := out.Write([]byte{1}); err != nil || out.Len() != MaxScreenBytes {
+		t.Fatal("exact byte limit rejected")
+	}
+	if n, err := out.Write([]byte{1}); err == nil || n != 0 || out.Len() != MaxScreenBytes {
+		t.Fatal("encoder exceeded the byte limit")
+	}
+}

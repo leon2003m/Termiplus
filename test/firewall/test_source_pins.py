@@ -177,6 +177,18 @@ class SourcePins(unittest.TestCase):
 
 
 class PortWatcher(unittest.TestCase):
+    def test_multicast_flooding_is_checked_and_disabled(self):
+        source = FIREWALL[FIREWALL.index("port_flags_ok() {"):FIREWALL.index("# port_macs BRIDGE")]
+        for flag in ("on", "off"):
+            script = ('set -eu\nbridge() {\n'
+                      'if [ "$1" = -d ]; then echo " locked on learning off flood off mcast_flood '
+                      + flag + ' "; else echo "$*"; fi; }\n' + source + '\nlock_port veth-dummy\n')
+            p = subprocess.run(["/bin/sh"], input=script, capture_output=True, text=True,
+                               timeout=5, env={"PATH": "/usr/bin:/bin"})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(p.stdout.strip(), "link set dev veth-dummy locked on learning off flood off mcast_flood off"
+                             if flag == "on" else "")
+
     def test_lock_failure_never_mutates_source_pins(self):
         source = FIREWALL[FIREWALL.index("sync_all() {"):FIREWALL.index("# port_worker keeps")]
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,14 +214,14 @@ class PortWatcher(unittest.TestCase):
         source = FIREWALL[FIREWALL.index("port_worker() {"):FIREWALL.index("# ip monitor prefixes")]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            command = root / "firewall.sh"
+            command = root / "installed-firewall"
             log = root / "calls"
             command.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\nexit "$APPLY_RC"\n')
             command.chmod(0o755)
             for rc in (0, 1):
                 script = 'set -eu\nsync_all() { return 0; }\n' + source + '\nport_worker\n'
                 p = subprocess.run(["/bin/sh"], input=script, text=True, capture_output=True, timeout=5,
-                                   env={"PATH": "/usr/bin:/bin", "PORTLOCK_DIR": tmp, "SCRIPT_DIR": tmp,
+                                   env={"PATH": "/usr/bin:/bin", "PORTLOCK_DIR": tmp, "SCRIPT_FILE": str(command),
                                         "CALLS": str(log), "APPLY_RC": str(rc)})
                 self.assertEqual(p.returncode, rc, p.stderr)
             self.assertEqual(log.read_text().splitlines(), ["--if-needed", "--if-needed"])

@@ -41,3 +41,4 @@ networks:
     ipam:
       config:
         - subnet: 172.30.1.0/24
+          ip_range: 172.30.1.128/25 # reserve low addresses for trusted services

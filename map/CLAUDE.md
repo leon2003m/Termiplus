@@ -55,7 +55,14 @@ attached throughout refreshes; existing static MAC port locks remain in place.
 Port discovery matches host `link-netnsid` to `lsns NETNSID` for Docker's PID;
 it does not inspect workspace-controlled links. `--watch-ports` refreshes on link
 events, including recreated service pins, and the timer reconciles state.
-Policy changes activate a separate repeatable firewall reload service. See the
+Policy changes activate a separate repeatable firewall reload service. Complete
+IPv4/IPv6 policies commit in separate restore transactions, with chain and policy
+hashes detecting incomplete or stale state. Static denies do not require a
+gateway; the DNS forwarder can only use validated upstream DNS. Each run reuses
+one bridge discovery snapshot for pins, rules and its marker; legacy service pin
+contents are hashed. Compose reserves low service addresses using upper-half
+`ip_range` pools, and forwarder privileges require a trusted service label rather
+than address ownership alone. See the
 [firewall card](objects/sandbox/firewall-chain.md),
 [host update](../docs/deploy-alpha.md#host-source-identity-update) and
 [isolated kernel regression](../test/integration/source-pins.py). The gateway
@@ -77,6 +84,10 @@ See [native Desktop](processes/desktop-stream.md),
 [model tool boundary](objects/control-plane/mcp-tools.md) and
 [migration](../docs/native-integration.md). No AI administration or snapshot
 pruning is exposed. Shared viewing is image-only at five-second intervals.
+Image responses have socket deadlines; share revocation/expiry interrupts writes.
+MCP admits four image responses, one per viewer and two per owner; gateway admits
+eight, four per user. Workspace fetches have a separate three-second deadline. Only decoding/encoding holds the image slot; workspace waits and cache hits
+do not. Image writes get two to four seconds. See the share card.
 The native image smoke test runs under Sysbox, including Chromium with its
 sandbox enabled. The desktop CI job installs a checksum-pinned Sysbox package;
 ordinary Docker is insufficient for that browser sandbox test on the live host.

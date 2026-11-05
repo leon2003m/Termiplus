@@ -6,12 +6,36 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [1.0.0] - 2026-11-05
 
-Republished with the workspace source-identity and home-export fixes below.
+Republished with the firewall isolation, home-export and screenshot resource
+bounds fixes below.
 The original 1.0.0 release was withdrawn. Upgrade the gateway image and the
 host firewall together; container images alone do not install the source guards.
 
 ### Security
 
+- Bound screen-share and console-preview socket writes as well as upstream reads.
+  Share revocation and expiry interrupt blocked image writes; normalized writes
+  get two to four seconds. Admit four MCP image responses (one per viewer), eight
+  gateway responses (four per user), and serialize only decoding/encoding. Slow
+  workspace fetches, cache hits and preview locks cannot hold that image slot.
+  Bound workspace headers/body fetches to three seconds and MCP shares to two
+  in-flight responses per owner. Return explicit 503/504 on image/write-start
+  failures. Release cache locks before socket writes. Reserve the PNG output buffer up
+  front and reject encoder output beyond 8 MiB.
+- Reserve the low half of both sandbox subnets for static services. Require a
+  verified DNS-forwarder service identity before granting DNS access or applying
+  its dedicated source DROP; a workspace holding `.3` gains no service privileges.
+- Use one port-discovery snapshot per bridge for an apply/current-state check,
+  including service rendering and the completion marker. Check legacy service-pin
+  chain contents and hash the invoked script even when installed under a new name.
+- Replace complete IPv4 and IPv6 firewall policies in restore transactions,
+  preserving the previous policy on an interrupted or failed rebuild. Verify
+  complete chain hashes, policy inputs and hook placement before skipping an apply.
+- Install static isolation rules even without a gateway or offline bridge.
+  Reject malformed, noncanonical and overlapping never-allowed IPv4 CIDRs.
+- Restrict the DNS forwarder to configured upstream DNS, including established
+  traffic; admin exceptions and public egress cannot bypass its final deny.
+  Disable unknown multicast flooding and wait for the xtables lock.
 - Bind every container on `ot-sandbox` and `ot-offline` to its Docker-assigned
   bridge port, Ethernet MAC and IPv4 address, including the ARP sender address.
   This closes cross-user ARP poisoning with an attacker's own MAC, which could
