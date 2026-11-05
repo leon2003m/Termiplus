@@ -177,6 +177,18 @@ class SourcePins(unittest.TestCase):
 
 
 class PortWatcher(unittest.TestCase):
+    def test_multicast_flooding_is_checked_and_disabled(self):
+        source = FIREWALL[FIREWALL.index("port_flags_ok() {"):FIREWALL.index("# port_macs BRIDGE")]
+        for flag in ("on", "off"):
+            script = ('set -eu\nbridge() {\n'
+                      'if [ "$1" = -d ]; then echo " locked on learning off flood off mcast_flood '
+                      + flag + ' "; else echo "$*"; fi; }\n' + source + '\nlock_port veth-dummy\n')
+            p = subprocess.run(["/bin/sh"], input=script, capture_output=True, text=True,
+                               timeout=5, env={"PATH": "/usr/bin:/bin"})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(p.stdout.strip(), "link set dev veth-dummy locked on learning off flood off mcast_flood off"
+                             if flag == "on" else "")
+
     def test_lock_failure_never_mutates_source_pins(self):
         source = FIREWALL[FIREWALL.index("sync_all() {"):FIREWALL.index("# port_worker keeps")]
         with tempfile.TemporaryDirectory() as tmp:
