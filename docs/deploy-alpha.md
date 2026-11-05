@@ -103,6 +103,55 @@ Rerun `firewall.sh` whenever the gateway container is recreated (new image or
 config): the gateway gets a new MAC address, and until the firewall pins the
 new one, terminals cannot be reached.
 
+### Host source-identity update
+
+The original 1.0.0 release's MAC port locks alone do not prevent a Sysbox workspace from
+claiming another workspace's IPv4 address in ARP. Install the updated host script
+before allowing untrusted workspaces to run. Container image updates alone are
+insufficient; no Open WebUI change is required. The republished 1.0.0 release
+includes the fix; replace any digest pins from the withdrawn release with the
+new release's digest assets.
+
+The host needs `ebtables`, `flock`, and `lsns` with the `NETNSID` output column,
+plus Linux and iproute2 6.2 or newer for locked bridge ports. Discovery matches
+the host's `link-netnsid` to Docker's PID namespace using `lsns`; workspace-owned
+interface names, indices and MAC addresses are not trusted. Failed or ambiguous
+discovery leaves the affected ports denied.
+
+During a maintenance window, stop untrusted workspace workloads, update the host
+checkout to the fixed revision and use that checkout's paths below (adjust the
+installed unit's `ExecStart` if necessary):
+
+```sh
+sudo deploy/firewall.sh
+sudo cp deploy/termiplus-portlock.service deploy/termiplus-firewall-reload.service \
+  deploy/termiplus-firewall.path deploy/termiplus-firewall-watch.service \
+  deploy/termiplus-firewall-watch.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart termiplus-portlock.service
+sudo systemctl enable --now termiplus-firewall-watch.timer
+sudo systemctl enable --now termiplus-firewall.path
+sudo systemctl restart termiplus-firewall.path
+sudo deploy/firewall.sh --lock-ports
+sudo deploy/firewall.sh --if-needed
+```
+
+Both final commands must succeed once containers have settled. Inspect
+`ebtables -t nat -L PREROUTING` for a bridge-scoped `TERMIPLUS-IP-S*` guard on
+`ot-sandbox` and `TERMIPLUS-IP-O*` on `ot-offline` when present. Each active
+chain must contain exactly the resolved port/MAC/IPv4 and ARP sender tuples,
+followed by an explicit `DROP`. Never flush an attached source guard to resolve
+connectivity problems: inspect Docker/namespace discovery and watcher logs.
+The policy path now starts the repeatable `termiplus-firewall-reload.service`.
+Installing that unit and restarting the path are necessary on existing hosts;
+starting an already-active boot service does not reapply a changed policy.
+
+If the bridge was already attacked, clear the affected workspace IP's neighbour
+entry inside the gateway network namespace after installing the pins, or
+recreate the gateway and reapply the firewall. That prevents an existing poisoned
+entry from continuing to direct requests to the wrong port. Investigate any
+suspected key disclosure and follow [the security policy](../SECURITY.md#workspace-source-identity).
+
 ## 5. Open WebUI
 
 Set the environment printed by `setup-alpha.sh` (OIDC client `owui`,

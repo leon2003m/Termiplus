@@ -1,13 +1,13 @@
-# Locks every terminal's bridge port to its own MAC the moment the port
-# appears (deploy/firewall.sh --watch-ports): learning off, port locked and
-# a static FDB entry, so one terminal cannot forge another's MAC and receive
-# the gateway's replies to it. Needs Linux and iproute2 >= 6.2.
+# Pins every container on both sandbox bridges to its Docker port/MAC/IPv4
+# tuple before bridge learning, including ARP sender IP/MAC. Unknown ports
+# drop immediately. Also keeps port learning off with static locked MACs.
+# deploy/firewall.sh --watch-ports; needs Linux and iproute2 >= 6.2.
 #
 #   sudo cp deploy/termiplus-portlock.service /etc/systemd/system/
 #   sudo systemctl edit termiplus-portlock   # only if the path below differs
 #   sudo systemctl enable --now termiplus-portlock.service
 [Unit]
-Description=termiplus bridge port lock watcher
+Description=termiplus bridge source identity and port lock watcher
 # Wants, not Requires: a Docker stop must not stop the watcher (systemd would
 # not start it again with Docker); while Docker is down it just retries.
 After=docker.service

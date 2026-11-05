@@ -1,0 +1,10 @@
+# A separate, repeatable oneshot for policy updates. The boot service has
+# RemainAfterExit=yes and starting an already-active service does not rerun it.
+[Unit]
+Description=Reload termiplus sandbox egress policy
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/termiplus/deploy/firewall.sh

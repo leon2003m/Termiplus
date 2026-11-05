@@ -73,7 +73,8 @@ type Config struct {
 	// no cap.
 	ExportMaxBytes int64
 	// ExportConcurrency is how many home exports run at once across all users
-	// (default 4); further ones wait, within their deadline.
+	// (default 4); further ones wait, within their deadline. One active or
+	// queued export per user is allowed; overlapping requests return 429.
 	ExportConcurrency int
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on

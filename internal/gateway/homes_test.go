@@ -255,13 +255,21 @@ func TestHomeExportsOfOneHomeDoNotCollide(t *testing.T) {
 	h.docker.files[vol] = map[string]string{"a": strings.Repeat("x", 1<<20)}
 	h.docker.mu.Unlock()
 	errs := make(chan string, 8)
+	successes := make(chan struct{}, 8)
 	for i := 0; i < 8; i++ {
 		go func() {
 			code, b := h.homes(t, http.MethodGet, "default/archive", "alice", nil)
+			// Overlapping exports now refuse admission before taking a slot
+			// or touching the shared helper. Every admitted export stays intact.
+			if code == http.StatusTooManyRequests {
+				errs <- ""
+				return
+			}
 			if code != 200 || len(tarNames(t, b)["user/a"]) != 1<<20 {
 				errs <- fmt.Sprintf("%d, %d bytes", code, len(b))
 				return
 			}
+			successes <- struct{}{}
 			errs <- ""
 		}()
 	}
@@ -269,6 +277,12 @@ func TestHomeExportsOfOneHomeDoNotCollide(t *testing.T) {
 		if e := <-errs; e != "" {
 			t.Fatalf("concurrent export: %s", e)
 		}
+	}
+	if len(successes) == 0 {
+		t.Fatal("no export was admitted")
+	}
+	if code, b := h.homes(t, http.MethodGet, "default/archive", "alice", nil); code != http.StatusOK || len(tarNames(t, b)["user/a"]) != 1<<20 {
+		t.Fatalf("export after overlap: %d, %d bytes", code, len(b))
 	}
 	h.noHelpersLeft(t)
 }

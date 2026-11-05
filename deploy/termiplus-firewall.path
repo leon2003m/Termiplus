@@ -1,5 +1,5 @@
 # Reapplies the sandbox firewall whenever the admin network policy changes the
-# rendered egress rules. Pairs with termiplus-firewall.service.
+# rendered egress rules. Uses a repeatable reload service, separate from boot.
 #
 #   sudo cp deploy/termiplus-firewall.path /etc/systemd/system/
 #   sudo systemctl edit termiplus-firewall.path   # only if the path below differs
@@ -12,7 +12,7 @@ Description=Reapply termiplus egress rules when the network policy changes
 
 [Path]
 PathChanged=/opt/termiplus/deploy/netpolicy/egress.rules
-Unit=termiplus-firewall.service
+Unit=termiplus-firewall-reload.service
 
 [Install]
 WantedBy=multi-user.target

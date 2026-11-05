@@ -3,7 +3,7 @@ type: object
 cluster: workspaces
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-05 @ working tree
 entity: internal/gateway/homes.go
 ---
 
@@ -17,10 +17,11 @@ The gateway has no volume mounts and the terminal may be stopped or busy. A stop
 
 ## Shape
 
-- Label `termiplus.storage=archive`. One helper per home at a time: a second export waits. A leftover helper from an interrupted run is replaced.
+- Label `termiplus.storage=archive`. One helper per home at a time. Export admission allows one running or queued export per user across all homes; an overlapping export is refused with 429. Other users wait for the global export slots within their deadline. A leftover helper from an interrupted run is replaced.
 - Created and removed around each operation by `withHelper`.
+- When `EXPORT_MAX_BYTES` is positive, `copyHomeArchive` bounds both raw tar bytes and cumulative logical member sizes. It rejects oversized members at their headers, before consuming a sparse file's expanded holes. A zero limit keeps exports uncapped.
 
-Citations: `internal/naming/naming.go:58-61` (Archive, ArchiveFor), `internal/gateway/homes.go:25` (storageArchive), `:67` (withHelper), `internal/sockproxy/archive.go:23` (filterHomeTar), `internal/sockproxy/proxy.go:273`
+Citations: `internal/naming/naming.go:58-61` (Archive, ArchiveFor), `internal/gateway/homes.go`: `withHelper`, `exportHome`, `copyHomeArchive`, `exportLimits`; `internal/gateway/archive_limits_test.go`; `internal/sockproxy/archive.go:23` (filterHomeTar), `internal/sockproxy/proxy.go:273`.
 
 ## Connected to
 

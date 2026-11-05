@@ -95,6 +95,8 @@ jobs:
         run: |
           go build -o "$RUNNER_TEMP/mcp" ./cmd/mcp
           TERMIPLUS_MCP_BIN="$RUNNER_TEMP/mcp" python3 -I -B integrations/openwebui/test_termiplus_workspaces.py -v
+      - name: Bridge source-identity regressions
+        run: make test-firewall
       - name: Coverage report
         if: always()
         run: |

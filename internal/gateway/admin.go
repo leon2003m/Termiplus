@@ -165,6 +165,8 @@ func (g *Gateway) exportHome(w http.ResponseWriter, r *http.Request, userID, hom
 		httpError(w, http.StatusNotFound, "no such home")
 	case errors.Is(err, errExportTooLarge) && !sw.started:
 		httpError(w, http.StatusRequestEntityTooLarge, "the home is larger than the export limit")
+	case errors.Is(err, errExportBusy) && !sw.started:
+		httpError(w, http.StatusTooManyRequests, errExportBusy.Error())
 	case err != nil && !sw.started:
 		log.Printf("export home %q of %q: %q", home, userID, err)
 		httpError(w, http.StatusBadGateway, "could not read the home")
