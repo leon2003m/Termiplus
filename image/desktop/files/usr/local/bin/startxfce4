@@ -1,0 +1,37 @@
+#!/bin/sh
+# Open Terminal starts this inside its private display and D-Bus session.
+set -eu
+# Run before xfconf starts, including when reusing an older persistent home.
+python3 /usr/local/libexec/termiplus/desktop-defaults.py
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+for app in qt6ct gtk-3.0; do
+  mkdir -p "$config_home/$app"
+  for config in /etc/xdg/"$app"/*; do
+    [ -f "$config" ] || continue
+    target="$config_home/$app/${config##*/}"
+    [ -e "$target" ] || cp "$config" "$target"
+  done
+done
+for config in kdeglobals dolphinrc; do
+  [ -e "$config_home/$config" ] || cp "/etc/xdg/$config" "$config_home/$config"
+done
+# Native processes sanitize their environment; set Qt preferences here too.
+export QT_QPA_PLATFORMTHEME=qt6ct
+export QT_LOGGING_RULES="*.debug=false;kf.solid.backends.udisks2.warning=false"
+# XFCE's monitor name differs between Kasm and TigerVNC. Set the default on
+# this display only when the user has not selected a wallpaper (or it vanished).
+for monitor in $(xrandr --query | awk '$2 == "connected" {print $1}'); do
+  backdrop="/backdrop/screen0/monitor$monitor/workspace0"
+  image="$(xfconf-query -c xfce4-desktop -p "$backdrop/last-image" 2>/dev/null || true)"
+  if [ -z "$image" ] || [ ! -f "$image" ]; then
+    xfconf-query -c xfce4-desktop -p "$backdrop/last-image" --create -t string \
+      -s /usr/share/backgrounds/termiplus/default.svg
+    xfconf-query -c xfce4-desktop -p "$backdrop/image-style" --create -t int -s 5
+  fi
+done
+# Dolphin owns folder opening, including old launchers on existing home volumes.
+timeout 5 gdbus call --session --dest org.freedesktop.DBus \
+  --object-path /org/freedesktop/DBus \
+  --method org.freedesktop.DBus.StartServiceByName \
+  org.freedesktop.FileManager1 0 >/dev/null 2>&1 || true
+exec /usr/bin/startxfce4 "$@"

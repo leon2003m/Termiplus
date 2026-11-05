@@ -20,8 +20,6 @@ import (
 type GatewayBackend struct {
 	base       string // internal gateway URL, e.g. http://gateway:8080
 	publicBase string // externally reachable gateway URL for access handles
-	streamBase string // browser-facing URL of the desktop stream (sign-in proxy)
-	fwdBase    string // browser-facing URL of the port forwards (fwd-auth), or ""
 	controlKey string
 	adminKey   string // optional; empty disables set_network_policy
 	client     *http.Client
@@ -36,7 +34,6 @@ func NewGatewayBackend(base, publicBase, controlKey, adminKey string) *GatewayBa
 	return &GatewayBackend{
 		base:       strings.TrimSuffix(base, "/"),
 		publicBase: strings.TrimSuffix(publicBase, "/"),
-		streamBase: strings.TrimSuffix(publicBase, "/"),
 		controlKey: controlKey,
 		adminKey:   adminKey,
 		// Creating a session waits for the terminal to become ready.
@@ -44,38 +41,29 @@ func NewGatewayBackend(base, publicBase, controlKey, adminKey string) *GatewayBa
 	}
 }
 
-// WithStreamBase sets the browser-facing base URL for desktop stream handles
-// (the desktop sign-in proxy). Defaults to the public gateway URL.
-func (b *GatewayBackend) WithStreamBase(u string) *GatewayBackend {
-	if u != "" {
-		b.streamBase = strings.TrimSuffix(u, "/")
-	}
-	return b
-}
-
-// WithForwardBase sets the browser-facing base URL of the port forwards; each
-// session handle then carries forward_url (append "<port>/").
-func (b *GatewayBackend) WithForwardBase(u string) *GatewayBackend {
-	b.fwdBase = strings.TrimSuffix(u, "/")
-	return b
-}
-
 // gwWorkspace / gwSession mirror the gateway control API's JSON.
 type gwWorkspace struct {
-	Name       string `json:"name"`
-	Runtime    string `json:"runtime"`
-	Persistent bool   `json:"persistent"`
-	Desktop    bool   `json:"desktop"`
+	IdleSeconds int64  `json:"idle_seconds,omitempty"`
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Runtime     string `json:"runtime"`
+	Persistent  bool   `json:"persistent"`
+	Desktop     bool   `json:"desktop"`
 }
 
 type gwSession struct {
+	StartedAt       string `json:"started_at,omitempty"`
+	LastActivity    string `json:"last_activity,omitempty"`
+	IdleExpiresAt   string `json:"idle_expires_at,omitempty"`
+	IdleSeconds     int64  `json:"idle_seconds,omitempty"`
 	ID              string `json:"session_id"`
 	Workspace       string `json:"workspace"`
 	Persistent      bool   `json:"persistent"`
 	Running         bool   `json:"running"`
 	TerminalPath    string `json:"terminal_path"`
 	TerminalSession string `json:"terminal_session"`
-	StreamPath      string `json:"stream_path"`
+	Desktop         bool   `json:"desktop"`
 }
 
 func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Workspace, error) {
@@ -85,7 +73,16 @@ func (b *GatewayBackend) ListWorkspaces(ctx context.Context, _ Principal) ([]Wor
 	}
 	out := make([]Workspace, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, Workspace{Name: w.Name, Description: "runtime " + w.Runtime, Persistent: w.Persistent, Desktop: w.Desktop})
+		desc := w.Description
+		if desc == "" {
+			desc = "runtime " + w.Runtime
+		}
+		connection := w.Label
+		if connection == "" {
+			connection = w.Name
+		}
+
+		out = append(out, Workspace{ConnectionName: connection, TerminalURL: b.publicBase + "/p/" + w.Name + "/", Name: w.Name, Label: w.Label, Description: desc, Persistent: w.Persistent, Desktop: w.Desktop, IdleSeconds: w.IdleSeconds})
 	}
 	return out, nil
 }
@@ -166,7 +163,8 @@ func (b *GatewayBackend) GetNetworkPolicy(ctx context.Context, _ Principal) (jso
 
 func (b *GatewayBackend) session(s gwSession, userID string) Session {
 	out := Session{
-		ID:              s.ID,
+		ID:        s.ID,
+		StartedAt: s.StartedAt, LastActivity: s.LastActivity, IdleExpiresAt: s.IdleExpiresAt, IdleSeconds: s.IdleSeconds,
 		Workspace:       s.Workspace,
 		UserID:          userID,
 		Persistent:      s.Persistent,
@@ -174,12 +172,8 @@ func (b *GatewayBackend) session(s gwSession, userID string) Session {
 		TerminalURL:     b.publicBase + s.TerminalPath,
 		TerminalSession: s.TerminalSession,
 	}
-	if b.fwdBase != "" {
-		out.ForwardURL = b.fwdBase + "/" + s.ID + "/"
-	}
-	if s.StreamPath != "" {
-		out.StreamURL = b.streamBase + s.StreamPath
-	}
+	out.Desktop = s.Desktop
+
 	return out
 }
 

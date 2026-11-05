@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+Actions=terminal;
+X-KDE-Priority=TopLevel
+
+[Desktop Action terminal]
+Name=Open Terminal Here
+Icon=utilities-terminal
+Exec=xfce4-terminal --working-directory %f

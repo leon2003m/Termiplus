@@ -5,20 +5,10 @@
 #   test/integration/oidc/desktop.sh
 #   BUILD=0 ECHO_IMAGE=ghcr.io/leon2003m/termiplus-terminal:it test/integration/oidc/desktop.sh
 #
-# Starts a throwaway Keycloak (realm.json), desk-auth (console) and
-# desk-stream-auth (desktops) exactly as the overlay configures them (image
-# and flags read from the overlay; only --cookie-secure is adapted to
-# plain-HTTP localhost) and, in place of the gateway, an echo server (echo.py,
-# run with the terminal image's Python), plus the real mcp image (stub
-# backend) serving the management UI and the desktop stream proxy on two
-# listeners. It logs in like a browser and checks that only signed-in
-# browsers reach the stream path and the UI, that each origin serves only its
-# own part (the console never the desktops, the desktops never the console),
-# that nothing else is reachable, that a desktop request reaches the gateway's
-# control API as the linked Open WebUI user with no credentials or tokens of
-# the browser, that WebSockets pass only from the desktops' own origin, and
-# that the UI acts as the Open WebUI user linked to the signed-in subject.
-# Everything it creates is named tp-dskauth-it-* and removed on exit.
+# Starts isolated Keycloak, the real console/share oauth2-proxies and MCP,
+# plus a gateway image fixture. Tests browser sign-in, CSRF, identity binding,
+# origin separation and read-only expiring screen links. Native interactive
+# Desktop/Browser protocols are covered by the separate image smoke test.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -55,7 +45,7 @@ PUBLIC="http://127.0.0.1:$PORT"   # console (desk-auth)
 SPUBLIC="http://127.0.0.1:$SPORT" # desktops (desk-stream-auth), another origin
 
 cfg="$(cd "$ROOT/deploy" && MCP_OIDC_ISSUER_URL="$ISSUER" DESKTOP_PUBLIC_URL="$PUBLIC" DESKTOP_STREAM_URL="$SPUBLIC" \
-  FORWARD_PUBLIC_URL=http://127.0.0.1:1 TERMINAL_IMAGE=unused DOCKER_GID=0 \
+  TERMINAL_IMAGE=unused DOCKER_GID=0 \
   docker compose -p "$P" -f docker-compose.yml -f docker-compose.mcp.yml -f docker-compose.desktop.yml \
   config --format json)"
 PROXY_IMAGE="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["desk-auth"]["image"])' <<<"$cfg")"
@@ -70,7 +60,7 @@ mapfile -t PROXY_ARGS < <(proxy_args desk-auth)
 mapfile -t SPROXY_ARGS < <(proxy_args desk-stream-auth)
 ups() { printf '%s\n' "$@" | grep -- '^--upstream=' | sort | tr '\n' ' '; }
 [ "$(ups "${PROXY_ARGS[@]}")" = "--upstream=http://mcp:8091/ui/ " ] || { echo "desk-auth upstreams changed; update this test"; exit 1; }
-[ "$(ups "${SPROXY_ARGS[@]}")" = "--upstream=http://mcp:8093/share/ --upstream=http://mcp:8093/stream/ " ] ||
+[ "$(ups "${SPROXY_ARGS[@]}")" = "--upstream=http://mcp:8093/share/ " ] ||
   { echo "desk-stream-auth upstreams changed; update this test"; exit 1; }
 
 printf 'desk-secret-it' >"$WORK/client_secret"
@@ -107,10 +97,10 @@ SUB_A="$(curl -s -m 10 -d grant_type=password -d client_id=termiplus-desktop -d 
 mkdir "$WORK/data"
 printf '{"subjects":{"%s":"owui-alice"}}\n' "$SUB_A" >"$WORK/data/identities.json"
 printf '{"default":"allow","workspaces":{}}\n' >"$WORK/data/entitlements.json"
-chmod 755 "$WORK/data"
+chmod 777 "$WORK/data"
 chmod 644 "$WORK/data/identities.json" "$WORK/data/entitlements.json"
 docker run -d --name "$P-mcp" --network "$P-desk" --network-alias mcp \
-  --read-only --cap-drop ALL --security-opt no-new-privileges:true -v "$WORK/data:/data:ro" \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true -v "$WORK/data:/data" \
   -e MCP_AUTH=proxy -e MCP_STUB_BACKEND=1 -e MCP_IDENTITY_FILE=/data/identities.json -e UI_LISTEN_ADDR=:8091 \
   -e MCP_ENTITLEMENTS_FILE=/data/entitlements.json -e MCP_OWUI_PLUGIN_KEY=plugin-key-it-0123456789abcdef0123456789 \
   -e STREAM_LISTEN_ADDR=:8093 -e CONSOLE_PUBLIC_URL="$PUBLIC" -e STREAM_PUBLIC_URL="$SPUBLIC" \
@@ -143,7 +133,7 @@ done
 browser() { curl -s -m 10 --connect-to "keycloak:8080:127.0.0.1:$KCPORT" "$@"; }
 
 login() { # jar user password [url cookie] -> 0 when the session cookie was obtained
-  local jar="$1" url="${4:-$SPUBLIC/stream/x/}" cookie="${5:-_termiplus_dstream}" form action
+  local jar="$1" url="${4:-$SPUBLIC/share/invalid/}" cookie="${5:-_termiplus_dstream}" form action
   form="$(browser -L -c "$jar" -b "$jar" "$url")"
   action="$(python3 -c '
 import html, re, sys
@@ -156,15 +146,15 @@ print(html.unescape(m.group(1)) if m else "")' <<<"$form")"
 }
 
 # Not signed in: no request reaches the gateway.
-code="$(browser -o /dev/null -w '%{http_code}' "$SPUBLIC/stream/x/")"
-loc="$(browser -o /dev/null -w '%{redirect_url}' "$SPUBLIC/stream/x/")"
+code="$(browser -o /dev/null -w '%{http_code}' "$SPUBLIC/share/invalid/")"
+loc="$(browser -o /dev/null -w '%{redirect_url}' "$SPUBLIC/share/invalid/")"
 check "not signed in: redirected to the IdP, not proxied" "$([[ "$code" = 302 && "$loc" == http://keycloak:8080/realms/termiplus/* ]] && echo 0 || echo 1)" "$code $loc"
-code="$(browser -o /dev/null -w '%{http_code}' -u user:pw "$SPUBLIC/stream/x/")"
+code="$(browser -o /dev/null -w '%{http_code}' -u user:pw "$SPUBLIC/share/invalid/")"
 check "basic auth alone does not pass the proxy" "$([ "$code" = 302 ] && echo 0 || echo 1)" "$code"
 TOKEN="$(browser -d grant_type=password -d client_id=termiplus-desktop -d client_secret=desk-secret-it \
   -d username=alice -d password=alice-pw "http://keycloak:8080/realms/termiplus/protocol/openid-connect/token" |
   python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
-code="$(browser -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$SPUBLIC/stream/x/")"
+code="$(browser -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$SPUBLIC/share/invalid/")"
 check "a bearer token does not replace the browser sign-in" "$([ "$code" = 302 ] && echo 0 || echo 1)" "$code"
 
 JAR="$WORK/jar"
@@ -176,38 +166,14 @@ for path in /stream/ot-u-1-desk/ /share/x/; do
   out="$(browser -b "$JARC" -w ' %{http_code}' "$PUBLIC$path")"
   check "console origin: $path is not proxied" "$([[ "$out" != *'"path"'* && "${out##* }" = 404 ]] && echo 0 || echo 1)" "$out"
 done
-out="$(browser -b "$JAR" -w ' %{http_code}' "$SPUBLIC/stream/ot-u-1-desk/sw.js" -H 'Service-Worker: script')"
-check "desktops origin: service worker scripts are refused" "$([[ "$out" != *'"path"'* && "${out##* }" = 403 ]] && echo 0 || echo 1)" "$out"
-
-seen="$(browser -b "$JAR" -u user:kasm-pw -H "Cookie: other=1" "$SPUBLIC/stream/ot-u-1-desk/websockify?x=1")"
-py() { python3 -c "import json,sys; d=json.loads(sys.argv[1]); print($1)" "$seen"; }
-check "signed in: request reaches the gateway's control stream path" "$([ "$(py 'd["path"]')" = "/control/v1/stream/ot-u-1-desk/websockify?x=1" ] && echo 0 || echo 1)" "$seen"
-check "the gateway is called as the linked Open WebUI user, with the control key" \
-  "$([ "$(py 'd["headers"].get("x-user-id","") + " " + d["headers"].get("x-control-key","")')" = "owui-alice control-key-it-0123456789abcdef0123456789" ] && echo 0 || echo 1)" "$seen"
-check "the browser's basic auth and cookies are not passed on" \
-  "$([ "$(py 'd["headers"].get("authorization","") + d["headers"].get("cookie","")')" = "" ] && echo 0 || echo 1)" "$seen"
-check "no access token or id token is forwarded" \
-  "$([ "$(py '",".join(k for k in d["headers"] if "token" in k or k.startswith("x-auth-request") or k.startswith("x-forwarded-"))')" = "" ] && echo 0 || echo 1)" "$seen"
-
-for path in /control/v1/workspaces /p/default/openapi.json /admin/v1/policy /healthz / /ui/ /ui/api/sessions; do
+out="$(browser -b "$JAR" -w ' %{http_code}' "$SPUBLIC/share/invalid/sw.js" -H 'Service-Worker: script')"
+check "share origin: service workers are refused" "$([[ "$out" == *" 403" ]] && echo 0 || echo 1)" "$out"
+for path in /stream/ot-u-1-desk/ /control/v1/workspaces /p/default/openapi.json /admin/v1/policy /healthz / /ui/ /ui/api/sessions; do
   out="$(browser -b "$JAR" -w ' %{http_code}' "$SPUBLIC$path")"
-  check "signed in: $path is not proxied" "$([[ "$out" != *'"path"'* && "${out##* }" = 404 ]] && echo 0 || echo 1)" "$out"
+  check "share origin: $path is not proxied" "$([[ "$out" != *'\"path\"'* && "$out" == *" 404" ]] && echo 0 || echo 1)" "$out"
 done
 
-ws="$(browser -b "$JAR" -u user:kasm-pw -i -o - -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $SPUBLIC" \
-  "$SPUBLIC/stream/ot-u-1-desk/websockify" | head -1 | tr -d '\r' || true)"
-check "WebSocket upgrade passes for a signed-in browser" "$([[ "$ws" == *" 101 "* ]] && echo 0 || echo 1)" "$ws"
-ws="$(browser -i -o - -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
-  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $SPUBLIC" -u user:kasm-pw \
-  "$SPUBLIC/stream/ot-u-1-desk/websockify" | head -1 | tr -d '\r' || true)"
-check "WebSocket upgrade without sign-in is refused" "$([[ "$ws" != *" 101 "* ]] && echo 0 || echo 1)" "$ws"
-ws="$(browser -b "$JAR" -i -o - -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
-  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: https://evil.example" \
-  "$SPUBLIC/stream/ot-u-1-desk/websockify" | head -1 | tr -d '\r' || true)"
-check "cross-origin WebSocket upgrade is refused" "$([[ "$ws" == *" 403 "* ]] && echo 0 || echo 1)" "$ws"
-
-for c in "$PUBLIC/oauth2/start?rd=/ui/ _termiplus_desk" "$SPUBLIC/oauth2/start?rd=/stream/x/ _termiplus_dstream"; do
+for c in "$PUBLIC/oauth2/start?rd=/ui/ _termiplus_desk" "$SPUBLIC/oauth2/start?rd=/share/invalid/ _termiplus_dstream"; do
   cookie="$(curl -s -o /dev/null -D - "${c% *}" | grep -i "^set-cookie: ${c#* }" | tr -d '\r')"
   check "${c#* } cookies are HttpOnly and SameSite=Lax" "$([[ "$cookie" == *HttpOnly* && "$cookie" == *SameSite=Lax* ]] && echo 0 || echo 1)" "$cookie"
 done
@@ -250,8 +216,27 @@ out="$(ui "$JARB" GET api/me)"
 check "UI: bob (never used the plugin) is not linked" "$([[ "$out" == *'"linked":false'* ]] && echo 0 || echo 1)" "$out"
 out="$(ui "$JARB" GET api/sessions "" -H "X-Forwarded-User: $SUB_A")"
 check "UI: a forged X-Forwarded-User does not make bob alice" "$(endswith "$out" 409)" "$out"
-out="$(browser -b "$JARBS" -w ' %{http_code}' "$SPUBLIC/stream/ot-u-1-desk/")"
-check "stream: unlinked bob does not reach the gateway" "$([[ "$out" != *'"path"'* && "$out" == *" 403" ]] && echo 0 || echo 1)" "$out"
+# Owner creates a named share through the human console. The token does not
+# grant input or override its recipient identity.
+sid="$(python3 -c 'import json,sys; print(next(x["session_id"] for x in json.loads(sys.argv[1].rsplit(" ",1)[0]) if x.get("desktop")))' "$sessions")"
+shared="$(write "$JARC" POST api/shares "{\"session_id\":\"$sid\",\"minutes\":10}")"
+share_url="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1].rsplit(" ",1)[0])["url"])' "$shared")"
+share_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1].rsplit(" ",1)[0])["share_id"])' "$shared")"
+out="$(browser -b "$JAR" -w ' %{http_code}' "$share_url")"
+check "signed-in recipient sees the image-only viewer" "$([[ "$out" == *"view only"* && "$out" == *" 200" ]] && echo 0 || echo 1)" "$out"
+code="$(browser -b "$JAR" -o /dev/null -w '%{http_code}' "${share_url}screen.png")"
+check "native screenshot is relayed as PNG" "$([ "$code" = 200 ] && echo 0 || echo 1)" "$code"
+for suffix in clipboard desktop/action websockify; do
+  code="$(browser -b "$JAR" -o /dev/null -w '%{http_code}' "${share_url}$suffix")"
+  check "share cannot access $suffix" "$([ "$code" = 404 ] && echo 0 || echo 1)" "$code"
+done
+code="$(browser -b "$JAR" -X POST -o /dev/null -w '%{http_code}' "${share_url}screen.png")"
+check "share cannot send input" "$([ "$code" = 403 ] && echo 0 || echo 1)" "$code"
+ws="$(browser -b "$JAR" -i -o - -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$share_url" | head -1 | tr -d '\r' || true)"
+check "share cannot open a WebSocket" "$([[ "$ws" == *" 403 "* ]] && echo 0 || echo 1)" "$ws"
+write "$JARC" DELETE "api/shares/$share_id" >/dev/null
+code="$(browser -b "$JAR" -o /dev/null -w '%{http_code}' "${share_url}screen.png")"
+check "revocation prevents subsequent images" "$([ "$code" = 404 ] && echo 0 || echo 1)" "$code"
 
 nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$P-gw")"
 check "the gateway sits only on the internal network shared with the MCP server" "$([ "$nets" = "$P-gwnet " ] && echo 0 || echo 1)" "$nets"

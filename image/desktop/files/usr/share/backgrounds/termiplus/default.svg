@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <!-- termiplus default wallpaper: a cat watching the moon. Original work, same license as termiplus. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2d5c"/>
+      <stop offset="0.55" stop-color="#7b6fb0"/>
+      <stop offset="1" stop-color="#f4b6c2"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff6d8" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#fff6d8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hillBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fa8d8"/>
+      <stop offset="1" stop-color="#6f86c0"/>
+    </linearGradient>
+    <linearGradient id="hillMid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5d6fae"/>
+      <stop offset="1" stop-color="#4a5893"/>
+    </linearGradient>
+    <linearGradient id="hillFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#383f74"/>
+      <stop offset="1" stop-color="#2a2f5a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)"/>
+  <!-- stars -->
+  <g fill="#fffbe9">
+    <circle cx="180" cy="120" r="2.5"/><circle cx="320" cy="260" r="1.8"/><circle cx="460" cy="90" r="2.2"/>
+    <circle cx="610" cy="200" r="1.6"/><circle cx="760" cy="70" r="2.4"/><circle cx="900" cy="170" r="1.7"/>
+    <circle cx="1080" cy="60" r="2"/><circle cx="1210" cy="230" r="1.6"/><circle cx="1720" cy="110" r="2.3"/>
+    <circle cx="1820" cy="260" r="1.8"/><circle cx="90" cy="330" r="1.6"/><circle cx="1000" cy="300" r="1.4"/>
+    <circle cx="700" cy="350" r="1.3"/><circle cx="1650" cy="350" r="1.5"/>
+  </g>
+  <g fill="#fffbe9" opacity="0.9">
+    <path d="M260 180l5 13 13 5-13 5-5 13-5-13-13-5 13-5z"/>
+    <path d="M1120 140l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/>
+    <path d="M1780 190l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/>
+  </g>
+  <!-- moon -->
+  <circle cx="1440" cy="250" r="240" fill="url(#glow)"/>
+  <circle cx="1440" cy="250" r="96" fill="#fff4d6"/>
+  <circle cx="1410" cy="225" r="14" fill="#f3e3bb"/>
+  <circle cx="1470" cy="285" r="10" fill="#f3e3bb"/>
+  <circle cx="1465" cy="215" r="7" fill="#f3e3bb"/>
+  <!-- clouds -->
+  <g fill="#ffffff" opacity="0.35">
+    <path transform="translate(300 -30)" d="M220 470c0-28 26-48 56-42 10-30 52-40 76-16 26-12 58 4 60 32 26 2 40 34 20 50H236c-12-4-16-14-16-24z"/>
+    <path d="M1240 420c0-22 20-38 44-34 8-24 42-32 60-12 20-10 46 4 48 26 20 2 32 26 16 40h-152c-10-4-16-12-16-20z"/>
+  </g>
+  <!-- hills -->
+  <path d="M0 760C260 660 520 650 780 700s520 40 760-20 300-40 380-30V1080H0z" fill="url(#hillBack)"/>
+  <path d="M0 860C300 760 600 780 900 830s600 10 1020-90V1080H0z" fill="url(#hillMid)"/>
+  <path d="M0 960c360-90 760-120 1140-60 300 46 560 20 780-30V1080H0z" fill="url(#hillFront)"/>
+  <!-- cat on the hill, looking at the moon -->
+  <g transform="translate(1150 912)" fill="#1e2148">
+    <path d="M-48 2C-62-46-44-96-8-106c34-8 58 22 60 62 2 24-2 42-8 46z"/>
+    <ellipse cx="10" cy="-128" rx="38" ry="33"/>
+    <path d="M-20-150l-8-38 30 22zM34-154l14-36 4 38z"/>
+    <path d="M40-2c48 2 64-34 46-58-6-8-16-4-12 4 12 18 2 38-34 36z"/>
+  </g>
+  <!-- tiny flowers -->
+  <g fill="#f7c6d9">
+    <circle cx="300" cy="985" r="5"/><circle cx="318" cy="992" r="4"/><circle cx="560" cy="972" r="5"/>
+    <circle cx="840" cy="960" r="4"/><circle cx="1520" cy="958" r="5"/><circle cx="1680" cy="966" r="4"/>
+  </g>
+</svg>

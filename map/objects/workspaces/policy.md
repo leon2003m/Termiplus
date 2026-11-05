@@ -3,7 +3,7 @@ type: object
 cluster: workspaces
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/gateway/lifecycle.go
 ---
 
@@ -13,7 +13,7 @@ One kind of terminal environment, reached at `/p/<name>/`. The MCP tools, the pl
 
 ## Why this shape
 
-Open WebUI only knows "a terminal connection with a URL". Putting runtime, limits, storage mode and image behind a URL prefix lets an admin offer several terminals (gVisor, sysbox, desktop, ephemeral scratch) with no change in Open WebUI beyond adding a connection. Every field ends up in the container's config hash, so editing a policy recreates its containers on their next request.
+Open WebUI only knows "a terminal connection with a URL". Putting runtime, limits, storage mode and image behind a URL prefix lets an admin offer several terminals (gVisor, sysbox, desktop, ephemeral scratch) with no change in Open WebUI beyond adding a connection. Every field except `label` and `description` ends up in the container's config hash, so editing a policy recreates its containers on their next request.
 
 ## Shape
 
@@ -21,11 +21,13 @@ Open WebUI only knows "a terminal connection with a URL". Putting runtime, limit
 - `storage`: `persistent` (default: one container per user plus a home volume) | `ephemeral` (one container per chat, no volume, deleted when idle)
 - `home`: groups policies that share one home volume (default: the policy name; ignored for ephemeral)
 - `idle_timeout`, `max_per_user` (ephemeral cap, default 3; the least recently used idle sandbox is evicted)
-- `desktop`: KasmVNC XFCE next to Open Terminal (needs the desktop image)
+- `desktop`: native Open Terminal Desktop/Browser with XFCE (needs the desktop image)
+- `label`, `description`: display name and one-line help shown by the console and `list_workspaces` (at most 60 and 300 bytes, printable, checked at start). Not hashed.
 - `image`: another image built on the terminal image. It must be in the sockproxy's `EXTRA_IMAGES`.
+- `egress`: `internet` (default) | `offline`. Offline terminals join `OFFLINE_NETWORK` (ot-offline, internal-only) with no resolver; without that network the gateway refuses to start. A container found on the wrong network is recreated (`manager.networkFor`, adoption check in `ensure`).
 - Name: `[a-z0-9]{1,24}` (`naming.go:31-44`)
 
-Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lifecycle.go:154-158` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
+Citations: `internal/gateway/lifecycle.go:23-60` (Policy), `internal/gateway/lifecycle.go:194-201` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
 
 ## Connected to
 
@@ -36,7 +38,7 @@ Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lif
 
 ## If you change this
 
-- **Hits:** the config hash, so every container of that policy is recreated; sockproxy limits (a policy above `MAX_MEMORY` and the like is refused at create); Open WebUI connection URLs (outside the repo); entitlements keyed by the name
+- **Hits:** `egress` also picks the network (sockproxy `OfflineNetwork`, firewall offline rules); (except for `label`/`description`) the config hash, so every container of that policy is recreated; sockproxy limits (a policy above `MAX_MEMORY` and the like is refused at create); Open WebUI connection URLs (outside the repo); entitlements keyed by the name
 - **Does not hit:** home contents (renaming `home` points at a *different* volume, the old one stays)
 
 ## Surfaces
@@ -51,3 +53,15 @@ Citations: `internal/gateway/lifecycle.go:20-56` (Policy), `internal/gateway/lif
 
 - Source: `internal/gateway/lifecycle.go`, `deploy/policies.json`
 - The live host keeps a local uncommitted edit of `deploy/policies.json`; see [effects](../../effects/CONTEXT.md).
+
+## Native integration update (2026-11-04)
+
+Desktop now enables native OPEN_TERMINAL_ENABLE_DESKTOP and OPEN_TERMINAL_ENABLE_BROWSER. Plain policies explicitly disable both. Discovery separates runtime, image, egress and feature flags; no added Docker capability, endpoint, mount or network. Source: internal/gateway/lifecycle.go and gateway.go:specPolicies.
+
+## Desktop defaults (2026-11-04)
+
+`deploy/policies.json` now ships only `default` and `scratch`, both Sysbox with
+desktop/browser enabled. The original `default` home group stays unchanged;
+legacy `desk`/`sysbox` share that home and are retired from the shipped picker.
+Custom policies may still disable capabilities explicitly. Resource limits are
+unchanged from the original default/scratch policies.

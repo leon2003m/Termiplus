@@ -3,58 +3,36 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/server.go
 ---
 
-# MCP tools
+# MCP tools and human dispatcher
 
-The JSON-RPC tools the MCP server offers to chat (via the Open WebUI tool) and to the management console. Each tool has a gate (RBAC), an optional confirmation, a handler, and an audit entry. In code: `mcp.tool`, built in `buildTools`.
+The model-facing JSON-RPC surface is an explicit allowlist in
+`internal/mcp/server.go:modelTool`. It permits workspace/session listing,
+request/destroy/reset lifecycle, snapshot list/create, and expiring desktop
+shares. `listTools` filters discovery; `callTool` independently rejects direct
+calls to every excluded tool, including admin callers with `_confirmed=true`.
 
-## Why this shape
+Snapshot delete/restore are refused at this transport. Model confirmation is
+removed for snapshot creation so it can never request implicit pruning. A full
+backup store returns a capacity error; the human console handles pruning.
 
-An LLM picks the calls, so the server must not trust *it*: every destructive tool needs `"_confirmed": true`, which only the plugin's human modal adds. Admin tools are gated on `termiplus-admin`. Workspace access is re-checked against [Entitlements](../identity/entitlements.md) on every call. The console runs the same `invoke` path, so chat and UI cannot drift apart.
+Network policy, entitlements, user/group, audit and departed management stay in
+the internal dispatcher for human administration/background services. They are
+not model tools. `internal/mcp/ui.go` checks OIDC, roles and CSRF before `invoke`.
+The provider console handles user/group membership. `invoke` retains ownership,
+RBAC, confirmation and audit behavior for all authorized paths.
 
-## Shape
+`GatewayBackend` calls `/control/v1/` using the control key and the linked
+Open WebUI id. Plugin confirmation is normal UX, not cryptographic authorization
+against a client that already holds credentials. Native desktop/browser/files/
+execution are supplied by the selected Open WebUI connection, not these tools.
+MCP provisioning does not automatically attach a chat to a connection.
 
-| Tool | Gate | Confirm | Source |
-|---|---|---|---|
-| `list_workspaces`, `list_sessions` | entitled | no | `server.go:416`, `:454` |
-| `request_session` | entitled; persistent needs `termiplus-persist` | persistent only | `server.go:430` |
-| `destroy_session` | own session | yes | `server.go:468` |
-| `reset_workspace`, `manage_snapshots` | own home | yes | `homes.go:267`, `:293` |
-| `share_desktop` | own desktop session | yes | `shares.go:330` |
-| `get_network_policy`, `get_entitlements`, `get_audit_log`, `manage_group` | admin | no | `server.go:485`, `:495`, `:561`, `:541` |
-| `set_network_policy`, `set_entitlements`, `manage_user`, `manage_departed` | admin | yes | `server.go:524`, `:506`, `:551`, `departed.go:310` |
-
-- Transport: `POST` JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`), body ≤ 1 MiB.
-- `callTool`: authenticate, record the identity binding (fail closed on conflict), then `invoke`.
-- `invoke`: gate (denied → audit "denied"), confirm check, handle, audit "ok" or "error".
-- Backend: `GatewayBackend` calls `/control/v1/` with `X-Control-Key` and `X-User-Id`.
-
-Citations: `internal/mcp/server.go:154-166` (tool), `:231` (ServeHTTP), `:303` (callTool), `:337` (invoke), `:413` (buildTools), `:575` (adminOnly), `internal/mcp/gateway_backend.go:187` (do)
-
-## Connected to
-
-- **owns:** no state of its own
-- **owned-by:** the MCP server (`cmd/mcp`)
-- **joins:** [Principal](../identity/principal.md), [Entitlements](../identity/entitlements.md), [Audit log](audit-log.md), [Share](share.md), [Departed](departed.md), [Directory](../identity/directory.md), the gateway control API
-- **looks-like-but-is-not:** Open Terminal's own API, which Open WebUI reaches through `/p/<policy>/`
-
-## If you change this
-
-- **Hits:** the plugin `integrations/openwebui/termiplus_workspaces.py` (tool names, the confirmation modal), the console `internal/mcp/ui.go` and `internal/mcp/ui/`, `test/integration/alpha-e2e.sh`, `internal/mcp/server_test.go`
-- **Does not hit:** sockproxy, firewall
-
-## Surfaces
-
-| Surface | Role |
-|---|---|
-| Open WebUI tool | calls (through oauth2-proxy) |
-| console (`UI_LISTEN_ADDR`) | calls `invoke` directly |
-| gateway | serves the backend calls |
-
-## See
-
-- Source: `internal/mcp/server.go`
-- Process: [mcp-tool-call](../../processes/mcp-tool-call.md)
+Source: `internal/mcp/server.go:callTool`, `internal/mcp/server.go:invoke`,
+`internal/mcp/homes.go`, `internal/mcp/gateway_backend.go`,
+`integrations/openwebui/termiplus_workspaces.py`,
+`internal/mcp/server_test.go:TestModelCannotInvokeConsoleToolsEvenAsAdmin`.
+See [tool call](../../processes/mcp-tool-call.md) and [Share](share.md).

@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"termiplus/internal/dockerapi"
 	"termiplus/internal/naming"
@@ -54,6 +56,9 @@ type Config struct {
 	// HostConfig.Dns (the internal forwarder). The socket proxy accepts only
 	// this one address. Empty leaves terminals on Docker's embedded resolver.
 	ForwarderDNS string
+	// OfflineNetwork is the Docker internal network (no route out) that
+	// "egress": "offline" policies join. Empty: offline policies are refused.
+	OfflineNetwork string
 	// BackupDir stores snapshots and archived homes (control API). Empty
 	// disables them; downloads of the current home still work.
 	BackupDir string
@@ -123,12 +128,21 @@ func New(cfg Config) (*Gateway, error) {
 			return nil, errors.New("control API key must differ from the connection and admin keys")
 		}
 	}
+	if cfg.OfflineNetwork != "" && cfg.OfflineNetwork == cfg.Network {
+		return nil, errors.New("offline network must differ from the sandbox network")
+	}
 	for name, p := range cfg.Policies {
 		if !naming.PolicyName.MatchString(name) {
 			return nil, fmt.Errorf("invalid policy name %q", name)
 		}
 		if p.Home != "" && !naming.PolicyName.MatchString(p.Home) {
 			return nil, fmt.Errorf("policy %s: invalid home %q", name, p.Home)
+		}
+		if err := checkDisplayText(p.Label, maxPolicyLabel); err != nil {
+			return nil, fmt.Errorf("policy %s: label %w", name, err)
+		}
+		if err := checkDisplayText(p.Description, maxPolicyDescription); err != nil {
+			return nil, fmt.Errorf("policy %s: description %w", name, err)
 		}
 		if p.Runtime == "" || p.MemoryMB <= 0 || p.CPUs <= 0 || p.Pids <= 0 {
 			return nil, fmt.Errorf("policy %s: runtime, memory_mb, cpus and pids are required", name)
@@ -150,6 +164,17 @@ func New(cfg Config) (*Gateway, error) {
 		if p.Image != "" && !imageRef.MatchString(p.Image) {
 			return nil, fmt.Errorf("policy %s: invalid image %q", name, p.Image)
 		}
+		switch p.Egress {
+		case "", egressInternet:
+		case egressOffline:
+			// Fail closed: an offline policy without its network would
+			// otherwise land on the sandbox network with internet access.
+			if cfg.OfflineNetwork == "" {
+				return nil, fmt.Errorf("policy %s: egress %q needs OFFLINE_NETWORK", name, egressOffline)
+			}
+		default:
+			return nil, fmt.Errorf("policy %s: egress must be %q or %q", name, egressInternet, egressOffline)
+		}
 		if p.MaxPerUser < 0 {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
 		}
@@ -168,17 +193,18 @@ func New(cfg Config) (*Gateway, error) {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }
 	}
 	m := &manager{
-		docker:       cfg.Docker,
-		image:        cfg.Image,
-		network:      cfg.Network,
-		port:         cfg.Port,
-		keySecret:    []byte(cfg.KeySecret),
-		startWait:    cfg.StartWait,
-		idle:         cfg.IdleTimeout,
-		maxRunning:   cfg.MaxRunning,
-		policies:     cfg.Policies,
-		addrFor:      cfg.AddrFor,
-		forwarderDNS: cfg.ForwarderDNS,
+		docker:         cfg.Docker,
+		image:          cfg.Image,
+		network:        cfg.Network,
+		port:           cfg.Port,
+		keySecret:      []byte(cfg.KeySecret),
+		startWait:      cfg.StartWait,
+		idle:           cfg.IdleTimeout,
+		maxRunning:     cfg.MaxRunning,
+		policies:       cfg.Policies,
+		addrFor:        cfg.AddrFor,
+		forwarderDNS:   cfg.ForwarderDNS,
+		offlineNetwork: cfg.OfflineNetwork,
 		exportLimits: exportLimits{
 			timeout:  cfg.ExportTimeout,
 			maxBytes: cfg.ExportMaxBytes,
@@ -198,12 +224,9 @@ func New(cfg Config) (*Gateway, error) {
 	return g, nil
 }
 
-// specPolicies picks, for each runtime, one policy whose container answers the
-// user-less spec requests of every policy with that runtime. Without this each
-// policy started its own full terminal container just for three read-only
-// GETs. Spec answers are shared per runtime, not globally, because /system
-// describes the kernel, which differs between gVisor and Sysbox. Preference:
-// "default", then persistent policies, then by name.
+// specPolicies shares discovery only across equal runtime, image, egress and
+// desktop/browser feature flags. Otherwise discovery could advertise another
+// policy's capabilities. Prefer default, then persistent policies, then name.
 func specPolicies(policies map[string]Policy) map[string]string {
 	rank := func(name string) string {
 		switch {
@@ -214,15 +237,20 @@ func specPolicies(policies map[string]Policy) map[string]string {
 		}
 		return "2" + name
 	}
-	best := map[string]string{} // runtime -> policy name
+	type specKey struct {
+		runtime, image, network string
+		desktop                 bool
+	}
+	key := func(p Policy) specKey { return specKey{p.Runtime, p.Image, p.Egress, p.Desktop} }
+	best := map[specKey]string{}
 	for name, p := range policies {
-		if cur, ok := best[p.Runtime]; !ok || rank(name) < rank(cur) {
-			best[p.Runtime] = name
+		if cur, ok := best[key(p)]; !ok || rank(name) < rank(cur) {
+			best[key(p)] = name
 		}
 	}
 	out := make(map[string]string, len(policies))
 	for name, p := range policies {
-		out[name] = best[p.Runtime]
+		out[name] = best[key(p)]
 	}
 	return out
 }
@@ -376,6 +404,15 @@ func (g *Gateway) proxyHTTP(w http.ResponseWriter, r *http.Request, inst *instan
 			pr.Out.Header.Set("Authorization", "Bearer "+inst.key)
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del("X-Proxy-Token")
+			if r.Method == http.MethodGet && rest == "/openapi.json" {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
+		},
+		ModifyResponse: func(response *http.Response) error {
+			if r.Method == http.MethodGet && rest == "/openapi.json" {
+				return describeDesktopActions(response)
+			}
+			return nil
 		},
 		FlushInterval: -1, // stream command output immediately
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -416,4 +453,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func httpError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"detail": msg})
+}
+
+// Limits for a policy's display texts (bytes).
+const (
+	maxPolicyLabel       = 60
+	maxPolicyDescription = 300
+)
+
+// checkDisplayText accepts short, printable UTF-8 text for the console.
+func checkDisplayText(s string, limit int) error {
+	if len(s) > limit {
+		return fmt.Errorf("must be at most %d bytes", limit)
+	}
+	if !utf8.ValidString(s) {
+		return errors.New("must be valid UTF-8")
+	}
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return errors.New("must not contain control characters")
+		}
+	}
+	return nil
 }

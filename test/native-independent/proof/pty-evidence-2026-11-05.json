@@ -1,0 +1,20 @@
+{
+ "route": "documented ws_terminal",
+ "handshake": "HTTP/1.1 101 Switching Protocols",
+ "events": [
+  {
+   "op": 2,
+   "len": 72
+  }
+ ],
+ "terminal_session_created": true,
+ "send_user_terminal_input": {
+  "status": 200,
+  "body": "{\"status\":\"ok\"}"
+ },
+ "read_user_terminal": {
+  "status": 200,
+  "contains_marker": true,
+  "bytes": 293
+ }
+}

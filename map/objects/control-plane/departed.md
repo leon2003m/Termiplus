@@ -3,7 +3,7 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/departed.go
 ---
 
@@ -47,3 +47,7 @@ Citations: `internal/mcp/departed.go:16-24` (doc), `:26` (DepartedEntry), `:37` 
 
 - Source: `internal/mcp/departed.go`
 - Process: [user-departure](../../processes/user-departure.md)
+
+## Native integration update (2026-11-04)
+
+manage_departed is excluded from model calls, including admins. The watcher remains; human console API /ui/api/admin/departed uses invoke with admin/CSRF checks. Source: internal/mcp/ui.go and server.go:modelTool.

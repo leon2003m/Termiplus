@@ -58,7 +58,7 @@ func fakeTerminal(t *testing.T, apiKey string) *httptest.Server {
 		}
 		_, _ = io.WriteString(w, `{"openapi":"3.1.0"}`)
 	})
-	mux.HandleFunc("/api/terminals/", func(w http.ResponseWriter, r *http.Request) {
+	wsHandler := func(w http.ResponseWriter, r *http.Request) {
 		conn, brw, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			return
@@ -85,7 +85,11 @@ func fakeTerminal(t *testing.T, apiKey string) *httptest.Server {
 			out := []byte(r.Header.Get("X-User-Id") + ":" + string(data))
 			conn.Write(append([]byte{0x82, byte(len(out))}, out...))
 		}
-	})
+	}
+	for _, path := range []string{"/api/terminals/", "/desktop/stream", "/desktop/audio", "/events", "/execute", "/execute/proc/status"} {
+		mux.HandleFunc(path, wsHandler)
+	}
+
 	return httptest.NewServer(mux)
 }
 
@@ -122,6 +126,7 @@ type fakeDocker struct {
 	image   string                       // ID testImage currently points to; "" = no such image
 	files   map[string]map[string]string // volume -> path below the home -> content
 	tarPuts []string                     // entry names of extracted tars, as received
+	fail    map[string]int               // "METHOD /path" (container by name) -> requests to answer with 500
 }
 
 // mountedVolume returns the volume a fake container mounts, or "".
@@ -186,12 +191,41 @@ type fakeCtr struct {
 	image   string // image ID at create time
 	running bool
 	srv     *httptest.Server
+	// extraNets are networks attached after create (docker network connect).
+	extraNets []string
+}
+
+// networks is what inspect reports in NetworkSettings.Networks.
+func (c *fakeCtr) networks() map[string]any {
+	out := map[string]any{}
+	if hc, ok := c.body["HostConfig"].(map[string]any); ok {
+		if nm, _ := hc["NetworkMode"].(string); nm != "" {
+			out[nm] = map[string]any{}
+		}
+	}
+	for _, n := range c.extraNets {
+		out[n] = map[string]any{}
+	}
+	return out
 }
 
 func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	p := r.URL.Path
+	k := r.Method + " " + p
+	if rest, ok := strings.CutPrefix(p, "/containers/"); ok { // the proxy sends IDs; key by name
+		id, tail, _ := strings.Cut(rest, "/")
+		if c := d.find(id); c != nil {
+			k = r.Method + " /containers/" + c.name + strings.TrimSuffix("/"+tail, "/")
+		}
+	}
+	if d.fail[k] > 0 {
+		d.fail[k]--
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"message":"injected failure"}`)
+		return
+	}
 	switch {
 	case p == "/volumes/create":
 		var v map[string]any
@@ -274,8 +308,10 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 2 && parts[1] == "json":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id": c.id, "Name": "/" + c.name, "Image": c.image,
-				"State":  map[string]any{"Running": c.running},
-				"Config": map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"State":           map[string]any{"Running": c.running},
+				"Config":          map[string]any{"Image": c.body["Image"], "Labels": c.body["Labels"]},
+				"HostConfig":      c.body["HostConfig"],
+				"NetworkSettings": map[string]any{"Networks": c.networks()},
 			})
 		case len(parts) == 2 && parts[1] == "archive":
 			d.archive(w, r, c)
@@ -380,7 +416,7 @@ func newHarness(t *testing.T, opts ...func(*harnessOpts)) *harness {
 		Policies: map[string]Policy{
 			"default": {Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256},
 			"sysbox":  {Runtime: "sysbox-runc", MemoryMB: 2048, CPUs: 2, Pids: 512, Home: "default"},
-			"scratch": {Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256, Storage: "ephemeral", IdleTimeout: "10m", MaxPerUser: 2},
+			"scratch": {Label: "Temporary terminal", Description: "Deleted when idle.", Runtime: "runsc", MemoryMB: 1024, CPUs: 1, Pids: 256, Storage: "ephemeral", IdleTimeout: "10m", MaxPerUser: 2},
 		},
 		StartWait: 5 * time.Second, IdleTimeout: time.Hour, MaxRunning: 3,
 		Docker: dockerapi.New(proxy.URL, "proxy-token"),
@@ -1010,6 +1046,28 @@ func TestPolicyImageValidated(t *testing.T) {
 	}
 }
 
+func TestPolicyDisplayTextValidated(t *testing.T) {
+	for _, p := range []Policy{
+		{Label: strings.Repeat("x", maxPolicyLabel+1)},
+		{Description: strings.Repeat("x", maxPolicyDescription+1)},
+		{Label: "two\nlines"},
+		{Description: "bell\a"},
+		{Label: "bad \xff utf8"},
+	} {
+		p.Runtime, p.MemoryMB, p.CPUs, p.Pids = "runsc", 1, 1, 1
+		cfg := Config{APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Policies: map[string]Policy{"default": p}}
+		if _, err := New(cfg); err == nil {
+			t.Fatalf("display text accepted: %+v", p)
+		}
+	}
+	cfg := Config{APIKey: testAPIKey, KeySecret: testKeySecret, Image: testImage, Policies: map[string]Policy{
+		"default": {Label: "Temporäres Terminal", Description: "Wird nach 15 Minuten gelöscht.", Runtime: "runsc", MemoryMB: 1, CPUs: 1, Pids: 1},
+	}}
+	if _, err := New(cfg); err != nil {
+		t.Fatalf("valid display text rejected: %v", err)
+	}
+}
+
 // Policies without their own image must hash exactly as before the field
 // existed, or every existing workspace would be recreated on upgrade.
 func TestConfigHashUnchangedWithoutImage(t *testing.T) {
@@ -1026,6 +1084,11 @@ func TestConfigHashUnchangedWithoutImage(t *testing.T) {
 	sum := sha256.Sum256(b)
 	if got, want := m.configHash(pol, "default"), hex.EncodeToString(sum[:8]); got != want {
 		t.Fatalf("hash changed: %s != %s", got, want)
+	}
+	labelled := pol
+	labelled.Label, labelled.Description = "Terminal", "Your own terminal."
+	if got, want := m.configHash(labelled, "default"), hex.EncodeToString(sum[:8]); got != want {
+		t.Fatalf("label or description changed the hash: %s != %s", got, want)
 	}
 	pol.Image = "registry.local/ot-python:1"
 	if m.configHash(pol, "default") == hex.EncodeToString(sum[:8]) {

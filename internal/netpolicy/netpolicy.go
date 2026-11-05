@@ -57,6 +57,7 @@ var denyList = mustPrefixes(
 	"fe80::/10",      // link-local v6
 	"100.64.0.0/10",  // CGNAT / tailnet range
 	"172.30.0.0/24",  // the sandbox subnet itself (other terminals, gateway, forwarder, host bridge)
+	"172.30.1.0/24",  // the offline subnet (offline terminals, gateway, host bridge)
 )
 
 // Validated is a policy that passed Validate: every value is well-formed and

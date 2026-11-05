@@ -29,7 +29,7 @@ func NewStubBackend(gatewayBase string) *StubBackend {
 		gatewayBase: gatewayBase,
 		workspaces: []Workspace{
 			{Name: "default", Description: "ephemeral shell", Persistent: false},
-			{Name: "desk", Description: "persistent workspace", Persistent: true},
+			{Name: "desk", Description: "persistent native desktop", Persistent: true, Desktop: true},
 		},
 		sessions: map[string]Session{},
 	}
@@ -67,6 +67,7 @@ func (b *StubBackend) RequestSession(_ context.Context, p Principal, workspace s
 		Persistent:  persistent,
 		Label:       label,
 		Running:     true,
+		Desktop:     ws.Desktop,
 		TerminalURL: fmt.Sprintf("%s/p/%s/", b.gatewayBase, workspace),
 	}
 	b.mu.Lock()

@@ -1,4 +1,4 @@
-"""Stand-in for the gateway's control stream path in desktop.sh: answers every
+"""Stand-in for the gateway's control screen path in desktop.sh: answers every
 request with what reached it (path and headers) and accepts WebSocket
 upgrades. Standard library only."""
 
@@ -10,6 +10,13 @@ import json
 
 class Echo(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith("/control/v1/screen/"):
+            body = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         seen = {"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}}
         if self.headers.get("Upgrade", "").lower() == "websocket":
             key = self.headers.get("Sec-WebSocket-Key", "")

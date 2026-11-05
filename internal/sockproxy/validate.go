@@ -20,10 +20,15 @@ type Rules struct {
 	// per policy that names its own "image"). Image is always allowed.
 	ExtraImages []string
 	Runtimes    map[string]bool // allowed OCI runtimes, e.g. runsc, sysbox-runc
-	Network     string          // the only network terminals may join
-	MaxMemory   int64           // bytes
-	MaxNanoCPUs int64
-	MaxPids     int64
+	Network     string          // the network terminals join by default
+	// OfflineNetwork, when set, is the one other network a terminal may join:
+	// the internal-only network for policies with "egress": "offline". It
+	// has no route out, so a terminal on it is never pinned to a resolver
+	// (Dns is refused there). Empty: only Network is allowed, as before.
+	OfflineNetwork string
+	MaxMemory      int64 // bytes
+	MaxNanoCPUs    int64
+	MaxPids        int64
 	// AllowedDNS is the single resolver address a terminal may be pinned to
 	// (the internal forwarder). Empty means HostConfig.Dns is refused, as
 	// before. Any other value, more than one entry, DnsSearch or DnsOptions
@@ -151,7 +156,8 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 	if !r.Runtimes[hc.Runtime] {
 		return nil, fmt.Errorf("runtime %q not allowed", hc.Runtime)
 	}
-	if hc.NetworkMode != r.Network {
+	offline := r.OfflineNetwork != "" && hc.NetworkMode == r.OfflineNetwork
+	if hc.NetworkMode != r.Network && !offline {
 		return nil, fmt.Errorf("network %q not allowed", hc.NetworkMode)
 	}
 	if hc.Memory <= 0 || hc.Memory > r.MaxMemory {
@@ -166,7 +172,7 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 	// A terminal may be pinned to exactly the configured forwarder and nothing
 	// else. This is the only place a resolver address can enter a container.
 	if len(hc.Dns) > 0 {
-		if r.AllowedDNS == "" {
+		if r.AllowedDNS == "" || offline {
 			return nil, fmt.Errorf("dns not allowed")
 		}
 		if len(hc.Dns) != 1 || hc.Dns[0] != r.AllowedDNS {
@@ -224,7 +230,7 @@ func (r *Rules) ValidateCreate(name string, body io.Reader) ([]byte, error) {
 		"Hostname": "terminal",
 		"HostConfig": map[string]any{
 			"Runtime":        hc.Runtime,
-			"NetworkMode":    r.Network,
+			"NetworkMode":    hc.NetworkMode,
 			"Memory":         hc.Memory,
 			"MemorySwap":     hc.Memory, // no swap beyond the memory limit
 			"NanoCpus":       hc.NanoCpus,

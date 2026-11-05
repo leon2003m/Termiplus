@@ -3,7 +3,7 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-10-19 @ a35e601
+verified: 2026-11-04 (native integration)
 entity: internal/mcp/audit.go
 ---
 
@@ -13,7 +13,8 @@ A JSON-lines file of every MCP tool call that can change something, whether it r
 
 ## Why this shape
 
-Destructive actions are chosen by an LLM and confirmed by a human, so an admin needs to see who did what afterwards. Read-only calls and calls still waiting for confirmation are left out, so the log stays about changes. Size-capped rotation (`<file>.1`) keeps at most two files' worth of history without a log daemon.
+Lifecycle actions may be requested by a model and confirmed by a human;
+administration is human-only. Both need a record of who changed what. Read-only calls and calls still waiting for confirmation are left out, so the log stays about changes. Size-capped rotation (`<file>.1`) keeps at most two files' worth of history without a log daemon.
 
 ## Shape
 
@@ -44,3 +45,7 @@ Citations: `internal/mcp/audit.go:1-30` (doc), `:32` (AuditEntry), `:43` (AuditL
 ## See
 
 - Source: `internal/mcp/audit.go`
+
+## Native integration update (2026-11-04)
+
+Administrative audit queries are human-only. Model tool discovery/calls never expose get_audit_log. Source: internal/mcp/server.go:modelTool; console retains invoke auditing.

@@ -255,13 +255,12 @@ class HomeTools(unittest.TestCase):
         self.assertEqual(rec.calls, [])
         self.assertIn("not available", out)
 
-    def test_snapshot_restore_asks_first(self):
-        rec = Recorder(False)
-        out = asyncio.run(
-            self.tools().manage_snapshots("restore", "desk", "20261016T221500Z", __oauth_token__=TOKEN, __event_call__=rec)
-        )
-        self.assertEqual(len(rec.calls), 1)
-        self.assertIn("cancelled", out)
+    def test_snapshot_destructive_actions_are_not_sent(self):
+        rec = Recorder(True)
+        for action in ("restore", "delete"):
+            out = asyncio.run(self.tools().manage_snapshots(action, "desk", __oauth_token__=TOKEN, __event_call__=rec))
+            self.assertIn("console", out)
+        self.assertEqual(rec.calls, [])
 
     def test_share_create_asks_first_list_does_not(self):
         rec = Recorder(False)
@@ -272,10 +271,6 @@ class HomeTools(unittest.TestCase):
         out = asyncio.run(self.tools().share_desktop("list", __oauth_token__=TOKEN, __event_call__=rec))
         self.assertEqual(rec.calls, [])
         self.assertIn("not configured", out)
-
-    def test_departed_is_admin_only(self):
-        out = asyncio.run(self.tools().manage_departed("list", __oauth_token__=TOKEN))
-        self.assertIn("not allowed", out)
 
     def test_result_links(self):
         share = json.dumps({"share_id": "abc", "url": "https://desk.example/share/" + "a" * 64 + "/"})
@@ -291,103 +286,32 @@ class HomeTools(unittest.TestCase):
         self.assertEqual(plugin._with_result_links("list_sessions", snaps), snaps)
 
 
-class NetworkPolicyTools(unittest.TestCase):
-    """Admin tools: RBAC from the server, confirmation from the user."""
-
-    POLICY = ([{"name": "db.internal", "ip": "10.0.0.5"}], [{"cidr": "10.0.0.5/32", "port": 5432, "proto": "tcp"}])
-
+@unittest.skipUnless(MCP_BIN, "set TERMIPLUS_MCP_BIN")
+class ModelBoundary(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.admin_proc, cls.admin_url = start_mcp("termiplus-admin")
-        cls.user_proc, cls.user_url = start_mcp("termiplus-persist")
+        cls.proc, cls.url = start_mcp("termiplus-admin,termiplus-persist")
 
     @classmethod
     def tearDownClass(cls):
-        for p in (cls.admin_proc, cls.user_proc):
-            p.kill()
-            p.wait()
+        cls.proc.kill()
+        cls.proc.wait()
 
-    def tools(self, url):
-        t = plugin.Tools()
-        t.valves.mcp_url = url
-        t.valves.timeout_seconds = 10
-        return t
+    def test_administration_is_absent_and_server_rejects_direct_calls(self):
+        tools = plugin.Tools()
+        tools.valves.mcp_url = self.url
+        for name in ("set_network_policy", "get_network_policy", "manage_user", "manage_group", "manage_departed", "get_audit_log", "set_entitlements", "open_port"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(tools, name))
+                out = asyncio.run(tools._run(name, {"_confirmed": True}, TOKEN, Recorder(True), None))
+                self.assertIn("not allowed", out)
 
-    def test_admin_sets_after_yes_and_reads_back(self):
-        rec = Recorder(True)
-        out = asyncio.run(
-            self.tools(self.admin_url).set_network_policy(*self.POLICY, __oauth_token__=TOKEN, __event_call__=rec)
-        )
-        self.assertIn('"applied"', out)
-        self.assertEqual(len(rec.calls), 1)
-        self.assertIn("db.internal", rec.calls[0]["data"]["message"])
-        out = asyncio.run(self.tools(self.admin_url).get_network_policy(__oauth_token__=TOKEN))
-        self.assertIn("db.internal", out)
-
-    def test_declined_changes_nothing(self):
-        t = self.tools(self.admin_url)
-        before = asyncio.run(t.get_network_policy(__oauth_token__=TOKEN))
-        out = asyncio.run(
-            t.set_network_policy([{"name": "x.internal", "ip": "10.0.0.9"}], [], __oauth_token__=TOKEN,
-                                 __event_call__=Recorder(False))
-        )
-        self.assertIn("cancelled", out)
-        self.assertEqual(asyncio.run(t.get_network_policy(__oauth_token__=TOKEN)), before)
-
-    def test_non_admin_is_forbidden_without_a_dialog(self):
-        rec = Recorder(True)
-        t = self.tools(self.user_url)
-        self.assertIn("not allowed", asyncio.run(t.get_network_policy(__oauth_token__=TOKEN)))
-        out = asyncio.run(t.set_network_policy(*self.POLICY, __oauth_token__=TOKEN, __event_call__=rec))
-        self.assertIn("not allowed", out)
-        self.assertEqual(rec.calls, [])
-
-    def test_user_management_is_admin_only(self):
-        rec = Recorder(True)
-        t = self.tools(self.user_url)
-        self.assertIn("not allowed", asyncio.run(t.manage_group("list", __oauth_token__=TOKEN)))
-        out = asyncio.run(
-            t.manage_user("add_to_group", "bob", "termiplus-persist", __oauth_token__=TOKEN, __event_call__=rec)
-        )
-        self.assertIn("not allowed", out)
-        self.assertEqual(rec.calls, [])
-
-    def test_membership_change_asks_first(self):
-        # The test server has no directory, so after the yes it reports that.
-        rec = Recorder(True)
-        out = asyncio.run(
-            self.tools(self.admin_url).manage_user(
-                "add_to_group", "bob", "termiplus-persist", __oauth_token__=TOKEN, __event_call__=rec
-            )
-        )
-        self.assertEqual(len(rec.calls), 1)
-        self.assertIn("termiplus-persist", rec.calls[0]["data"]["message"])
-        self.assertIn("not configured", out)
-        out = asyncio.run(
-            self.tools(self.admin_url).manage_user(
-                "remove_from_group", "bob", "termiplus-persist", __oauth_token__=TOKEN, __event_call__=Recorder(False)
-            )
-        )
-        self.assertIn("cancelled", out)
-        # show needs no dialog
-        rec = Recorder(True)
-        asyncio.run(self.tools(self.admin_url).manage_user("show", "bob", __oauth_token__=TOKEN, __event_call__=rec))
-        self.assertEqual(rec.calls, [])
-
-    def test_audit_log_shows_changes_to_admins_only(self):
-        t = self.tools(self.admin_url)
-        asyncio.run(t.set_network_policy(*self.POLICY, __oauth_token__=TOKEN, __event_call__=Recorder(True)))
-        out = asyncio.run(t.get_audit_log(tool="set_network_policy", limit=5, __oauth_token__=TOKEN))
-        self.assertIn('"actor":"plugin-user"', out)
-        self.assertIn('"outcome":"ok"', out)
-        self.assertNotIn("_confirmed", out)
-        self.assertIn("not allowed", asyncio.run(self.tools(self.user_url).get_audit_log(__oauth_token__=TOKEN)))
-
-    def test_lists_are_required(self):
-        out = asyncio.run(
-            self.tools("http://127.0.0.1:1/").set_network_policy("db.internal", [], __oauth_token__=TOKEN)
-        )
-        self.assertIn("must both be lists", out)
+    def test_forged_snapshot_confirmation_cannot_delete_or_restore(self):
+        tools = plugin.Tools()
+        tools.valves.mcp_url = self.url
+        for action in ("delete", "restore"):
+            out = asyncio.run(tools._run("manage_snapshots", {"action": action, "workspace": "desk", "_confirmed": True}, TOKEN, Recorder(True), None))
+            self.assertIn("not allowed", out)
 
 
 class HeaderRecorder(http.server.BaseHTTPRequestHandler):
@@ -457,33 +381,25 @@ class OpenWebUIUserHeaders(unittest.TestCase):
 
 
 PW = "f" * 64
-DESK = {"session_id": "ot-u-1-desk", "workspace": "desk", "stream_url": "https://desk.example/stream/ot-u-1-desk/"}
+DESK = {"session_id": "ot-u-1-desk", "workspace": "desk", "desktop": True}
 
 
-class DesktopLinks(unittest.TestCase):
-    def test_link_for_each_desktop(self):
+class NativeWorkspaceGuidance(unittest.TestCase):
+    def test_native_guidance_for_desktops(self):
         for reply in (DESK, [DESK, {"session_id": "t", "workspace": "default"}]):
-            with self.subTest(reply=reply):
-                out = plugin._with_desktop_links(json.dumps(reply))
-                self.assertIn("[Open desktop (desk)](https://desk.example/stream/ot-u-1-desk/)", out)
-                self.assertIn("no password", out)
-                self.assertEqual(json.loads(out.split("\n")[0]), reply)
+            out = plugin._with_workspace_guidance(json.dumps(reply))
+            self.assertIn("Desktop", out)
+            self.assertIn("connection", out)
+            self.assertNotIn("/stream/", out)
+
+    def test_legacy_credentials_and_links_are_removed(self):
+        out = plugin._with_workspace_guidance(json.dumps(dict(DESK, stream_password=PW, stream_url="https://old.example/stream/x/", forward_url="https://old.example/fwd/x/")))
+        self.assertNotIn(PW, out)
+        self.assertNotIn("old.example", out)
 
     def test_without_desktop_text_is_unchanged(self):
         for text in ("[]", '{"session_id":"t"}', "not json", '"x"'):
-            self.assertEqual(plugin._with_desktop_links(text), text)
-
-    def test_password_of_an_older_server_is_dropped(self):
-        out = plugin._with_desktop_links(json.dumps(dict(DESK, stream_password=PW)))
-        self.assertNotIn(PW, out)
-        self.assertIn("Open desktop", out)
-
-    def test_unsafe_links_are_not_given(self):
-        for url in ("javascript:alert(1)", "https://desk.example/x)[y](https://evil.example", "https://a b"):
-            with self.subTest(url=url):
-                out = plugin._with_desktop_links(json.dumps(dict(DESK, stream_url=url)))
-                self.assertNotIn("Open desktop", out)
-                self.assertNotIn(url, out)
+            self.assertEqual(plugin._with_workspace_guidance(text), text)
 
 
 class Console(unittest.TestCase):
@@ -499,31 +415,11 @@ class Console(unittest.TestCase):
             self.assertIn("not configured", asyncio.run(t.open_console()))
 
 
-class OpenPort(OpenWebUIUserHeaders):
-    def test_link_for_own_session(self):
-        HeaderRecorder.reply = json.dumps([{"session_id": "ot-u-1-default", "forward_url": "https://fwd.example/ot-u-1-default/"}])
-        out = asyncio.run(self.tools("").open_port("ot-u-1-default", 3000, __oauth_token__=TOKEN))
-        self.assertIn("[Open port 3000](https://fwd.example/ot-u-1-default/3000/)", out)
-
-    def test_with_desktop_session_in_list(self):
-        HeaderRecorder.reply = json.dumps([dict(DESK, forward_url="https://fwd.example/ot-u-1-desk/")])
-        out = asyncio.run(self.tools("").open_port("ot-u-1-desk", "5173", __oauth_token__=TOKEN))
-        self.assertIn("(https://fwd.example/ot-u-1-desk/5173/)", out)
-
-    def test_refusals(self):
-        HeaderRecorder.reply = json.dumps([{"session_id": "s1", "forward_url": "javascript:alert(1)//"}])
-        t = self.tools("")
-        self.assertIn("between 1 and 65535", asyncio.run(t.open_port("s1", 0, __oauth_token__=TOKEN)))
-        self.assertIn("must be a number", asyncio.run(t.open_port("s1", "x", __oauth_token__=TOKEN)))
-        self.assertIn("no session", asyncio.run(t.open_port("other", 3000, __oauth_token__=TOKEN)))
-        self.assertIn("not configured", asyncio.run(t.open_port("s1", 3000, __oauth_token__=TOKEN)))
-
-
-class DesktopLinksThroughRun(OpenWebUIUserHeaders):
+class NativeGuidanceThroughRun(OpenWebUIUserHeaders):
     def test_run_adds_links(self):
         HeaderRecorder.reply = json.dumps([dict(DESK, stream_password=PW)])
         out = asyncio.run(self.tools("").list_sessions(__oauth_token__=TOKEN))
-        self.assertIn("Open desktop", out)
+        self.assertIn("Desktop", out)
         self.assertNotIn(PW, out)
 
 

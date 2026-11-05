@@ -92,6 +92,11 @@ func TestControlWorkspaces(t *testing.T) {
 	if p, ok := got["scratch"]; !ok || p {
 		t.Fatalf("scratch should be listed as ephemeral: %v", ws)
 	}
+	for _, w := range ws {
+		if w.Name == "scratch" && (w.Label != "Temporary terminal" || w.Description == "") {
+			t.Fatalf("scratch should carry its label and description: %+v", w)
+		}
+	}
 }
 
 func TestControlSessionLifecycle(t *testing.T) {

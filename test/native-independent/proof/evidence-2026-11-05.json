@@ -1,0 +1,439 @@
+{
+  "run": "proof-071609-3460799",
+  "started_utc": "2026-11-05T07:16:28.185463+00:00",
+  "duration_seconds": 18.9,
+  "passed": 42,
+  "partial": 1,
+  "failed": 0,
+  "results": [
+    {
+      "tool": "inventory",
+      "case": "openapi discovery",
+      "status": "PASS",
+      "detail": "23 operations; desktop conditional descriptions present",
+      "evidence": {
+        "operations": {
+          "browser_action": "POST /browser/action",
+          "browser_screenshot": "GET /browser/screenshot",
+          "browser_snapshot": "GET /browser/snapshot",
+          "browser_tabs": "GET /browser/tabs",
+          "desktop_action": "POST /desktop/action",
+          "desktop_screenshot": "GET /desktop/screenshot",
+          "display_file": "GET /files/display",
+          "get_info": "GET /info",
+          "get_process_status": "GET /execute/{process_id}/status",
+          "glob_search": "GET /files/glob",
+          "grep_search": "GET /files/grep",
+          "kill_process": "DELETE /execute/{process_id}",
+          "list_files": "GET /files/list",
+          "list_processes": "GET /execute",
+          "match_files": "GET /files/matches",
+          "read_file": "GET /files/read",
+          "read_user_terminal": "GET /api/terminals/user/output",
+          "replace_file_content": "POST /files/replace",
+          "run_command": "POST /execute",
+          "search_files": "GET /files/search",
+          "send_process_input": "POST /execute/{process_id}/input",
+          "send_user_terminal_input": "POST /api/terminals/user/input",
+          "write_file": "POST /files/write"
+        }
+      }
+    },
+    {
+      "tool": "auth",
+      "case": "missing bearer rejected",
+      "status": "PASS",
+      "detail": "unauthenticated /info rejected with 401",
+      "evidence": null
+    },
+    {
+      "tool": "get_info",
+      "case": "read workspace capability info",
+      "status": "PASS",
+      "detail": "info describes XFCE desktop/browser",
+      "evidence": {
+        "chars": 1196
+      }
+    },
+    {
+      "tool": "write_file",
+      "case": "write + implicit parent dirs",
+      "status": "PASS",
+      "detail": "created parent dirs and two files",
+      "evidence": {
+        "a_size": 45
+      }
+    },
+    {
+      "tool": "list_files",
+      "case": "list fixture directory",
+      "status": "PASS",
+      "detail": "listed ['a.txt', 'b.txt']",
+      "evidence": {
+        "dir": "/home/user/proof-071609-3460799/data"
+      }
+    },
+    {
+      "tool": "read_file",
+      "case": "read + line range",
+      "status": "PASS",
+      "detail": "full read + start_line/end_line range",
+      "evidence": {
+        "total_lines": 3
+      }
+    },
+    {
+      "tool": "read_file",
+      "case": "negative missing file",
+      "status": "PASS",
+      "detail": "missing file -> 404 File not found",
+      "evidence": null
+    },
+    {
+      "tool": "glob_search",
+      "case": "glob with type/exclude",
+      "status": "PASS",
+      "detail": "glob + type + exclude + max_results",
+      "evidence": {
+        "matches": [
+          "data/a.txt",
+          "data/b.txt"
+        ]
+      }
+    },
+    {
+      "tool": "grep_search",
+      "case": "grep params and case folding",
+      "status": "PASS",
+      "detail": "literal grep + case_insensitive + file include",
+      "evidence": {
+        "matches": 2
+      }
+    },
+    {
+      "tool": "match_files",
+      "case": "match with limit/offset contract",
+      "status": "PASS",
+      "detail": "ranked name/path/content match",
+      "evidence": {
+        "results": 1
+      }
+    },
+    {
+      "tool": "search_files",
+      "case": "filename search + type filter",
+      "status": "PASS",
+      "detail": "filename ranking with type filter",
+      "evidence": {
+        "results": 1
+      }
+    },
+    {
+      "tool": "replace_file_content",
+      "case": "replace with line bounds",
+      "status": "PASS",
+      "detail": "bounded unique replacement verified by read_file",
+      "evidence": {
+        "size": 49
+      }
+    },
+    {
+      "tool": "replace_file_content",
+      "case": "ambiguous vs allow_multiple",
+      "status": "PASS",
+      "detail": "ambiguous match rejected HTTP 400; allow_multiple replaced 2",
+      "evidence": {
+        "detail": "{\"detail\":\"Found 2 occurrences of target string but allow_multiple is false\"}"
+      }
+    },
+    {
+      "tool": "display_file",
+      "case": "open file in viewer",
+      "status": "PARTIAL",
+      "detail": "viewer notified (exists=true); GUI rendering not asserted",
+      "evidence": {
+        "path": "/home/user/proof-071609-3460799/data/a.txt",
+        "exists": true
+      }
+    },
+    {
+      "tool": "run_command",
+      "case": "cwd + env + wait",
+      "status": "PASS",
+      "detail": "cwd/env honoured; exit 0; output verified",
+      "evidence": {
+        "id": "20261105-071609-655b72",
+        "output": "ENV=env42\r\n/home/user/proof-071609-3460799"
+      }
+    },
+    {
+      "tool": "run_command",
+      "case": "negative missing command",
+      "status": "PASS",
+      "detail": "missing required command -> 422",
+      "evidence": null
+    },
+    {
+      "tool": "run_command",
+      "case": "start interactive process",
+      "status": "PASS",
+      "detail": "long-running process returned id",
+      "evidence": {
+        "id": "20261105-071609-538eb1"
+      }
+    },
+    {
+      "tool": "send_process_input",
+      "case": "write to process stdin",
+      "status": "PASS",
+      "detail": "stdin write accepted",
+      "evidence": null
+    },
+    {
+      "tool": "get_process_status",
+      "case": "status wait/offset + output",
+      "status": "PASS",
+      "detail": "status/wait/offset; echoed stdin observed",
+      "evidence": {
+        "status": "running",
+        "next_offset": 1
+      }
+    },
+    {
+      "tool": "kill_process",
+      "case": "force kill + verify status",
+      "status": "PASS",
+      "detail": "force kill; later status is killed/exit -9",
+      "evidence": {
+        "exit_code": -9
+      }
+    },
+    {
+      "tool": "kill_process",
+      "case": "negative unknown process",
+      "status": "PASS",
+      "detail": "unknown process -> 404",
+      "evidence": null
+    },
+    {
+      "tool": "list_processes",
+      "case": "list owned processes",
+      "status": "PASS",
+      "detail": "process inventory readable (28 entries)",
+      "evidence": {
+        "count": 28
+      }
+    },
+    {
+      "tool": "send_user_terminal_input",
+      "case": "negative: no attached shell",
+      "status": "PASS",
+      "detail": "unattached shell rejected with 404",
+      "evidence": {
+        "detail": "{\"detail\":\"No connected user shell\"}"
+      }
+    },
+    {
+      "tool": "read_user_terminal",
+      "case": "negative: no attached shell",
+      "status": "PASS",
+      "detail": "unattached shell rejected with 404",
+      "evidence": {
+        "detail": "{\"detail\":\"No connected user shell\"}"
+      }
+    },
+    {
+      "tool": "send_user_terminal_input",
+      "case": "documented WS attach + stdin",
+      "status": "PASS",
+      "detail": "documented PTY WS attach; stdin accepted and echoed",
+      "evidence": {
+        "terminal_session_created": true,
+        "send_status": 200
+      }
+    },
+    {
+      "tool": "read_user_terminal",
+      "case": "documented WS attach + stdout",
+      "status": "PASS",
+      "detail": "readback contains USER-SHELL-PROOF-42",
+      "evidence": {
+        "read_status": 200,
+        "bytes": 293
+      }
+    },
+    {
+      "tool": "browser_snapshot",
+      "case": "fixture server prerequisite",
+      "status": "PASS",
+      "detail": "local HTTP fixture server on loopback:18799",
+      "evidence": {
+        "pid": "2202"
+      }
+    },
+    {
+      "tool": "browser_tabs",
+      "case": "list chat tabs",
+      "status": "PASS",
+      "detail": "chat-scoped tab list; current tab in chrome mode",
+      "evidence": {
+        "tabs": 1
+      }
+    },
+    {
+      "tool": "browser_snapshot",
+      "case": "accessibility snapshot",
+      "status": "PASS",
+      "detail": "accessibility tree with element refs",
+      "evidence": {
+        "title": "Proof Page",
+        "refs": [
+          "@e73",
+          "@e74",
+          "@e75"
+        ]
+      }
+    },
+    {
+      "tool": "browser_screenshot",
+      "case": "PNG screenshot",
+      "status": "PASS",
+      "detail": "valid PNG 1279x799",
+      "evidence": {
+        "bytes": 14247,
+        "width": 1279,
+        "height": 799,
+        "sha256": "d91f14684ce65619"
+      }
+    },
+    {
+      "tool": "browser_action",
+      "case": "click + type effects",
+      "status": "PASS",
+      "detail": "ref click/type/click changed DOM (CLICKED-hello42)",
+      "evidence": {
+        "refs": [
+          "@e74",
+          "@e75"
+        ]
+      }
+    },
+    {
+      "tool": "browser_action",
+      "case": "key action effect",
+      "status": "PASS",
+      "detail": "key effect observed (KEY-a)",
+      "evidence": null
+    },
+    {
+      "tool": "browser_action",
+      "case": "double_click effect",
+      "status": "PASS",
+      "detail": "double_click effect observed",
+      "evidence": null
+    },
+    {
+      "tool": "browser_action",
+      "case": "move coordinates",
+      "status": "PASS",
+      "detail": "move destination observed (MOVE-300,250)",
+      "evidence": null
+    },
+    {
+      "tool": "browser_action",
+      "case": "drag with to_x/to_y",
+      "status": "PASS",
+      "detail": "drag destination (600,500) observed in DOM event",
+      "evidence": {
+        "marks": [
+          "StaticText \"MOVE-600,500\""
+        ]
+      }
+    },
+    {
+      "tool": "browser_action",
+      "case": "scroll direction/amount",
+      "status": "PASS",
+      "detail": "scroll accepted; screenshot changed=True",
+      "evidence": {
+        "before": "b25653afbf6aac62",
+        "after": "8c8f3abc1de83da6"
+      }
+    },
+    {
+      "tool": "browser_action",
+      "case": "navigate + history + reload",
+      "status": "PASS",
+      "detail": "navigate/back/forward/reload titles verified",
+      "evidence": null
+    },
+    {
+      "tool": "browser_action",
+      "case": "partial failure semantics",
+      "status": "PASS",
+      "detail": "batch partial failure reports completed=1 failed=1",
+      "evidence": {
+        "completed_actions": 1,
+        "failed_action_index": 1,
+        "error": "Element ref unavailable: Unknown or expired element ref. Take a new browser_snapshot."
+      }
+    },
+    {
+      "tool": "browser_action",
+      "case": "negative parameters",
+      "status": "PASS",
+      "detail": "non-HTTP URL 400; click without ref/x/y 422",
+      "evidence": {
+        "file_url": "{\"detail\":\"Only HTTP(S) URLs can be opened in Browser\"}",
+        "missing": "{\"detail\":[{\"type\":\"value_error\",\"loc\":[\"body\",\"actions\",0],\"msg\":\"Value error, This action requires an element ref or x and y\",\"input\":{\"action\":\"click\"},\"ctx\":{\"error\":{}}}]}"
+      }
+    },
+    {
+      "tool": "desktop_screenshot",
+      "case": "PNG dimensions",
+      "status": "PASS",
+      "detail": "1280x800 PNG screenshot",
+      "evidence": {
+        "bytes": 37456,
+        "width": 1280,
+        "height": 800,
+        "sha256": "df2ce4b7a73d1ff0"
+      }
+    },
+    {
+      "tool": "desktop_action",
+      "case": "pointer/scroll actions",
+      "status": "PASS",
+      "detail": "move/click/double_click/scroll/drag each returned PNG",
+      "evidence": {
+        "actions": [
+          "move",
+          "click",
+          "double_click",
+          "scroll",
+          "drag"
+        ]
+      }
+    },
+    {
+      "tool": "desktop_action",
+      "case": "key/type end-to-end GUI effect",
+      "status": "PASS",
+      "detail": "key alt+F2 + type + Return opened terminal and wrote file",
+      "evidence": {
+        "content": "DESKTOP-PROOF-42",
+        "screenshot": true
+      }
+    },
+    {
+      "tool": "desktop_action",
+      "case": "validation/partial failure",
+      "status": "PASS",
+      "detail": "batch validated before run (422); out-of-bounds 400",
+      "evidence": {
+        "missing_y": "{\"detail\":[{\"type\":\"value_error\",\"loc\":[\"body\",\"actions\",1],\"msg\":\"Value error, This action requires x and y\",\"input\":{\"action\":\"click\",\"x\":10},\"ctx\":{\"error\":{}}}]}",
+        "oob": "{\"detail\":\"Coordinates are outside the current desktop screenshot\"}"
+      }
+    }
+  ]
+}

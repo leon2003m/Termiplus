@@ -1,13 +1,13 @@
 """
 title: termiplus workspaces
 author: termiplus
-description: Provision and manage your termiplus sandbox sessions. Destructive or security-sensitive actions always ask you for confirmation first.
-version: 0.5.0
-required_open_webui_version: 0.8.6
+description: Provision and manage your termiplus sandbox sessions. Lifecycle, backups and view-only screen shares; administration is human-only.
+version: 0.6.0
+required_open_webui_version: 0.13.0
 license: see the termiplus repository
 """
 
-# Native Open WebUI tool for the termiplus MCP control plane (docs/mcp.md §7).
+# Native Open WebUI tool for the termiplus MCP control plane (docs/mcp.md).
 #
 # - Forwards the signed-in user's OIDC access token (__oauth_token__) unchanged
 #   to the MCP endpoint, where oauth2-proxy verifies it. This plugin does no
@@ -19,9 +19,9 @@ license: see the termiplus repository
 #   confirmation flag: when the server answers "human confirmation required",
 #   the plugin asks the user in an Open WebUI dialog and only repeats the call
 #   with "_confirmed": true after an explicit yes.
-# - Desktop, port and console links hold no secret: the browser signs in at
-#   the desktop/forward origin (oauth2-proxy) and the server lets only the
-#   session's owner in. The model hands them to the user as Markdown links.
+# - Desktop, browser, files and terminal interactions use Open WebUI's native
+#   terminal connection. This plugin adds only Termiplus lifecycle/storage tools
+#   and a link to the human management console.
 # - Needs nothing beyond the standard library and pydantic (which Open WebUI
 #   ships), so it installs without extra packages.
 
@@ -86,7 +86,7 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> Any:
         """
-        Start (or attach to) a termiplus sandbox session. Persistent sessions need the user's permission and an explicit confirmation from the user.
+        Provision a termiplus container. This does not select a terminal connection in the chat. For a shared human/AI desktop, the user selects the workspace in Open WebUI and opens Desktop; native desktop_screenshot starts that desktop. Prefer native tools for the currently selected workspace. Persistent provisioning requires explicit human confirmation.
         :param workspace: Name of the workspace from list_workspaces.
         :param persistent: Leave out to use the workspace's own setting.
         :param label: Optional short label for the session.
@@ -134,21 +134,19 @@ class Tools:
         self,
         action: str,
         workspace: str,
-        snapshot_id: str = "",
         __oauth_token__: Optional[dict] = None,
         __event_call__: EventCall = None,
         __event_emitter__: EventEmitter = None,
         __user__: Optional[dict] = None,
     ) -> Any:
         """
-        Backups of the home (/home/user) of one of the user's persistent workspaces. "list" shows the snapshots with download links (also a link to download the current home), "create" takes one now (do this before risky changes), "restore" writes a snapshot's files back (stops the workspace first; files created since then stay), "delete" removes one. Restore and delete always ask the user for confirmation.
-        :param action: "list", "create", "restore" or "delete".
-        :param workspace: The workspace name, e.g. "default".
-        :param snapshot_id: For restore and delete: the id from the list, e.g. 20261016T221500Z.
+        List or create home snapshots before risky changes. Creation never deletes an older snapshot. Restore, delete and pruning belong to the human management console.
+        :param action: "list" or "create".
+        :param workspace: The workspace name from list_workspaces.
         """
+        if action not in ("list", "create"):
+            return "termiplus: the AI may only list or create snapshots. Open the management console to restore or delete."
         args: dict = {"action": action, "workspace": workspace}
-        if snapshot_id:
-            args["snapshot_id"] = snapshot_id
         return await self._run("manage_snapshots", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
 
     async def share_desktop(
@@ -181,59 +179,6 @@ class Tools:
             args["share_id"] = share_id
         return await self._run("share_desktop", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
 
-    async def manage_departed(
-        self,
-        action: str,
-        username: str = "",
-        __oauth_token__: Optional[dict] = None,
-        __event_call__: EventCall = None,
-        __event_emitter__: EventEmitter = None,
-        __user__: Optional[dict] = None,
-    ) -> Any:
-        """
-        Admins only: users who left (disabled or deleted in the identity provider) and their archived homes. "list" shows them; "archive" archives a disabled user's homes now; "restore" puts a user's archived homes back. Archive and restore always ask the user for confirmation. Homes are archived automatically after the configured time anyway.
-        :param action: "list", "archive" or "restore".
-        :param username: For archive and restore: the user's login name.
-        """
-        args: dict = {"action": action}
-        if username:
-            args["username"] = username
-        return await self._run("manage_departed", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
-
-    async def open_port(
-        self,
-        session_id: str,
-        port: int,
-        __oauth_token__: Optional[dict] = None,
-        __user__: Optional[dict] = None,
-    ) -> Any:
-        """
-        Show the user a browser link to a port inside one of their sessions (e.g. a dev server the assistant started on port 3000). Only the session's owner can open it. Not needed for the desktop: request_session already shows it.
-        :param session_id: The session_id from list_sessions.
-        :param port: The TCP port the app listens on inside the session.
-        """
-        try:
-            port = int(port)
-        except (TypeError, ValueError):
-            return "termiplus: port must be a number."
-        if not 1 <= port <= 65535:
-            return "termiplus: port must be between 1 and 65535."
-        result = await self._run("list_sessions", {}, __oauth_token__, None, None, __user__)
-        try:
-            # The JSON list is the first line; desktop links may follow.
-            sessions = json.loads(result.split("\n")[0])
-        except (ValueError, AttributeError):
-            return result if isinstance(result, str) else "termiplus: could not list your sessions."
-        match = [s for s in sessions if isinstance(s, dict) and s.get("session_id") == session_id]
-        if not match:
-            return f"termiplus: no session {session_id!r} of yours."
-        base = str(match[0].get("forward_url") or "")
-        if not base.startswith(("https://", "http://")):
-            return "termiplus: port forwarding is not configured on this server."
-        link = _link(f"Open port {port}", f"{base}{port}/")
-        if not link:
-            return "termiplus: port forwarding is not configured on this server."
-        return f"Give the user this link exactly as written (only they can open it): {link}"
 
     async def open_console(self) -> Any:
         """
@@ -245,92 +190,6 @@ class Tools:
             return "termiplus: the management console is not configured (ui_url valve)."
         return f"Give the user this link exactly as written: {link}"
 
-    async def get_network_policy(self, __oauth_token__: Optional[dict] = None, __user__: Optional[dict] = None) -> Any:
-        """
-        Admins only: show the terminals' network policy, i.e. the custom DNS entries and the internal destinations terminals may reach. Internet access is always allowed and not listed.
-        """
-        return await self._run("get_network_policy", {}, __oauth_token__, None, None, __user__)
-
-    async def set_network_policy(
-        self,
-        dns_entries: list,
-        egress_allow: list,
-        __oauth_token__: Optional[dict] = None,
-        __event_call__: EventCall = None,
-        __event_emitter__: EventEmitter = None,
-        __user__: Optional[dict] = None,
-    ) -> Any:
-        """
-        Admins only: replace the terminals' whole network policy. Call get_network_policy first and include every existing entry that should stay; anything left out is removed. Always asks the user for confirmation. Host, link-local/metadata and other-terminal addresses can never be opened.
-        :param dns_entries: Custom DNS records, e.g. [{"name": "db.internal", "ip": "10.0.0.5"}].
-        :param egress_allow: Internal destinations terminals may reach, e.g. [{"cidr": "10.0.0.5/32", "port": 5432, "proto": "tcp"}]. proto is tcp or udp.
-        """
-        if not isinstance(dns_entries, list) or not isinstance(egress_allow, list):
-            return "termiplus: dns_entries and egress_allow must both be lists (use [] for none)."
-        policy = {"dns_entries": dns_entries, "egress_allow": egress_allow}
-        return await self._run(
-            "set_network_policy", {"policy": policy}, __oauth_token__, __event_call__, __event_emitter__, __user__
-        )
-
-    async def manage_group(
-        self,
-        action: str,
-        group: str = "",
-        __oauth_token__: Optional[dict] = None,
-        __user__: Optional[dict] = None,
-    ) -> Any:
-        """
-        Admins only: list the termiplus groups (action "list"), or the members of one group (action "members" with group). Groups decide who may use persistent workspaces (termiplus-persist), administer termiplus (termiplus-admin), and which workspaces someone sees.
-        :param action: "list" or "members".
-        :param group: The group name for "members", e.g. termiplus-persist.
-        """
-        args: dict = {"action": action}
-        if group:
-            args["group"] = group
-        return await self._run("manage_group", args, __oauth_token__, None, None, __user__)
-
-    async def manage_user(
-        self,
-        action: str,
-        username: str,
-        group: str = "",
-        __oauth_token__: Optional[dict] = None,
-        __event_call__: EventCall = None,
-        __event_emitter__: EventEmitter = None,
-        __user__: Optional[dict] = None,
-    ) -> Any:
-        """
-        Admins only: show a user's termiplus groups (action "show"), or add/remove them to/from a termiplus group (actions "add_to_group" / "remove_from_group" with group). Changes always ask the user for confirmation and apply at the affected user's next sign-in. Users themselves are created in the identity provider, not here.
-        :param action: "show", "add_to_group" or "remove_from_group".
-        :param username: The user's login name in the identity provider.
-        :param group: The termiplus group for add/remove, e.g. termiplus-persist.
-        """
-        args: dict = {"action": action, "username": username}
-        if group:
-            args["group"] = group
-        return await self._run("manage_user", args, __oauth_token__, __event_call__, __event_emitter__, __user__)
-
-    async def get_audit_log(
-        self,
-        actor: str = "",
-        tool: str = "",
-        since: str = "",
-        limit: int = 50,
-        __oauth_token__: Optional[dict] = None,
-        __user__: Optional[dict] = None,
-    ) -> Any:
-        """
-        Admins only: show who changed what in termiplus and when (sessions started or ended, workspace entitlements, network policy, group membership), newest first, with the outcome (ok, error or denied).
-        :param actor: Only entries by this user id.
-        :param tool: Only this action, e.g. set_network_policy, manage_user or request_session.
-        :param since: Only entries at or after this time, in RFC 3339 form, e.g. 2026-10-16T00:00:00Z.
-        :param limit: How many entries to show, 1 to 500 (default 50).
-        """
-        args: dict = {"limit": limit}
-        for k, v in (("actor", actor), ("tool", tool), ("since", since)):
-            if v:
-                args[k] = v
-        return await self._run("get_audit_log", args, __oauth_token__, None, None, __user__)
 
     # --- helpers (underscore: not exposed to the model) ---
 
@@ -380,7 +239,7 @@ class Tools:
             text = "".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
             if result.get("isError"):
                 return f"termiplus: {tool} failed: {text}"
-            return _with_result_links(tool, _with_desktop_links(text))
+            return _with_result_links(tool, _with_workspace_guidance(text))
         except Exception as e:  # network, HTTP or decoding problems
             return f"termiplus: {tool} failed: {e}"
         finally:
@@ -458,39 +317,27 @@ def _link(label: str, url: str) -> Optional[str]:
     return f"[{label}]({url})" if _SAFE_URL.match(url) else None
 
 
-def _with_desktop_links(text: str) -> str:
-    """Adds an "Open desktop" link for every desktop session in a result. The
-    links hold no secret: the desktop sign-in and the owner check happen on
-    the server. A stream_password from an older server is dropped."""
+def _with_workspace_guidance(text: str) -> str:
+    """Never advertise legacy streams or forward old desktop credentials."""
     try:
         data = json.loads(text)
-    except ValueError:
+    except (ValueError, TypeError):
         return text
     sessions = data if isinstance(data, list) else [data]
-    links, changed = [], False
-    for s in sessions:
-        if not isinstance(s, dict):
+    changed, desktop = False, False
+    for session in sessions:
+        if not isinstance(session, dict):
             continue
-        if s.pop("stream_password", None) is not None:
-            changed = True
-        url = str(s.get("stream_url") or "")
-        if not url:
-            continue
-        link = _link(f"Open desktop ({s.get('workspace', 'desktop')})", url)
-        if link:
-            links.append(link)
-        else:
-            s.pop("stream_url")
-            changed = True
-    if not links and not changed:
-        return text
-    out = json.dumps(data, separators=(",", ":"))
-    if links:
-        out += (
-            "\nGive the user these links exactly as written; they open the desktop in the browser after the "
-            "usual sign-in, with no password. Nothing else is needed to open the desktop.\n" + "\n".join(links)
-        )
-    return out
+        for key in ("stream_password", "stream_url", "forward_url"):
+            if key in session:
+                session.pop(key)
+                changed = True
+        desktop = desktop or session.get("desktop") is True
+    if changed:
+        text = json.dumps(data, separators=(",", ":"))
+    if desktop:
+        text += "\nUse this workspace's terminal connection in Open WebUI and open its Desktop tab. The native desktop_screenshot and desktop_action tools share that screen with the user. Provisioning a workspace does not switch the chat's connection."
+    return text
 
 
 def _with_result_links(tool: str, text: str) -> str:

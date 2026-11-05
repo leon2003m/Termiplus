@@ -42,6 +42,8 @@ func TestDenyListNeverOpens(t *testing.T) {
 		"sandbox host bridge":  "172.30.0.1/32",
 		"whole sandbox subnet": "172.30.0.0/24",
 		"supernet of sandbox":  "172.0.0.0/8", // overlaps 172.30.0.0/24
+		"offline gateway":      "172.30.1.2/32",
+		"whole offline subnet": "172.30.1.0/24",
 		"cgnat":                "100.64.0.1/32",
 		"all v4":               "0.0.0.0/0", // overlaps everything in the deny-list
 	}
