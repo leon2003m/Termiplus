@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- Deterministic live verification of all 23 Open WebUI-generated native tools,
+  published parameters and Desktop/Browser actions with independent GUI oracles.
+
+### Fixed
+
+- Annotate native Desktop OpenAPI descriptions with required coordinate fields
+  and the 1280x800 raw pixel scale while retaining upstream payload validation.
+
+### Added
+
 - Complete native desktop workspace image with private Sysbox Docker,
   scientific Python/notebooks, LibreOffice and standard development tools.
 

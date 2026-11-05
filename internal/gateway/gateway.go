@@ -404,6 +404,15 @@ func (g *Gateway) proxyHTTP(w http.ResponseWriter, r *http.Request, inst *instan
 			pr.Out.Header.Set("Authorization", "Bearer "+inst.key)
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del("X-Proxy-Token")
+			if r.Method == http.MethodGet && rest == "/openapi.json" {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
+		},
+		ModifyResponse: func(response *http.Response) error {
+			if r.Method == http.MethodGet && rest == "/openapi.json" {
+				return describeDesktopActions(response)
+			}
+			return nil
 		},
 		FlushInterval: -1, // stream command output immediately
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
