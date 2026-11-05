@@ -142,6 +142,16 @@ Both final commands must succeed once containers have settled. Inspect
 chain must contain exactly the resolved port/MAC/IPv4 and ARP sender tuples,
 followed by an explicit `DROP`. Never flush an attached source guard to resolve
 connectivity problems: inspect Docker/namespace discovery and watcher logs.
+IP policy updates now render and validate complete IPv4 and IPv6 snapshots before
+committing each family atomically. An interrupted update retains that family's
+previous complete rules. Only Termiplus chains and hooks are replaced; Docker
+and unrelated rules are preserved. A completion marker in
+`/run/termiplus-portlock/policy.applied` binds full chain contents to the script,
+egress file, upstreams and service identities. Missing rules or changed policy
+inputs cause the timer to retry. Static denies remain installed when the gateway
+is absent. The DNS forwarder may reach only validated upstreams on TCP/UDP 53;
+admin exceptions do not widen its access.
+
 The policy path now starts the repeatable `termiplus-firewall-reload.service`.
 Installing that unit and restarting the path are necessary on existing hosts;
 starting an already-active boot service does not reapply a changed policy.

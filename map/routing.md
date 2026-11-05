@@ -55,7 +55,10 @@ attached throughout refreshes; existing static MAC port locks remain in place.
 Port discovery matches host `link-netnsid` to `lsns NETNSID` for Docker's PID;
 it does not inspect workspace-controlled links. `--watch-ports` refreshes on link
 events, including recreated service pins, and the timer reconciles state.
-Policy changes activate a separate repeatable firewall reload service. See the
+Policy changes activate a separate repeatable firewall reload service. Complete
+IPv4/IPv6 policies commit in separate restore transactions, with chain and policy
+hashes detecting incomplete or stale state. Static denies do not require a
+gateway; the DNS forwarder can only use validated upstream DNS. See the
 [firewall card](objects/sandbox/firewall-chain.md),
 [host update](../docs/deploy-alpha.md#host-source-identity-update) and
 [isolated kernel regression](../test/integration/source-pins.py). The gateway

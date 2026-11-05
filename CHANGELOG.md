@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Security
+
+- Replace complete IPv4 and IPv6 firewall policies in restore transactions,
+  preserving the previous policy on an interrupted or failed rebuild. Verify
+  complete chain hashes, policy inputs and hook placement before skipping an apply.
+- Install static isolation rules even without a gateway or offline bridge.
+  Reject malformed, noncanonical and overlapping never-allowed IPv4 CIDRs.
+- Restrict the DNS forwarder to configured upstream DNS, including established
+  traffic; admin exceptions and public egress cannot bypass its final deny.
+  Disable unknown multicast flooding and wait for the xtables lock.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the workspace source-identity and home-export fixes below.
