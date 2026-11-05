@@ -190,7 +190,9 @@ jobs:
             BASE=${{ steps.base.outputs.ref }}
             VERSION=${{ github.ref_name }}
             REVISION=${{ github.sha }}
-          sbom: true
+          # The complete desktop exceeds BuildKit's 80 MiB inline SBOM limit.
+          # Generate the package SBOM below, then sign and attach it with cosign.
+          sbom: false
           provenance: mode=max
       - run: .github/scripts/install-tools.sh trivy
       - name: Scan pushed image and write SBOM
@@ -214,6 +216,16 @@ jobs:
       - name: Sign image (keyless)
         if: env.PUBLIC_REPO == 'true'
         run: cosign sign --yes "${{ env.REGISTRY }}/${{ github.repository_owner }}/termiplus-desktop@${{ steps.build.outputs.digest }}"
+      - name: Sign and verify desktop SBOM attestation
+        if: env.PUBLIC_REPO == 'true'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/termiplus-desktop@${{ steps.build.outputs.digest }}
+        run: |
+          cosign attest --yes --type spdxjson --predicate sbom-desktop.spdx.json "$IMAGE"
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE" > /dev/null
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-desktop

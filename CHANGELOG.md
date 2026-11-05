@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-11-05
+
+Packages native Desktop, Browser, files, Git, terminals and app previews for
+Open WebUI 0.13.0 + Open Terminal 0.16.0, with Termiplus isolation, homes and
+access control. Full integration changes are listed under 1.0.0-rc.3. The rc.3
+release run stopped before publishing the desktop image or a release page:
+BuildKit rejected its embedded file-level SBOM above the 80 MiB limit. The five
+rc.3 base images that were already pushed are superseded by rc.4.
+
+### Fixed
+
+- Release the complete desktop with a Trivy-generated SPDX package SBOM,
+  attached and signed with cosign after the image build. Verify the SBOM
+  attestation against the exact release workflow identity before publishing
+  the release page. Preserve image signatures, maximum build provenance,
+  vulnerability reports and the downloadable SBOM for every image.
+
 ## [1.0.0-rc.3] - 2026-11-05
 
 Native Open WebUI workspaces replace the custom desktop and port-forwarding
