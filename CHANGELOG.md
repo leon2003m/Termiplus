@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-11-05
+
+Native Open WebUI workspaces replace the custom desktop and port-forwarding
+integration. This remains a release candidate.
+
+### Upgrade notes
+
+- Use Open WebUI 0.13.0 and Open Terminal 0.16.0 with the native integration
+  described in [the migration guide](docs/native-integration.md). Remove the
+  retired KasmVNC desktop and custom port-forwarding services and configuration.
+- The default and scratch policies now both use the complete Sysbox desktop
+  image. Chromium is the only browser; persistent home contents are preserved.
+- Reapply the sandbox firewall and install the host requirements described in
+  the Security entries below before accepting workspace traffic.
+- See [supported tools](docs/tool-support.md) for the exact native/plugin
+  inventory and the gateway/schema/image adaptations maintained by Termiplus.
+
 ### Added
 
 - Deterministic live verification of all 23 Open WebUI native tools, their

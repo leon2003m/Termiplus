@@ -51,9 +51,10 @@ a replacement. A guessed roadmap is not a basis for deleting working behavior.
 Upstream source may be read to understand the protocol. Implement termiplus
 changes independently; do not copy Open WebUI code.
 
-## Validation status (2026-11-04)
+## Validation status (2026-11-05)
 
-- Alpha checkpoint: `808cc87`; integration work is on `feat/native-workspace-integration`.
+- Alpha checkpoint: `808cc87`; the integrated native workspace changes are
+  included in release candidate `1.0.0-rc.3`.
 - `make check` passes, including race detection and all 30 plugin tests.
 - Native gateway tests cover first-frame and Browser header authentication,
   chat scoping, per-user routing, capability discovery and denied legacy routes.
@@ -74,14 +75,20 @@ changes independently; do not copy Open WebUI code.
   through the actual Open WebUI proxy and gateway.
 - Chromium's sandbox fails with the ordinary Docker runtime on this host.
   The desktop CI job now installs checksum-pinned Sysbox 0.7.1 and runs the same
-  smoke test with `sysbox-runc`; the hosted-runner installation has not run here.
+  smoke test with `sysbox-runc`; the hosted-runner build and smoke test pass.
   No test or image disables Chromium's sandbox to accommodate the runner.
-- Updated OIDC/deployment integration scripts have syntax/lint coverage here;
-  the real provider and host-firewall scenarios were not rerun.
+- The Docker-backed OIDC/proxy integration suite passes all 33 checks. GitHub
+  CI, Security, CodeQL and gVisor integration checks pass on the integrated code.
+  The production host-firewall scenarios were not rerun for this release.
+- The [tool inventory](tool-support.md), [deterministic validation](native-tool-validation.md),
+  [independent review](reviews/2026-11-05-deepseek-native-review.md) and
+  [frontend acceptance](reviews/2026-11-05-frontend-acceptance.md) distinguish
+  native callable, HTTP/PTY and real viewer coverage.
 
-No push or release was performed. Existing home volumes, backup data and deployed
-credentials are retained. Running workspaces are adopted; their image updates
-when their normal lifecycle recreates them.
+Existing home volumes, backup data and deployed credentials are retained.
+Running workspaces are adopted; their image updates when their normal lifecycle
+recreates them. Release candidate `1.0.0-rc.3` packages this native integration;
+see [the changelog](../CHANGELOG.md#100-rc3---2026-11-05) for upgrade notes.
 
 ## Testing in Open WebUI
 
