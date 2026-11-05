@@ -16,12 +16,15 @@ proxy. Neither model arguments nor share tokens choose another user's container.
 | --- | --- |
 | `list_workspaces`, `list_sessions` | List entitled workspaces and the caller's sessions |
 | `request_session` | Provision a workspace; persistent provisioning needs the persist role and confirmation |
-| `destroy_session`, `reset_workspace` | Stop/remove the caller's session or reset its home, with confirmation |
+| `destroy_session` | Remove the caller's container with confirmation; keep a persistent home |
+| `reset_workspace` | Recreate a persistent container while keeping `/home/user`, or remove a temporary sandbox; confirmation required |
 | `manage_snapshots` | **List/create only.** At capacity creation fails; it cannot delete/prune/restore an older backup |
 | `share_desktop` | List, create or revoke the caller's expiring view-only screen links; creation needs confirmation |
 
 The Open WebUI plugin also offers `open_console`, which returns a human console
 link. It does not run an administrative operation.
+The [complete supported tool inventory](tool-support.md) distinguishes these
+seven MCP tools plus one plugin-only link from the 23 native Open Terminal tools.
 
 **Network policy, entitlements, users, groups, audit queries and departed-user
 management are not model tools.** The MCP transport rejects direct calls even
@@ -37,7 +40,8 @@ administration and snapshot restrictions above.
 
 ## Working together in the native Desktop
 
-1. Configure an Open WebUI terminal connection to `http://gateway:8080/p/desk`
+1. Configure an Open WebUI terminal connection to `http://gateway:8080/p/default`
+   for Desktop, or `http://gateway:8080/p/scratch` for Temporary desktop,
    with the gateway API key. The policy must enable `desktop` and select the
    native desktop image. Apply Open WebUI connection access restrictions.
 2. Select that connection in the chat's terminal picker. For an ephemeral policy,

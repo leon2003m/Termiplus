@@ -9,11 +9,14 @@ entity: deploy/docker-compose.yml
 
 # Compose overlays
 
-How a deployment is put together: one base compose file plus opt-in overlay files, each stacked with another `-f`. Every alpha feature is an overlay. Without it the base stays unchanged.
+How a deployment is put together: one base compose file plus opt-in overlay files, each stacked with another `-f`. The control plane and its human UI are overlays. Native Desktop/Browser is
+provided by the default image and policy flags without an overlay.
 
 ## Why this shape
 
-The 0.x core (gateway plus sockproxy) must keep working for people who want only terminals. So every alpha feature (MCP, desktops, Keycloak, network policy) arrives as its own file, joins existing services through `!override`/merge, and its absence switches the feature off. For example, without the MCP overlay `/control/v1` returns 404.
+The core gateway and sockproxy work without MCP or OIDC. The control plane,
+console/share sign-in, Keycloak and network policy arrive as separate files
+that join existing services through `!override`/merge. For example, without the MCP overlay `/control/v1` returns 404.
 
 ## Shape
 
@@ -23,9 +26,9 @@ The 0.x core (gateway plus sockproxy) must keep working for people who want only
 | `docker-compose.separate-vm.yml` | gateway without `owui`, published on `GATEWAY_BIND` (default `127.0.0.1:8080`) | base |
 | `docker-compose.netpolicy.yml` | `dns-forwarder`, admin netpolicy API | base; host `firewall.sh` |
 | `docker-compose.mcp.yml` | `mcp`, `mcp-auth` (oauth2-proxy), gateway control key, `BACKUP_DIR` | base, an OIDC IdP |
-| `docker-compose.desktop.yml` | `desk-auth`, `desk-stream-auth`, `fwd-auth`; console and share listener | mcp |
+| `docker-compose.desktop.yml` | `desk-auth`, `desk-stream-auth`; console and image-only share listener | mcp |
 | `docker-compose.keycloak.yml` | `keycloak`, `keycloak-db` | `setup-alpha.sh` once |
-| `docker-compose.mcp-users.yml` | mcp ↔ Keycloak admin (`manage_user`, `manage_group`, departed) | mcp, keycloak |
+| `docker-compose.mcp-users.yml` | mcp ↔ Keycloak directory (role checks, recipient lookup, departed watcher) | mcp, keycloak |
 | `docker-compose.mcp-netpolicy.yml` | mcp ↔ admin netpolicy API | netpolicy, mcp |
 | `docker-compose.mqtt.yml` | gateway metrics to an MQTT broker | base |
 | `docker-compose.offline.yml` | network `ot-offline` (internal, icc off), gateway at 172.30.1.2, `OFFLINE_NETWORK` for gateway and sockproxy | base; host `firewall.sh`; after separate-vm |
@@ -62,3 +65,7 @@ Citations: `deploy/docker-compose.yml:1-20`, `:26`, `:55`, `:77`, `:87-102`, `de
 ## Native integration update (2026-11-04)
 
 The desktop overlay now exposes only the human console and image-only share viewer. fwd-auth, the forwarding network/secrets/listener and owner /stream upstream are removed. STREAM_* and DESKTOP_STREAM_URL names remain for share configuration compatibility. Source: deploy/docker-compose.desktop.yml and cmd/mcp/main.go.
+
+The shipped `default`/`scratch` policies both require the complete desktop image
+and Sysbox. The optional desktop overlay adds the human console and screen
+shares; native Desktop/Browser support does not depend on that overlay.

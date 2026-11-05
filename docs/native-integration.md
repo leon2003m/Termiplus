@@ -1,21 +1,29 @@
 # Native Open WebUI integration
 
-Decision, 2026-11-04: the existing alpha implementation is the checkpoint before
-migrating to Open WebUI's native workspace. Do not add another desktop or browser
-control implementation to termiplus.
+Current architecture, 2026-11-05: Open WebUI 0.13 and Open Terminal 0.16 own
+workspace interaction. The alpha checkpoint `808cc87` is the pre-migration
+baseline. Termiplus supplies isolation, routing, lifecycle, homes and access;
+it does not add another desktop or browser control implementation.
+
+Termiplus uses the standard terminal-server connection and optional Workspace
+Tools extension without a core Open WebUI fork. It is not a byte-for-byte
+transparent proxy: the gateway annotates Desktop OpenAPI descriptions and the
+image supplies narrow command/startup wrappers. See the [supported tool inventory
+and maintained adaptations](tool-support.md) for all 23 native tools, eight
+optional plugin methods and the precise compatibility boundary.
 
 ## Ownership
 
-| Feature | Owner and migration decision |
+| Feature | Current owner |
 | --- | --- |
-| Desktop display, screenshots, mouse and keyboard | Open WebUI 0.13.0 + Open Terminal 0.16.0; retire the KasmVNC player and relay |
-| Browser automation and local app previews | Native Browser tab; retire the separate port-link tool and forwarding UI |
+| Desktop display, screenshots, mouse and keyboard | Open WebUI 0.13.0 + Open Terminal 0.16.0; KasmVNC player and relay removed |
+| Browser automation and local app previews | Native Browser tab; separate port-link tool and forwarding UI removed |
 | Files, terminals, Git, installed skills, live events | Native Open Terminal connection; pass the authenticated user's policy and chat consistently |
 | Container provisioning, runtimes, limits, egress and persistent homes | Keep in termiplus |
 | Snapshots and home archives | Keep; AI may list/create snapshots, never delete or prune them |
 | Network policy, entitlements, identity groups and departed users | Human administration only; remove these from the model-facing tool surface |
 | Console link | Keep as a link to human administration |
-| View-only expiring desktop shares | No verified native replacement; do not describe ordinary chat sharing as equivalent |
+| View-only expiring desktop shares | Termiplus image-only viewer, refreshed every five seconds; ordinary chat sharing is not equivalent |
 
 Only released features or an explicit upstream implementation/commit establish
 a replacement. A guessed roadmap is not a basis for deleting working behavior.
@@ -86,5 +94,48 @@ when their normal lifecycle recreates them.
    the model and the visible native tabs then use the same user/policy/chat.
 
 Requesting a session with the MCP plugin provisions it but does not select a
-native connection in the frontend. Desktop entries depend on the selected
-connection's capabilities; choosing a plain terminal hides them.
+native connection in the frontend. Both shipped connections now advertise Desktop and Browser; terminal-only
+policies are no longer offered by the default configuration.
+
+## Desktop defaults restored (2026-11-04)
+
+The transport migration initially dropped the existing desktop applications and
+branding. Restore Dolphin, Chromium, Kate, the app dock,
+Qt/GTK theme and wallpaper while retaining native TigerVNC and audio.
+The native startxfce4 launcher seeds missing user preferences and initializes
+the wallpaper for TigerVNC's monitor name, preserving existing valid choices.
+
+The shipped policies are now only `default` (Desktop) and `scratch` (Temporary
+desktop), both Sysbox with desktop/browser enabled. The persistent home name is
+unchanged. The complete image also includes inner Docker with Compose/Buildx,
+scientific Python and Jupyter, Office/PDF/media tools and the standard CLI set.
+See [image comparison](open-terminal-image-review.md) for coverage and deliberate
+architecture differences. Native model context explains Desktop coordinates,
+and vision-capable models must have vision enabled in Open WebUI. The saved
+model system prompt must describe the shared graphical XFCE desktop and its
+native screenshot/action tools; remove old terminal-only instructions and
+references to removed tools. Browser automation is separate from shared
+desktop applications. Chromium is the only installed browser, btop replaces
+htop, and Ristretto/ImageMagick are intentionally omitted. Startup repairs
+obsolete app defaults and hides logout/lock controls on saved homes as well
+as new desktops, including inherited shortcuts absent from partial saved files.
+Malformed MIME/panel/shortcut settings are preserved as `.invalid-*` backups
+before restoring valid defaults. Pointer synchronization is bounded so repeated clicks at the
+current position no longer hang or time out with HTTP 502. Unknown X11 key
+names fail with HTTP 502 and report partial-batch progress. Linux screenshots use
+1280×800 raw pixel coordinates; the schema and image context describe this
+explicitly rather than assuming a normalized vision coordinate scale.
+
+Validated on 2026-11-05: `make check`, the complete Sysbox native smoke test
+(including notebook analysis, Office-to-PDF and nested Docker build/run), real
+Open WebUI Desktop HTTP/VNC and Browser automation, visible Chromium rendering,
+and repeated native clicks at the same pointer position returning HTTP 200.
+A local model selecting tools is a separate check from completing a browser
+task: full chat tests must verify page reads, button clicks and navigation
+against observed browser state, with tool-call and time budgets. The live test model's supported vision
+capability is enabled. Reload Open WebUI and start a new chat to discard old
+connection selections and failed tool-call history.
+
+The [deterministic native tool suite](native-tool-validation.md) extracts the
+actual Open WebUI callables and verifies all 23 model tools without inference,
+including independent DOM observations for Desktop and Browser input.

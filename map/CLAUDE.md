@@ -5,8 +5,9 @@ the truth; every card cites `path:line` and stops there. Edit this file only:
 `AGENTS.md` and `routing.md` next to it are generated twins (`make map`), and
 `make lint` fails if they drift.
 
-Verified against commit `a35e601` on 2026-10-19. Lines may move; the symbol
-names in each citation are the stable anchor.
+Baseline verified against commit `a35e601` on 2026-10-19; native integration
+updates reflect the working tree on 2026-11-05. Individual cards retain their
+verification dates. Lines may move; cited symbols are the stable anchor.
 
 ## Where to go
 
@@ -58,3 +59,39 @@ pruning is exposed. Shared viewing is image-only at five-second intervals.
 The native image smoke test runs under Sysbox, including Chromium with its
 sandbox enabled. The desktop CI job installs a checksum-pinned Sysbox package;
 ordinary Docker is insufficient for that browser sandbox test on the live host.
+
+The shipped workspace choices are Desktop (`default`) and Temporary desktop
+(`scratch`), both Sysbox with native Desktop/Browser enabled. The complete
+`image/desktop` includes Dolphin, Chromium, Kate, dark theme and wallpaper;
+`image/` remains its build dependency. See the [image comparison](../docs/open-terminal-image-review.md).
+It also supplies standard workspace CLI/document tools, scientific Python and
+Jupyter, plus a private Sysbox Docker daemon with Compose/Buildx. The API venv
+stays separate from user Python; native model context announces the shared graphical
+desktop and explains desktop input. `image/desktop/defaults.py` migrates obsolete
+app launchers and removes session-ending UI controls without resetting the layout.
+It explicitly suppresses inherited logout/lock/mail shortcuts in partial saved
+profiles, and preserves malformed INI/XML files as `.invalid-*` backups before
+seeding usable defaults.
+
+`image/desktop/files/usr/local/bin/xdotool` bounds native pointer synchronization
+so repeated clicks at the current position do not hang, and turns libxdo's
+unknown-key warnings into failed native actions with partial-batch progress.
+Native schema guidance
+uses the Linux display's 1280×800 pixel size; smoke tests verify that contract.
+
+`.github/scripts/native-tool-contract.py` resolves Open WebUI's actual terminal
+callables and deterministically tests every published model tool, parameter and
+Desktop/Browser action against a disposable scratch chat. Its independent DOM
+oracle is `.github/scripts/native-tool-fixture.py`; results and scope are in
+[tool validation](../docs/native-tool-validation.md). Inventory drift fails coverage;
+live callable descriptions must retain the gateway's pixel-coordinate guidance.
+`test/native-independent/` preserves a fresh DeepSeek session's separately
+authored and executed native HTTP/PTY proof, with its scope and remaining visual
+limits distinguished from the actual Open WebUI callable suite.
+
+[Supported tools and adaptations](../docs/tool-support.md) is the explicit
+23-native/8-plugin inventory and integration boundary: no core Open WebUI fork,
+but intentional OpenAPI description rewriting and image command/default wrappers.
+The [frontend acceptance](../docs/reviews/2026-11-05-frontend-acceptance.md)
+records real viewer rendering, model-to-viewer delivery, download and native
+Desktop/Chrome UI checks in a disposable normal-user chat.

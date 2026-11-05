@@ -13,7 +13,8 @@ A JSON-lines file of every MCP tool call that can change something, whether it r
 
 ## Why this shape
 
-Destructive actions are chosen by an LLM and confirmed by a human, so an admin needs to see who did what afterwards. Read-only calls and calls still waiting for confirmation are left out, so the log stays about changes. Size-capped rotation (`<file>.1`) keeps at most two files' worth of history without a log daemon.
+Lifecycle actions may be requested by a model and confirmed by a human;
+administration is human-only. Both need a record of who changed what. Read-only calls and calls still waiting for confirmation are left out, so the log stays about changes. Size-capped rotation (`<file>.1`) keeps at most two files' worth of history without a log daemon.
 
 ## Shape
 

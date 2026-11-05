@@ -7,7 +7,27 @@
 > [!WARNING]
 > **Experimental. Do not use in production.** termiplus is a personal project and test environment. Most of the code was written with AI assistance and has not been independently security reviewed, so expect serious security bugs. It runs untrusted code and controls Docker on the host, so one such bug can expose the host, other users' files or your network. Run it only on a machine you can wipe, keep it off the public internet, and keep real users and real data away from it. Found a problem? See [SECURITY.md](SECURITY.md).
 
-Per-user Open Terminal containers for Open WebUI. Every user gets their own isolated terminal, started on demand and stopped when idle. Users can pick a **persistent** terminal (home directory survives) or a **throwaway sandbox** per chat. A self-hosted replacement for the paid Open WebUI "Terminals" orchestrator.
+Per-user Open Terminal containers for Open WebUI. Every user gets an isolated desktop workspace with browser, files and terminal, started on demand and stopped when idle. Users can pick a **persistent** desktop (home directory survives) or a **temporary desktop** per chat. A self-hosted replacement for the paid Open WebUI "Terminals" orchestrator.
+
+## Focus since Open WebUI 0.13
+
+Open WebUI's native workspace now provides Desktop, Browser, files, Git,
+terminals and app previews through Open Terminal 0.16. Termiplus focuses on
+isolating and routing each user's workspace, its lifecycle, persistent homes,
+backups and access management. **KasmVNC and our separate interactive desktop
+player and port-forwarding UI have been removed.**
+
+Choose **Desktop** or **Temporary desktop** in Open WebUI; both include the same
+native desktop support. The human management console and expiring view-only
+screen shares remain. See [native integration](docs/native-integration.md) and
+[tool validation](docs/native-tool-validation.md).
+
+Termiplus plugs into a normal terminal-server connection without an Open WebUI
+core fork. It supports **23 native model tools**, plus **8 optional Workspaces
+plugin methods** (seven backed by MCP, one console link). The gateway does
+annotate Desktop descriptions in `/openapi.json`, and the workspace image has
+desktop/input wrappers. See [supported tools and maintained adaptations](docs/tool-support.md)
+for the exact names, prerequisites and integration boundaries.
 
 ```
                         Bearer key + X-User-Id (+ X-Session-Id)
@@ -24,7 +44,9 @@ Open WebUI backend ────────────────────�
 |---|---|
 | `cmd/gateway` | Checks Open WebUI's key, routes each request to that user's container (creating or starting it), proxies HTTP and the interactive terminal WebSocket, stops or deletes idle containers |
 | `cmd/sockproxy` | Deny-by-default filter in front of the Docker socket. Only lets the gateway create and manage terminal containers, nothing else |
-| `image/` | Terminal image: Debian, common dev tools, passwordless sudo, Open Terminal server |
+| `image/` | Base image: Debian, common dev tools, passwordless sudo, Open Terminal server |
+| `image/desktop/` | Complete default workspace: XFCE, Chromium, Dolphin, office tools, Python/notebooks and Docker inside Sysbox |
+| `cmd/mcp` | Workspace lifecycle/storage tools, human management console and view-only screen shares |
 | `deploy/` | Compose file, policies, Docker runtime config, firewall script |
 
 Go standard library only, no third-party modules.
@@ -36,10 +58,13 @@ cmd/gateway/main.go         gateway entrypoint (env config)
 cmd/sockproxy/main.go       socket proxy entrypoint (env config)
 internal/gateway/           routing, lifecycle, idle reaper, WebSocket proxy, e2e tests
 internal/sockproxy/         request filter and body validation, escape-attempt tests
+cmd/mcp/main.go            MCP control plane entrypoint
+internal/mcp/              tools, identity, entitlements, console and screen shares
 internal/dockerapi/         minimal Docker API client used by the gateway
 internal/naming/            container/volume naming shared by gateway and proxy
 internal/config/            env and *_FILE secret helpers
-image/Dockerfile            terminal image
+image/Dockerfile            base terminal image
+image/desktop/             complete default workspace image
 Dockerfile                  gateway and sockproxy images (--target)
 deploy/                     docker-compose.yml, policies.json, daemon.json, firewall.sh,
                             termiplus-firewall-watch.{service,timer}, termiplus-firewall.path,
@@ -53,21 +78,23 @@ internal/netpolicy/         admin network policy: validation, persistence, confi
 
 ## Quick start (dedicated VM)
 
-Requirements: Linux VM, Docker 25+, Go 1.24 only if you want to run the tests.
+Requirements: Linux VM, Docker 25+ and Sysbox for the bundled desktop policies.
+Use Open WebUI 0.13+ and Open Terminal 0.16.0. Go 1.24+ is needed for Go checks.
 
 ```bash
-# 1. Runtimes: install gVisor and/or Sysbox, then
+# 1. Runtime: install Sysbox for the bundled desktop policies, then
 sudo cp deploy/daemon.json /etc/docker/daemon.json   # or merge into your existing one
 sudo systemctl restart docker
-docker info | grep -i runtimes                       # must list runsc and/or sysbox-runc
+docker info | grep -i runtimes                       # must list sysbox-runc for the bundled policies
 #    deploy/daemon.json starts runsc with --allow-suid, without it sudo inside gVisor fails
 #    (gVisor ignores setuid bits by default). If you merge by hand, keep that runtimeArgs entry.
 #    gVisor terminals have no DNS without the netpolicy overlay (internal DNS forwarder, see
 #    "Custom DNS and internal egress" below): deploy it whenever a policy uses runsc. Sysbox
 #    terminals resolve with or without it.
 
-# 2. Terminal image (push to your registry and pin by digest in production)
-docker build -t ot-terminal:0.14.0 image/
+# 2. Build the base and complete workspace (pin your deployed image by digest)
+docker build -t ot-terminal:0.16.0 image/
+docker build --build-arg BASE=ot-terminal:0.16.0 -t ot-desktop:0.16.0 image/desktop
 
 # 3. Secrets, each 64 hex chars. gateway and sockproxy run as uid/gid 65534 and
 #    read them through Compose's file secrets, which keep the host file mode:
@@ -79,7 +106,7 @@ done
 
 # 4. Settings for compose (deploy/.env is gitignored)
 cat > deploy/.env <<ENV
-TERMINAL_IMAGE=ot-terminal:0.14.0
+TERMINAL_IMAGE=ot-desktop:0.16.0
 DOCKER_GID=$(stat -c %g /var/run/docker.sock)
 ENV
 
@@ -107,7 +134,7 @@ sudo systemctl enable --now termiplus-portlock.service
 
 7. Open WebUI → Admin Settings → Integrations → Open Terminal → add a connection:
    - URL `http://gateway:8080`, auth type **Bearer**, key = contents of `deploy/secrets/gateway_api_key`
-   - Optionally a second one, `http://gateway:8080/p/scratch`, named e.g. "Sandbox (fresh per chat)"
+   - Optionally a second one, `http://gateway:8080/p/scratch`, named "Temporary desktop"
    - Restrict who sees which with access grants
 
 With 5a, Open WebUI must run in the `owui` network. With 5b the gateway speaks plain HTTP on `GATEWAY_BIND`: put it on a private interface (VLAN, WireGuard) or behind a TLS reverse proxy, and allow only the Open WebUI host in the VM and Proxmox firewalls. Never expose the gateway key to browsers.
@@ -125,18 +152,19 @@ With 5a, Open WebUI must run in the `owui` network. With 5b the gateway speaks p
 Open WebUI's admin terminal connection already sends who the user is:
 
 - HTTP: `Authorization: Bearer <connection key>` and `X-User-Id`, plus `X-Session-Id` (the chat) when there is one
-- WebSocket: `X-User-Id`, `X-Session-Id`, then a first message `{"type":"auth","token":"<connection key>"}`
+- PTY/Desktop/events WebSocket: identity/context headers, then a first message `{"type":"auth","token":"<connection key>"}`; native chat-scoping fields are checked consistently
+- Native Browser capability WebSocket: connection bearer and identity/context headers; application frames pass through without an injected Desktop auth message
 
-The gateway verifies the connection key, then calls the user's container with that container's own key (HMAC of `KEY_SECRET` and the container name). For the WebSocket it reads the auth message, checks it, and resends it upstream with the container key. No container is started before authentication succeeds.
+The gateway verifies the connection key, then calls the user's container with that container's own key (HMAC of `KEY_SECRET` and the container name). For first-frame-authenticated WebSockets it reads the auth message, checks it, and resends it upstream with the container key. Browser capability relays use the matching upstream header-authentication protocol. No container is started before authentication succeeds.
 
-Open WebUI also sends a few requests without a user (connection check, OpenAPI spec, system prompt). Those go to a "spec" container shared by all policies with the same runtime, and only `GET /openapi.json`, `/api/config` and `/system` are allowed. `/health` is answered by the gateway. `/api/v1/*` returns 404, so Open WebUI treats the gateway as a normal terminal, not as an orchestrator. That is why plain Bearer auth is enough.
+Open WebUI also sends a few requests without a user (connection check, OpenAPI spec, system prompt). Those go to a "spec" container shared only by policies with the same runtime, image, egress and Desktop/Browser flags, and only `GET /openapi.json`, `/api/config` and `/system` are allowed. `/health` is answered by the gateway. `/api/v1/*` returns 404, so Open WebUI treats the gateway as a normal terminal, not as an orchestrator. Desktop descriptions in the returned OpenAPI schema are annotated as documented in the [integration contract](docs/tool-support.md).
 
 ## Native Desktop and Browser
 
 Use Open WebUI **0.13+** and the bundled Open Terminal **0.16.0** image. Native
 terminal connections provide Desktop, Browser, files, Git, events and local app
 previews. Termiplus supplies isolation, user/chat routing, homes and lifecycle.
-Select the desktop policy's connection in the chat; human and assistant then use
+Both shipped policies include desktop and browser support. Select the workspace's connection in the chat; human and assistant then use
 the same native display and tools. MCP provisioning does not switch connections.
 
 The human console retains backups, lifecycle, access and expiring image-only
@@ -151,16 +179,23 @@ service are removed. See [native integration](docs/native-integration.md),
 
 | URL | Policy | User gets |
 |---|---|---|
-| `http://gateway:8080` | `default` | **Persistent** terminal, gVisor |
-| `http://gateway:8080/p/scratch` | `scratch` | **Ephemeral** sandbox per chat, gVisor |
-| `http://gateway:8080/p/sysbox` | `sysbox` | Persistent, Sysbox (systemd or Docker inside possible: `sudo apt-get update && sudo apt-get install -y docker.io`, which also starts the daemon; it restarts with the container (`start-docker` by hand) and `docker` needs no sudo), same home as `default` |
+| `http://gateway:8080` | `default` | **Desktop**, persistent home, Sysbox |
+| `http://gateway:8080/p/scratch` | `scratch` | **Temporary desktop**, a fresh workspace per chat, Sysbox |
+
+Both include XFCE, Dolphin, Chromium, Kate, the Termiplus theme and wallpaper,
+and Chromium for native Browser automation. Docker, Compose and Buildx are
+preinstalled; Sysbox runs a private Docker daemon inside each workspace.
+Scientific Python, Jupyter, LibreOffice, PDF/media converters and standard CLI
+utilities are included too; see the [image comparison](docs/open-terminal-image-review.md).
+The base `image/` is a build dependency; deploy the complete `image/desktop` image.
+There are no separate terminal-only choices in the shipped configuration.
 
 ```json
 {
-  "default": { "runtime": "runsc", "memory_mb": 2048, "cpus": 2, "pids": 512 },
-  "scratch": { "runtime": "runsc", "memory_mb": 2048, "cpus": 2, "pids": 512,
-               "storage": "ephemeral", "idle_timeout": "15m", "max_per_user": 3 },
-  "sysbox":  { "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 4, "pids": 1024, "home": "default" }
+  "default": { "runtime": "sysbox-runc", "memory_mb": 2048, "cpus": 2, "pids": 512,
+               "desktop": true },
+  "scratch": { "runtime": "sysbox-runc", "memory_mb": 2048, "cpus": 2, "pids": 512,
+               "desktop": true, "storage": "ephemeral", "idle_timeout": "15m", "max_per_user": 3 }
 }
 ```
 
@@ -168,6 +203,7 @@ service are removed. See [native integration](docs/native-integration.md),
 |---|---|
 | `runtime`, `memory_mb`, `cpus`, `pids` | Required. Must stay within the proxy's caps |
 | `label`, `description` | Optional. Name and short help text shown in the console and by `list_workspaces` (at most 60 and 300 bytes, one line). Changing them does not recreate containers |
+| `desktop` | Enables native Desktop and Browser; true in both shipped policies |
 | `storage` | `persistent` (default) or `ephemeral` |
 | `home` | Persistent only. Policies with the same `home` share the user's volume |
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
@@ -398,9 +434,25 @@ curl -H "Authorization: Bearer $KEY" -H "X-User-Id: alice" -H "Content-Type: app
 
 ## Status
 
-Last verified 2026-10-09 on a single Linux host (kernel 6.12 LTS): Docker 29.2.1 with the containerd image store, gVisor `release-20260921.0`, Sysbox CE 0.7.1, Open Terminal 0.14.0, Open WebUI 0.11.4. Earlier runs against Docker 29 with runc covered the same functions without a sandbox runtime.
+The native integration was verified locally on 2026-11-05 with Open WebUI
+0.13.0, Open Terminal 0.16.0 and Sysbox. `make check`, the complete native image
+smoke test and two consecutive deterministic runs covering all 23 published
+native tools pass. See [validation scope and reproduction](docs/native-tool-validation.md)
+and [migration status](docs/native-integration.md). These checks do not establish
+that every model will complete arbitrary GUI tasks.
+The [DeepSeek code review](docs/reviews/2026-11-05-deepseek-native-review.md)
+records five addressed findings. A fresh DeepSeek session also built and ran
+an [independent native HTTP/PTY proof](test/native-independent/INDEPENDENT_PROOF.md):
+42 checks passed, with file-viewer rendering left unproved.
 
-### Integration tests (`test/integration/run.sh`)
+### Historical runtime baseline (October 2026)
+
+The following results describe the earlier terminal stack, before the native
+Desktop/Browser migration; they are not current image validation.
+
+Verified 2026-10-09 on a single Linux host (kernel 6.12 LTS): Docker 29.2.1 with the containerd image store, gVisor `release-20260921.0`, Sysbox CE 0.7.1, Open Terminal 0.14.0, Open WebUI 0.11.4. Earlier runs against Docker 29 with runc covered the same functions without a sandbox runtime.
+
+### Historical integration tests (`test/integration/run.sh`)
 
 | Runtime | Result |
 |---|---|
@@ -414,7 +466,7 @@ The two gVisor failures are runtime behaviour, not termiplus bugs, and are repro
 
 The full security acceptance set (`test/integration/VALIDATION.md`, automated by `validate.sh`) passed under both Sysbox and gVisor on 2026-10-13; see the results there.
 
-### Real Open WebUI in front
+### Historical Open WebUI checks
 
 Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Open WebUI on the same host reaching the gateway on a private bridge address. Two admin terminal connections with Bearer auth: the root URL (persistent) and `/p/scratch` (sandbox per chat). Tested through the real web UI (headless Chromium) as two regular users, terminals running under gVisor (`runsc` with `--allow-suid`, see above):
 
@@ -426,9 +478,9 @@ Deployed with the quick start, variant 5b (`docker-compose.separate-vm.yml`), Op
 - **`X-Session-Id` from the file browser**: sent once the chat is saved (after the first message). In a new, unsaved chat the file browser sends no session id and lands in the user's `nochat` sandbox, so it shows a different sandbox than the model will use until the first message is sent
 - Gateway and proxy logs showed no errors and no denials during normal use
 
-### Known issues found
+### Issues recorded in that baseline
 
-- **No job control in the interactive terminal.** Open Terminal starts `$SHELL` (falling back to `/bin/sh`, the image does not set `SHELL`) with `start_new_session=True` but does not make the PTY the controlling terminal, so the shell prints `can't access tty; job control turned off`. This is Open Terminal behaviour and happens under every runtime. Setting `ENV SHELL=/bin/bash` in `image/Dockerfile` would at least give users bash.
+- **Interactive shell/job control:** the old image fell back to `/bin/sh` and emitted a job-control warning. The current image sets `SHELL` to its Bash wrapper and initializes the controlling PTY; see `image/Dockerfile` and `image/bash-ctty`.
 - **gVisor DNS and sudo**, see above. Both are solved by configuration: `deploy/daemon.json` (`--allow-suid`) and the netpolicy overlay (DNS). With both, gVisor passes the full acceptance set; the base stack alone has no DNS under gVisor.
 
 ## Known limits

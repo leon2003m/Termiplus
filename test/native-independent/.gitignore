@@ -1,0 +1,6 @@
+/TEST_CONTEXT.json
+/.test-token
+/proof/proof_evidence.json
+/proof/run-output.txt
+/proof/user-shell-probe.txt
+__pycache__/

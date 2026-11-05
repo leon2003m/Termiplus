@@ -38,3 +38,47 @@ and re-encodes pixels. See [Share](../objects/control-plane/share.md).
 Changes affect the desktop overlay, image smoke tests, MCP/gateway share tests
 and OIDC fixtures. They must preserve tenant routing and read-only recipient
 access. Native image tests and real Open WebUI testing are separate gates.
+
+The image also packages the Termiplus applications and theme: Dolphin, Chromium,
+Kate and wallpaper. `image/desktop/files/usr/local/bin/startxfce4` is invoked
+by Open Terminal inside its display/D-Bus session; it seeds missing preferences
+and sets the wallpaper for the connected monitor only if its current image is
+absent. `image/desktop/defaults.py` seeds the dock before XFCE creates stock
+panels, migrates removed Firefox/Ristretto/htop and mail launchers on saved homes,
+sets Chromium and Dolphin as defaults, removes panel actions and disables
+logout/lock/mail keyboard shortcuts, including inherited bindings absent from
+partial saved profiles. Malformed MIME/panel/shortcut files are preserved as
+`.invalid-*` backups and replaced with valid defaults so startup can recover.
+Hidden desktop entries omit unsupported
+mail, TeX documentation GUI and logout; XFCE kiosk settings disable shutdown
+and saved sessions. These are UI guards, not a restriction against the user
+with sudo. Other personal settings remain on the existing home volume. The native smoke
+test checks the running XFCE wallpaper selection and Dolphin folder association.
+
+`image/desktop/prepare.py` acquires native Chromium profile leases before
+removing abandoned singleton symlinks after container recreation. Managed homes
+survive but PIDs are reused; active leases and unmanaged profiles stay intact.
+The desktop Dockerfile's `OPEN_TERMINAL_INFO` adds coordinate examples through
+the upstream `/system` prompt. Click/move require `x/y`; `to_x/to_y` are drag
+destinations. Open WebUI model vision capability must be enabled for image tools.
+`internal/gateway/native_schema.go` adds these requirements to native OpenAPI
+operation and field descriptions as well; runtime action validation is unchanged.
+The Linux screenshot is 1280×800; native schema descriptions explain raw pixels
+and conversion from normalized vision coordinates. The smoke test checks its size.
+`image/desktop/files/usr/local/bin/xdotool` intercepts only the two native
+synchronous pointer-move command shapes, then checks actual pointer position
+with a deadline. This avoids TigerVNC waits on repeated clicks at the current
+position, including drag starts. It also turns unknown-key warnings from the
+native `key --clearmodifiers` command into a nonzero exit, preserving native
+partial-batch failure reporting. Other xdotool commands pass through unchanged.
+The smoke test repeats native clicks at the same point to catch input timeouts.
+User Python and the explicitly installed notebook kernel use `/opt/workspace`;
+the API retains `/opt/open-terminal`. Inner Docker starts through `image/start`
+under Sysbox, using its own socket, and Tini is PID 1.
+
+Live model-tool contract verification uses `.github/scripts/native-tool-contract.py`
+and `.github/scripts/native-tool-fixture.py` to observe actual DOM input from
+shared Desktop Chromium and native Browser. It covers all published actions,
+repeated clicks, batch preflight and Desktop/Browser partial failures through the actual
+Open WebUI callables. It also asserts the live published coordinate descriptions;
+this is separate from model inference and recipient shares.

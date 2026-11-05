@@ -46,39 +46,27 @@ Open WebUI and both oauth2-proxies must reach the issuer
 (`KEYCLOAK_PUBLIC_URL/realms/termiplus`) under that same URL, because token
 issuers are compared literally.
 
-## 3. Desktops (optional)
+## 3. Desktop workspaces
 
-Set `TERMINAL_IMAGE` to the desktop image (`image/desktop`) and add a policy with
-`"desktop": true` to `deploy/policies.json`. The socket proxy must allow the selected
-image; the desktop image runs Open Terminal like the terminal image and starts a
-desktop only for desktop policies. For example:
+Build `image/` first, then `image/desktop` with that base. Set `TERMINAL_IMAGE`
+to the complete desktop image; the socket proxy must allow that image.
+The shipped `deploy/policies.json` offers **Desktop** (`default`, persistent)
+and **Temporary desktop** (`scratch`, per chat). Both use Sysbox and enable
+native Desktop and Browser. Their memory/CPU/PID limits remain in effect.
 
-```json
-"desk": {
-  "label": "Desktop",
-  "description": "A graphical Linux desktop in your browser, with file manager and web browser. Same home folder as Terminal.",
-  "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 2, "pids": 1024,
-  "home": "default", "desktop": true
-}
-```
+The image includes XFCE, TigerVNC over its private Unix socket, Dolphin,
+Kate, Chromium as its sole browser, audio support, the dark Termiplus theme,
+and the Termiplus wallpaper. The native desktop starts on demand. Missing user
+preferences are seeded when it starts; personal themes and wallpaper choices
+are preserved. Chromium's sandbox stays enabled.
 
-A throwaway desktop works the same way, with `"storage": "ephemeral"` and an
-`idle_timeout` instead of a home. Policy names are lower-case letters and
-digits only, so call it e.g. `tempdesk`:
-
-```json
-"tempdesk": {
-  "label": "Temporary desktop",
-  "description": "A throwaway desktop with web browser, file manager and editor. Everything is deleted after 15 minutes without use.",
-  "runtime": "sysbox-runc", "memory_mb": 4096, "cpus": 2, "pids": 1024,
-  "storage": "ephemeral", "idle_timeout": "15m", "max_per_user": 1, "desktop": true
-}
-```
-
-The image contains XFCE, TigerVNC (Unix socket only), Chromium and the native
-Open Terminal desktop/browser dependencies. It has no KasmVNC service, VNC
-password, custom theme or port-6901 listener. Chromium's sandbox stays enabled.
-Native desktop/browser flags are enabled only for desktop policies.
+When consolidating an older installation, keep `default` and its existing home
+volume name. `desk` and `sysbox` previously shared that home; back up container
+root filesystems before removing those redundant policies. Back up ephemeral
+workspaces before retiring `tempdesk` or recreating `scratch`; they have no home
+volume. Update Open WebUI's existing `default`/`scratch` connection names to
+Desktop/Temporary desktop and remove duplicate connections. Keep connection
+credentials and access grants. No home volume needs renaming or deletion.
 
 ## 4. Start
 
@@ -118,9 +106,10 @@ console can show their sessions (see `docs/mcp.md`, §8).
 
 ## 7. Native connection and migration
 
-Configure a terminal connection to `http://gateway:8080/p/desk` with the gateway
+Configure a terminal connection to `http://gateway:8080/p/default` with the gateway
 API key and appropriate Open WebUI connection access rules. Select it in the
-chat, then open the native Desktop/Browser tabs. The assistant uses the same
+chat, then open the native Desktop/Browser tabs. Use `/p/scratch` for Temporary
+desktop. The assistant uses the same
 connection's native tools. For ephemeral profiles use a saved chat and let native
 requests create that chat's workspace; MCP-created ephemeral sessions are separate.
 

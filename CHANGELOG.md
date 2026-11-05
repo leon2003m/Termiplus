@@ -6,32 +6,43 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
-- Deterministic live verification of all 23 Open WebUI-generated native tools,
-  published parameters and Desktop/Browser actions with independent GUI oracles.
+- Deterministic live verification of all 23 Open WebUI native tools, their
+  published parameters and every Desktop/Browser action, with independent GUI
+  observations and coverage checks for future upstream inventory changes.
 
-### Fixed
+- Complete desktop image includes the standard Open Terminal workspace tools:
+  inner Docker with Compose/Buildx, scientific Python and Jupyter, LibreOffice,
+  document/PDF/media converters, scripting/build and session/network utilities.
+  User Python and notebook kernels share libraries in a venv separate from the API.
+  Tini reaps child processes. No host Docker socket or sandbox permissions added.
 
-- Annotate native Desktop OpenAPI descriptions with required coordinate fields
-  and the 1280x800 raw pixel scale while retaining upstream payload validation.
+- Terminal image includes fdfind, rsync, bc and pipx (about 10 MB additional image size); native workspace ownership and egress limits are documented.
 
-### Added
+- Console dialogs replace browser prompts, with duration presets, an exact-name person picker and copyable share links. Terminal cards show observed activity and idle-deletion estimates; workspace help explains private access.
 
-- Complete native desktop workspace image with private Sysbox Docker,
-  scientific Python/notebooks, LibreOffice and standard development tools.
+- Owner-only desktop thumbnails in the console, refreshed every 30 seconds while visible. Stopped desktops show Offline without starting a container.
 
-### Changed
-
-- Ship Desktop and Temporary desktop profiles with Chromium, Dolphin, Kate,
-  XFCE Terminal and btop; retain persistent homes and existing resource limits.
-
-### Fixed
-
-- Restore native desktop theme/wallpaper and application defaults, hide session
-  controls, and recover malformed saved settings without losing their originals.
-- Bound native pointer synchronization and report unknown X11 keys as failed
-  actions with partial-batch progress instead of silently succeeding.
+- Workspaces can have a `label` and `description` in `policies.json`. The console and `list_workspaces` show them instead of the bare policy name; the default policies are now called Desktop and Temporary desktop. Changing them does not recreate containers.
+- Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
+- Offline workspaces: a policy with `"egress": "offline"` puts its terminals on an internal-only Docker network (`deploy/docker-compose.offline.yml`, `OFFLINE_NETWORK`) with no DNS, no internet, no LAN and no terminal-to-terminal traffic; only the gateway can reach them. `firewall.sh` adds host rules for that bridge. Without the overlay, the gateway refuses offline policies instead of falling back to the internet. The netpolicy deny-list now also covers the offline subnet `172.30.1.0/24`; a stored policy with a DNS or egress entry there stops the gateway at startup until that entry is removed.
 
 ### Changed
+
+- Document the exact 23 native tools, seven MCP tools and plugin-only console
+  link, plus the maintained gateway/schema/image adaptations and drop-in scope.
+- Document the focus since Open WebUI 0.13 prominently in the README: native
+  workspace interaction upstream, isolation/lifecycle/storage/access in Termiplus.
+  Refresh deployment, security and map docs; label pre-migration analyses as historical.
+- Record the external DeepSeek review, its fixes and a separately authored,
+  executed native HTTP/PTY verification harness with explicit coverage limits.
+- Record frontend acceptance of text/image/PDF rendering, real model-to-viewer
+  delivery, PDF download and the native Desktop/Chrome UI.
+
+- Use Chromium as the only desktop browser and btop instead of htop; omit
+  Ristretto and ImageMagick. Keep LibreOffice and XFCE Terminal.
+- Offer Desktop and Temporary desktop as the two default workspace choices,
+  both with native Browser, files and terminal support under Sysbox. Keep the
+  persistent home volume and existing resource limits.
 - Integrate Open WebUI 0.13 native workspaces with Open Terminal 0.16; route
   native Desktop, Browser, events, files, Git and app-preview protocols per user/chat.
 - Replace KasmVNC and the owner desktop player with the native Desktop; remove
@@ -41,34 +52,33 @@ All notable changes to this project are documented here. The format is based on 
 - Keep expiring/revocable view-only shares as native screen images refreshed
   every five seconds, without keyboard, mouse, clipboard or audio access.
 
-
-
-### Fixed
-- Run native Desktop/Browser CI tests under Sysbox so Chromium keeps its sandbox.
-- Give the "Terminal with Docker" workspace its own fallback text in the console instead of repeating the plain terminal text.
-
-
-### Added
-
-- Terminal image includes fdfind, rsync, bc and pipx (about 10 MB additional image size); workspace tool and desktop-control design notes document the proposal and egress limits.
-
-- Console dialogs replace browser prompts, with duration presets, an exact-name person picker and copyable share links. Terminal cards show observed activity and idle-deletion estimates; workspace and port help explain private access.
-
-- Owner-only desktop thumbnails in the console, refreshed every 30 seconds while visible. Stopped desktops show Offline without starting a container.
-
-- Workspaces can have a `label` and `description` in `policies.json`. The console and `list_workspaces` show them instead of the bare policy name; the default policies are now called Terminal, Temporary terminal and Terminal with Docker. Changing them does not recreate containers.
-- Desktop image: file manager, Firefox ESR with uBlock Origin, Kate, an image viewer, app menu, a dark theme, default applications for Home, File System and links, and a wallpaper that can be replaced before building.
-- Docs: a system map for agents and contributors under `map/`. It covers objects, processes and change effects, cites source lines, and is built with the vendored icm-architect skill (`.claude/skills/icm-architect/`). `make map` regenerates its twins, and `make lint` fails on drift.
-- Offline workspaces: a policy with `"egress": "offline"` puts its terminals on an internal-only Docker network (`deploy/docker-compose.offline.yml`, `OFFLINE_NETWORK`) with no DNS, no internet, no LAN and no terminal-to-terminal traffic; only the gateway can reach them. `firewall.sh` adds host rules for that bridge. Without the overlay, the gateway refuses offline policies instead of falling back to the internet. The netpolicy deny-list now also covers the offline subnet `172.30.1.0/24`; a stored policy with a DNS or egress entry there stops the gateway at startup until that entry is removed.
-
-### Changed
-
 - Record the alpha checkpoint and the decision to use Open WebUI's native
   Desktop and Browser workspace, retaining termiplus isolation and storage.
 
-- Desktop defaults now use Dolphin, matching dark Qt/GTK settings, a green accent and a compact bottom dock with Firefox, Dolphin, terminal and Kate. Existing home-folder customizations remain in place.
+- Desktop defaults now use Dolphin, matching dark Qt/GTK settings, a green accent and a compact bottom dock with Chromium, Dolphin, terminal and Kate. Existing home-folder customizations remain in place.
 
 - MQTT discovery messages are off by default. Set `MQTT_DISCOVERY_PREFIX` to your hub's discovery prefix to keep sending them; the MQTT docs and examples no longer name a specific hub.
+
+### Fixed
+
+- Suppress inherited logout/lock/mail shortcuts in partial saved XFCE profiles.
+  Preserve malformed desktop configuration files before restoring usable defaults,
+  so damaged persistent settings do not prevent the desktop from starting.
+- Report unknown X11 key names as failed Desktop actions, with partial-batch
+  progress, instead of returning a successful screenshot after ignoring input.
+- Prevent native Desktop input timeouts when clicking the current pointer position;
+  confirm pointer movement with a bounded position check.
+- Repair saved default applications and obsolete launchers; seed the configured
+  dock before XFCE generates stock panels. Hide unsupported mail/TeX GUI entries
+  and session-ending controls, including logout keyboard shortcuts.
+- Announce the shared graphical desktop explicitly in native model context,
+  including raw pixel coordinates for its 1280×800 screenshots.
+- Explain native Desktop action coordinates in OpenAPI field descriptions and
+  upstream system context; release abandoned managed Chromium profile locks after recreation.
+- Restore Dolphin, Chromium, Kate, the Termiplus theme, app dock and wallpaper
+  in the native desktop image. Initialize the wallpaper on TigerVNC displays
+  while preserving personal desktop preferences.
+- Run native Desktop/Browser CI tests under Sysbox so Chromium keeps its sandbox.
 
 ### Security
 

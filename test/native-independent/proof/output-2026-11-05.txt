@@ -1,0 +1,45 @@
+PASS  inventory                  openapi discovery                  23 operations; desktop conditional descriptions present
+PASS  auth                       missing bearer rejected            unauthenticated /info rejected with 401
+PASS  get_info                   read workspace capability info     info describes XFCE desktop/browser
+PASS  write_file                 write + implicit parent dirs       created parent dirs and two files
+PASS  list_files                 list fixture directory             listed ['a.txt', 'b.txt']
+PASS  read_file                  read + line range                  full read + start_line/end_line range
+PASS  read_file                  negative missing file              missing file -> 404 File not found
+PASS  glob_search                glob with type/exclude             glob + type + exclude + max_results
+PASS  grep_search                grep params and case folding       literal grep + case_insensitive + file include
+PASS  match_files                match with limit/offset contract   ranked name/path/content match
+PASS  search_files               filename search + type filter      filename ranking with type filter
+PASS  replace_file_content       replace with line bounds           bounded unique replacement verified by read_file
+PASS  replace_file_content       ambiguous vs allow_multiple        ambiguous match rejected HTTP 400; allow_multiple replaced 2
+PARTIAL display_file               open file in viewer                viewer notified (exists=true); GUI rendering not asserted
+PASS  run_command                cwd + env + wait                   cwd/env honoured; exit 0; output verified
+PASS  run_command                negative missing command           missing required command -> 422
+PASS  run_command                start interactive process          long-running process returned id
+PASS  send_process_input         write to process stdin             stdin write accepted
+PASS  get_process_status         status wait/offset + output        status/wait/offset; echoed stdin observed
+PASS  kill_process               force kill + verify status         force kill; later status is killed/exit -9
+PASS  kill_process               negative unknown process           unknown process -> 404
+PASS  list_processes             list owned processes               process inventory readable (28 entries)
+PASS  send_user_terminal_input   negative: no attached shell        unattached shell rejected with 404
+PASS  read_user_terminal         negative: no attached shell        unattached shell rejected with 404
+PASS  send_user_terminal_input   documented WS attach + stdin       documented PTY WS attach; stdin accepted and echoed
+PASS  read_user_terminal         documented WS attach + stdout      readback contains USER-SHELL-PROOF-42
+PASS  browser_snapshot           fixture server prerequisite        local HTTP fixture server on loopback:18799
+PASS  browser_tabs               list chat tabs                     chat-scoped tab list; current tab in chrome mode
+PASS  browser_snapshot           accessibility snapshot             accessibility tree with element refs
+PASS  browser_screenshot         PNG screenshot                     valid PNG 1279x799
+PASS  browser_action             click + type effects               ref click/type/click changed DOM (CLICKED-hello42)
+PASS  browser_action             key action effect                  key effect observed (KEY-a)
+PASS  browser_action             double_click effect                double_click effect observed
+PASS  browser_action             move coordinates                   move destination observed (MOVE-300,250)
+PASS  browser_action             drag with to_x/to_y                drag destination (600,500) observed in DOM event
+PASS  browser_action             scroll direction/amount            scroll accepted; screenshot changed=True
+PASS  browser_action             navigate + history + reload        navigate/back/forward/reload titles verified
+PASS  browser_action             partial failure semantics          batch partial failure reports completed=1 failed=1
+PASS  browser_action             negative parameters                non-HTTP URL 400; click without ref/x/y 422
+PASS  desktop_screenshot         PNG dimensions                     1280x800 PNG screenshot
+PASS  desktop_action             pointer/scroll actions             move/click/double_click/scroll/drag each returned PNG
+PASS  desktop_action             key/type end-to-end GUI effect     key alt+F2 + type + Return opened terminal and wrote file
+PASS  desktop_action             validation/partial failure         batch validated before run (422); out-of-bounds 400
+
+SUMMARY pass=42 partial=1 fail=0 duration=18.9s

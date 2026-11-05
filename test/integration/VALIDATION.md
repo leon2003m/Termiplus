@@ -1,5 +1,11 @@
 # termiplus v0.1.0 live validation
 
+This is the historical runtime/firewall acceptance record. Its results do not
+establish current native Desktop/Browser compatibility; see
+[native validation](../../docs/native-tool-validation.md) for the current
+Open WebUI 0.13 / Open Terminal 0.16 checks. These host-firewall scenarios have
+not been rerun as part of that native tool validation.
+
 Scenarios to run against a **real Docker host** before tagging v0.1.0. Unit and
 in-process tests cover the code paths; these prove the security model holds with
 a live runtime, iptables/ebtables and Docker networking in the loop — which the

@@ -5,11 +5,16 @@ Git, events, Desktop screenshots/actions and Browser automation. Termiplus does
 not implement a second screenshot/click/type/browser tool family, WebDriver
 service, desktop player or port forwarding UI.
 
+The [supported tool inventory](tool-support.md) lists exact native and plugin
+method names and our maintained adaptations. The connection interface is
+drop-in; Desktop schema descriptions and image command/default wrappers are
+deliberate Termiplus changes.
+
 Use one selected terminal connection in one saved chat. Native HTTP, WebSocket
-and tool calls must resolve to the same user/policy/chat sandbox. Persistent
-terminal and desktop policies may share a home profile; shared files do not
-imply the same running display. For shared human/AI desktop interaction select
-the **desktop connection itself**. See [native integration](native-integration.md)
+and tool calls must resolve to the same user/policy/chat sandbox. The bundled policies are **Desktop** (`default`, persistent) and **Temporary
+desktop** (`scratch`, per chat), both with Desktop/Browser enabled. Custom
+policies may share a home profile; shared files do not imply the same running
+display. For shared human/AI desktop interaction select the same connection. See [native integration](native-integration.md)
 and [control plane](mcp.md).
 
 Termiplus tools concern provisioning, lifecycle, homes, backups and expiring
@@ -29,3 +34,6 @@ versus desktop first-frame auth, role/entitlement denial, archive limits,
 read-only share transport, expiry and revocation. The native image smoke test
 checks the real upstream endpoints; it must not disable Chromium's sandbox to
 make a test pass.
+
+The [deterministic tool contract](native-tool-validation.md) documents every
+published native model tool and action, its behavioral assertions and limits.

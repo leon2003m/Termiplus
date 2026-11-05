@@ -9,7 +9,7 @@ entity: internal/mcp/directory.go
 
 # Directory
 
-The user directory behind the OIDC provider, as far as the admin tools need it. In code: the `mcp.Directory` interface, implemented by `KeycloakDirectory`.
+The user directory behind the OIDC provider, as used for role checks, recipient lookup and departure watching. In code: the `mcp.Directory` interface, implemented by `KeycloakDirectory`.
 
 ## Why this shape
 
@@ -39,7 +39,7 @@ Citations: `internal/mcp/directory.go:14-50`, `cmd/mcp/main.go:91-97`, `deploy/k
 
 | Surface | Role |
 |---|---|
-| admin tools | read and change membership |
+| internal directory handlers | role/group reads and retained membership methods; not model-facing |
 | Keycloak | owns users and groups |
 
 ## See

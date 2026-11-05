@@ -54,3 +54,8 @@ Open WebUI thinks it talks to *one* Open Terminal. The gateway must therefore be
 ## Native integration update (2026-11-04)
 
 Native HTTP and Desktop/PTY/events/process sockets preserve user and chat. Optional first-frame chat_id must agree with an existing header. Browser view ws/stream/vnc instead use header bearer authentication, checked before provisioning. Discovery is shared only across equal runtime, image, egress and Desktop feature flags. Source: internal/gateway/gateway.go:specPolicies, internal/gateway/ws.go, internal/gateway/native_test.go.
+
+`proxyHTTP` annotates successful GET `/openapi.json` responses with the native
+Desktop action coordinate requirements (`native_schema.go`). This adds model
+descriptions only, preserving endpoints, schemas' constraints, auth and request
+validation. Non-schema, compressed and oversized bodies pass through unchanged.
