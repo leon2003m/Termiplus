@@ -95,3 +95,9 @@ but intentional OpenAPI description rewriting and image command/default wrappers
 The [frontend acceptance](../docs/reviews/2026-11-05-frontend-acceptance.md)
 records real viewer rendering, model-to-viewer delivery, download and native
 Desktop/Chrome UI checks in a disposable normal-user chat.
+
+The release workflow publishes a Trivy-generated SPDX package SBOM for the
+complete desktop as a signed, verified cosign attestation after image export.
+This avoids BuildKit's 80 MiB inline file-level SBOM limit while retaining image
+signatures and maximum provenance. Other images keep their inline BuildKit SBOMs;
+all six have downloadable package SBOMs and scan reports. See [release](processes/release.md).

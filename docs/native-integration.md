@@ -54,7 +54,7 @@ changes independently; do not copy Open WebUI code.
 ## Validation status (2026-11-05)
 
 - Alpha checkpoint: `808cc87`; the integrated native workspace changes are
-  included in release candidate `1.0.0-rc.3`.
+  included in release candidate `1.0.0-rc.4`.
 - `make check` passes, including race detection and all 30 plugin tests.
 - Native gateway tests cover first-frame and Browser header authentication,
   chat scoping, per-user routing, capability discovery and denied legacy routes.
@@ -87,7 +87,7 @@ changes independently; do not copy Open WebUI code.
 
 Existing home volumes, backup data and deployed credentials are retained.
 Running workspaces are adopted; their image updates when their normal lifecycle
-recreates them. Release candidate `1.0.0-rc.3` packages this native integration;
+recreates them. Release candidate `1.0.0-rc.4` packages this native integration;
 see [the changelog](../CHANGELOG.md#100-rc3---2026-11-05) for upgrade notes.
 
 ## Testing in Open WebUI
