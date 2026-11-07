@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- Integration test (`test/integration/run.sh`): the sandbox bridge runs with
+  `enable_icc:false`, so `firewall.sh` must re-pin the gateway and lock each new
+  terminal's bridge port. The one-shot apply ran before any workspace existed,
+  leaving later-created terminals unreachable (every request to them returned
+  502 `terminal unavailable`) regardless of runtime. The run now re-applies the
+  firewall in the background for the duration of the checks, mirroring the
+  production `termiplus-firewall-watch` timer, and stops it on cleanup.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource
