@@ -100,8 +100,10 @@ They supplement the selected native connection and do not attach or switch it.
 | `share_desktop` | `create`, `list`, `revoke`; expiring image-only view links, creation requires confirmation |
 | `open_console` | Return the human console link; execute no administration |
 
-MCP discovery and direct calls enforce the seven-tool allowlist even for admin
-accounts. Network policy, entitlements, user/group administration, audit queries,
+A native MCP Apps connection instead shows the model only the read-only
+`open_workspaces` panel entry; the seven management tools are app-only there
+(see [Workspace panel](mcp.md#workspace-panel-mcp-app)). MCP discovery and
+direct calls enforce the eight-tool allowlist even for admin accounts. Network policy, entitlements, user/group administration, audit queries,
 departed-user actions and snapshot restore/delete/pruning are outside the model
 surface. Human console/provider administration has its own authentication and
 permission checks. See [MCP contract](mcp.md) and

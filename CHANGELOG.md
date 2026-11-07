@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- MCP App workspace panel: the read-only `open_workspaces` tool opens an inline
+  panel (sessions, home backups, screen links) in MCP Apps hosts. The
+  management tools are app-only in `tools/list`; server-side gates are
+  unchanged. See [Workspace panel](docs/mcp.md#workspace-panel-mcp-app).
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource

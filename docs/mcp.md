@@ -20,11 +20,12 @@ proxy. Neither model arguments nor share tokens choose another user's container.
 | `reset_workspace` | Recreate a persistent container while keeping `/home/user`, or remove a temporary sandbox; confirmation required |
 | `manage_snapshots` | **List/create only.** At capacity creation fails; it cannot delete/prune/restore an older backup |
 | `share_desktop` | List, create or revoke the caller's expiring view-only screen links; creation needs confirmation |
+| `open_workspaces` | Read-only overview that opens the workspace panel in MCP Apps hosts (see below) |
 
 The Open WebUI plugin also offers `open_console`, which returns a human console
 link. It does not run an administrative operation.
 The [complete supported tool inventory](tool-support.md) distinguishes these
-seven MCP tools plus one plugin-only link from the 23 native Open Terminal tools.
+seven plugin MCP tools, the `open_workspaces` panel entry and one plugin-only link from the 23 native Open Terminal tools.
 
 **Network policy, entitlements, users, groups, audit queries and departed-user
 management are not model tools.** The MCP transport rejects direct calls even
@@ -37,6 +38,35 @@ The plugin's confirmation modal protects against accidental destructive calls
 in normal chat use. It is not cryptographic proof of human consent for a client
 holding an MCP credential; server-side allowlists independently enforce the
 administration and snapshot restrictions above.
+
+## Workspace panel (MCP App)
+
+Hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
+(`io.modelcontextprotocol/ui`, Open WebUI 0.13+) get one model-visible entry
+tool, `open_workspaces`. It is read-only and returns the caller's entitled
+workspaces, sessions, home backups (list) and active screen links, rendered as
+an inline panel from the `ui://termiplus/workspaces` resource. The panel is a
+single embedded HTML file with no remote scripts, styles, frames or network
+access (empty CSP domain lists); it renders data as text only and opens backup
+downloads only as `http(s)` links through the host.
+
+The panel's buttons call the existing tools (`reset_workspace`,
+`destroy_session`, `manage_snapshots` create, `share_desktop`) through the host.
+Those tools are listed with `_meta.ui.visibility: ["app"]`, so an MCP Apps host
+hides them from the model. The panel never calls `request_session`; opening it
+starts nothing. Destructive buttons need a second click in the panel, and the
+host asks the user before every app tool call.
+
+Visibility is a host convention, not authorization. The server enforces the same
+allowlist, RBAC, entitlement and `_confirmed` rules for every caller, so the
+Open WebUI plugin keeps working unchanged and a forged call gains nothing.
+Snapshot restore/delete, pruning and administration stay in the human console.
+
+A native Open WebUI MCP connection (Streamable HTTP) goes through the same
+`oauth2-proxy` as the plugin: authentication **OAuth** (the user's SSO token)
+and Headers `{"X-Termiplus-Owui-Key": "<shared key>", "X-Termiplus-Owui-User":
+"{{USER_ID}}"}`, so `ProxyHeaderAuthenticator` links the same Open WebUI id.
+Verify the panel in your Open WebUI version before retiring the plugin.
 
 ## Working together in the native Desktop
 

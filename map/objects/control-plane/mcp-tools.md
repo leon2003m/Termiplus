@@ -3,7 +3,7 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-11-04 (native integration)
+verified: 2026-11-07 (MCP App panel)
 entity: internal/mcp/server.go
 ---
 
@@ -31,8 +31,17 @@ against a client that already holds credentials. Native desktop/browser/files/
 execution are supplied by the selected Open WebUI connection, not these tools.
 MCP provisioning does not automatically attach a chat to a connection.
 
+MCP App: `internal/mcp/app.go` adds the read-only `open_workspaces` entry
+tool (model + app visible, `structuredContent`) and serves the embedded panel
+`internal/mcp/app/workspaces.html` via `resources/list|read` (authenticated).
+`toolMeta` marks the seven management tools `visibility:["app"]` in
+`tools/list` only; `callTool`/`invoke` gates are unchanged, so app-only is UX,
+not authorization. The panel never calls `request_session`. JSON-RPC
+notifications get HTTP 202 with no body.
+
 Source: `internal/mcp/server.go:callTool`, `internal/mcp/server.go:invoke`,
 `internal/mcp/homes.go`, `internal/mcp/gateway_backend.go`,
 `integrations/openwebui/termiplus_workspaces.py`,
-`internal/mcp/server_test.go:TestModelCannotInvokeConsoleToolsEvenAsAdmin`.
+`internal/mcp/server_test.go:TestModelCannotInvokeConsoleToolsEvenAsAdmin`,
+`internal/mcp/app_test.go`.
 See [tool call](../../processes/mcp-tool-call.md) and [Share](share.md).

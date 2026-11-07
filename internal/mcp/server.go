@@ -39,7 +39,7 @@ type Server struct {
 func NewServer(auth Authenticator, backend Backend, version string) *Server {
 	s := &Server{auth: auth, backend: backend, version: version}
 	s.tools = s.buildTools()
-	for _, extra := range [][]tool{s.homeTools(), s.shareTools(), s.departedTools()} {
+	for _, extra := range [][]tool{s.homeTools(), s.shareTools(), s.departedTools(), {s.appTool()}} {
 		s.tools = append(s.tools, extra...)
 	}
 	return s
@@ -209,8 +209,9 @@ type contentBlock struct {
 }
 
 type toolResult struct {
-	Content []contentBlock `json:"content"`
-	IsError bool           `json:"isError,omitempty"`
+	Content           []contentBlock  `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
 }
 
 type toolAnnotations struct {
@@ -225,6 +226,7 @@ type toolSpec struct {
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
 	Annotations toolAnnotations `json:"annotations"`
+	Meta        map[string]any  `json:"_meta,omitempty"`
 }
 
 // ServeHTTP dispatches a single JSON-RPC request per POST.
@@ -254,6 +256,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.ID) == 0 || string(req.ID) == "null" {
+		// A JSON-RPC notification gets no response body (Streamable HTTP: 202).
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
 	resp := &rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
@@ -267,7 +274,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resp.Result = result
 		}
-	case "notifications/initialized", "ping":
+	case "resources/list", "resources/read", "resources/templates/list":
+		result, rerr := s.handleResources(r, req.Method, req.Params)
+		if rerr != nil {
+			resp.Error = rerr
+		} else {
+			resp.Result = result
+		}
+	case "ping":
 		resp.Result = map[string]any{}
 	default:
 		resp.Error = &rpcError{Code: codeMethodNotFound, Message: "unknown method " + req.Method}
@@ -278,8 +292,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) initialize() map[string]any {
 	return map[string]any{
 		"protocolVersion": protocolVersion,
-		"capabilities":    map[string]any{"tools": map[string]any{}},
-		"serverInfo":      map[string]any{"name": "termiplus", "version": s.version},
+		"capabilities": map[string]any{
+			"tools":      map[string]any{},
+			"resources":  map[string]any{},
+			"extensions": map[string]any{appExtension: map[string]any{"mimeTypes": []string{appMIMEType}}},
+		},
+		"serverInfo": map[string]any{"name": "termiplus", "version": s.version},
 	}
 }
 
@@ -303,6 +321,7 @@ func (s *Server) listTools() []toolSpec {
 				DestructiveHint:      t.destructive,
 				RequiresConfirmation: t.destructive,
 			},
+			Meta: toolMeta(t.name),
 		})
 	}
 	return out
@@ -365,7 +384,7 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 // exposed to models automatically, even for an administrator's chat.
 func modelTool(name string) bool {
 	switch name {
-	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "manage_snapshots", "share_desktop":
+	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "manage_snapshots", "share_desktop", appToolName:
 		return true
 	}
 	return false
@@ -408,7 +427,11 @@ func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[
 	if err != nil {
 		return nil, &rpcError{Code: codeInternal, Message: "marshal result"}
 	}
-	return &toolResult{Content: []contentBlock{{Type: "text", Text: string(js)}}}, nil
+	res := &toolResult{Content: []contentBlock{{Type: "text", Text: string(js)}}}
+	if t.name == appToolName {
+		res.StructuredContent = js
+	}
+	return res, nil
 }
 
 func (s *Server) findTool(name string) *tool {
