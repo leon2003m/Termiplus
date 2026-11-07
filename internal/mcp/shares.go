@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -258,7 +259,7 @@ func (s *Server) shareDesktop(ctx context.Context, p Principal, args map[string]
 		if err := s.shares.Revoke(p.UserID, argString(args, "share_id")); err != nil {
 			return nil, err
 		}
-		return map[string]any{"revoked": argString(args, "share_id")}, nil
+		return s.panelResult(ctx, p, "Revoked the screen-share link.", map[string]any{"revoked": argString(args, "share_id")})
 	case "create":
 	default:
 		return nil, errors.New(`action must be "create", "list" or "revoke"`)
@@ -306,13 +307,17 @@ func (s *Server) shareDesktop(ctx context.Context, p Principal, args map[string]
 	if forName != "" {
 		who = "only " + forName + " (after signing in)"
 	}
-	return map[string]any{
+	name := sess.Label
+	if name == "" {
+		name = sess.Workspace
+	}
+	return s.panelResult(ctx, p, "Shared "+name+" for "+strconv.Itoa(int(ttl/time.Minute))+" min.", map[string]any{
 		"share_id": sh.ID,
 		"url":      s.desktopBase + sharePathPrefix + token + "/",
 		"expires":  sh.Expires,
 		"who":      who,
-		"note":     "view only: screen images update every five seconds; no input, clipboard or audio; revoke with share_desktop action revoke",
-	}, nil
+		"note":     "View only: screen images update every five seconds; no input, clipboard or audio; revoke with share_desktop action revoke",
+	})
 }
 
 func (s *Server) shareGate(p Principal, args map[string]any) (bool, error) {

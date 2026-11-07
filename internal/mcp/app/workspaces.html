@@ -94,6 +94,7 @@ button:disabled{opacity:.5;cursor:default}
     status("Working…");
     return request("tools/call", { name: name, arguments: args }).then(parseResult);
   }
+  function isState(r) { return !!r && typeof r === "object" && (Array.isArray(r.sessions) || Array.isArray(r.workspaces)); }
   function action(label, run, destructive) {
     var b = el("button", label); b.type = "button";
     var armed = false, timer = null;
@@ -104,7 +105,14 @@ button:disabled{opacity:.5;cursor:default}
         return;
       }
       clearTimeout(timer); b.disabled = true;
-      run().then(function (r) { status((r && (r.note || r.message)) || "Done."); return refresh(true); })
+      // The action tools return the rebuilt panel state with a note, so one
+      // round trip updates the panel. Only a reply without state (an older
+      // server) falls back to a separate open_workspaces call.
+      run().then(function (r) {
+        var note = (r && (r.note || r.message)) || "Done.";
+        if (isState(r)) { render(r); if (!(r.errors && Object.keys(r.errors).length)) status(note); return; }
+        status(note); return refresh(true);
+      })
         .catch(function (e) { status(e.message, true); })
         .then(function () { b.disabled = false; armed = false; b.textContent = label; b.classList.remove("armed"); });
     };

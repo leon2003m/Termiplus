@@ -537,10 +537,11 @@ func (s *Server) buildTools() []tool {
 				if id == "" {
 					return nil, fmt.Errorf("session_id is required")
 				}
+				name := s.sessionName(ctx, p, id)
 				if err := s.backend.DestroySession(ctx, p, id); err != nil {
 					return nil, err
 				}
-				return map[string]any{"destroyed": id}, nil
+				return s.panelResult(ctx, p, "Stopped "+name+".", map[string]any{"destroyed": id})
 			},
 		},
 		{

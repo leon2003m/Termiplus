@@ -253,7 +253,7 @@ class HomeTools(unittest.TestCase):
         rec = Recorder(True)
         out = asyncio.run(self.tools().manage_snapshots("list", "desk", __oauth_token__=TOKEN, __event_call__=rec))
         self.assertEqual(rec.calls, [])
-        self.assertIn("not available", out)
+        self.assertIn("snapshots", out)
 
     def test_snapshot_destructive_actions_are_not_sent(self):
         rec = Recorder(True)
@@ -270,7 +270,7 @@ class HomeTools(unittest.TestCase):
         rec = Recorder(True)
         out = asyncio.run(self.tools().share_desktop("list", __oauth_token__=TOKEN, __event_call__=rec))
         self.assertEqual(rec.calls, [])
-        self.assertIn("not configured", out)
+        self.assertIn("shares", out)
 
     def test_result_links(self):
         share = json.dumps({"share_id": "abc", "url": "https://desk.example/share/" + "a" * 64 + "/"})

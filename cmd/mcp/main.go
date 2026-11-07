@@ -30,12 +30,14 @@ func main() {
 	// The real backend drives the gateway's /control/v1 API with CONTROL_API_KEY.
 	// The in-memory stub is only for local development and must be asked for.
 	var backend mcp.Backend
+	stubMode := false
 	switch controlKey := config.Secret("CONTROL_API_KEY", false); {
 	case config.Get("MCP_STUB_BACKEND", "") == "1":
 		// Asked for explicitly; wins over CONTROL_API_KEY so that tests can
 		// combine it with the screen-share viewer, which needs the key.
 		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
-		backend = mcp.NewStubBackend(publicURL)
+		backend = mcp.NewStubDevBackend(publicURL)
+		stubMode = true
 	case controlKey != "":
 		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false))
 	default:
@@ -117,6 +119,12 @@ func main() {
 		log.Fatal("STREAM_PUBLIC_URL (desktops) must be a different origin from CONSOLE_PUBLIC_URL (console)")
 	}
 	srv.WithUIBase(consoleURL).WithDesktopBase(desktopURL)
+	if stubMode {
+		// In-memory shares, snapshots and links so every panel control works.
+		if err := mcp.ConfigureStubServer(srv); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
 	// calls; the management UI needs it.

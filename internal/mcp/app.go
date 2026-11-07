@@ -109,6 +109,50 @@ func (s *Server) appTool() tool {
 }
 
 func (s *Server) workspaceOverview(ctx context.Context, p Principal, _ map[string]any) (any, error) {
+	return s.overview(ctx, p), nil
+}
+
+// panelResult is what the panel's action tools return: the freshly rebuilt
+// panel state plus a short human-readable note, so the panel re-renders from
+// the action's own response in one round trip. extra is the tool's original
+// result: its fields are kept (never overriding a panel field) and its own
+// note, if any, follows ours, so callers without MCP App support lose nothing.
+func (s *Server) panelResult(ctx context.Context, p Principal, note string, extra any) (any, error) {
+	out := s.overview(ctx, p)
+	if m, ok := extra.(map[string]any); ok {
+		for k, v := range m {
+			if k == "note" {
+				if t, ok := v.(string); ok && t != "" {
+					note += " " + t
+				}
+				continue
+			}
+			if _, taken := out[k]; !taken {
+				out[k] = v
+			}
+		}
+	}
+	out["note"] = note
+	return out, nil
+}
+
+// sessionName is the label a user knows a session by, for notes. Best effort:
+// it falls back to the workspace name, then the id.
+func (s *Server) sessionName(ctx context.Context, p Principal, id string) string {
+	if sessions, err := s.backend.ListSessions(ctx, p); err == nil {
+		for _, sess := range sessions {
+			if sess.ID == id {
+				if sess.Label != "" {
+					return sess.Label
+				}
+				return sess.Workspace
+			}
+		}
+	}
+	return id
+}
+
+func (s *Server) overview(ctx context.Context, p Principal) map[string]any {
 	out := map[string]any{"workspaces": []Workspace{}, "sessions": []Session{}, "backups": map[string]any{}, "shares": []any{}}
 	// Section errors are generic: backend messages can name internal URLs.
 	errs := map[string]string{}
@@ -159,5 +203,5 @@ func (s *Server) workspaceOverview(ctx context.Context, p Principal, _ map[strin
 	if len(errs) > 0 {
 		out["errors"] = errs
 	}
-	return out, nil
+	return out
 }

@@ -39,6 +39,19 @@ tool (model + app visible, `structuredContent`) and serves the embedded panel
 not authorization. The panel never calls `request_session`. JSON-RPC
 notifications get HTTP 202 with no body.
 
+The four panel action tools (`destroy_session`, `reset_workspace`,
+`share_desktop` create/revoke, `manage_snapshots` create) return the freshly
+rebuilt panel state plus a human `note` via `app.go:panelResult` (built on
+`app.go:overview`), so the panel re-renders from the action's own response in
+one `tools/call` — no second `open_workspaces` refresh, which halves a host's
+per-call approval prompts. The merge keeps each tool's original result fields
+(e.g. share `url`) for model-only hosts, so the change is additive and the
+gates/`_confirmed` rule are untouched. `cmd/mcp` under `MCP_STUB_BACKEND=1`
+uses `NewStubDevBackend`+`ConfigureStubServer` (in-memory shares/snapshots) so
+every panel control works in the dev preview; the gateway path is unchanged.
+Browser-level validation: `test/mcp-app/` drives the panel in headless chromium
+through a host harness mirroring Open WebUI's AppBridge.
+
 Source: `internal/mcp/server.go:callTool`, `internal/mcp/server.go:invoke`,
 `internal/mcp/homes.go`, `internal/mcp/gateway_backend.go`,
 `integrations/openwebui/termiplus_workspaces.py`,

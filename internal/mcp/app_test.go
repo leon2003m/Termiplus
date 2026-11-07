@@ -157,3 +157,61 @@ func TestNotificationsGet202(t *testing.T) {
 		}
 	}
 }
+
+// The panel's action tools return the rebuilt panel state plus a note, so the
+// panel needs no second open_workspaces call.
+func TestActionToolsReturnPanelStateAndNote(t *testing.T) {
+	auth := NewStaticAuthenticator(map[string]Principal{"tok": {UserID: "alice", Roles: []string{RolePersist}}})
+	s := NewServer(auth, NewStubDevBackend("https://gw.example"), "test")
+	if err := ConfigureStubServer(s); err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Sessions []Session `json:"sessions"`
+	}
+	result(t, toolCall(t, s, "tok", appToolName, nil), &state)
+	var desk, scratch Session
+	for _, x := range state.Sessions {
+		if x.Desktop {
+			desk = x
+		} else {
+			scratch = x
+		}
+	}
+	if desk.ID == "" || scratch.ID == "" {
+		t.Fatalf("stub should seed a desktop and a terminal session: %+v", state.Sessions)
+	}
+	type panel struct {
+		Note     string                    `json:"note"`
+		Sessions []Session                 `json:"sessions"`
+		Shares   []map[string]any          `json:"shares"`
+		Backups  map[string]map[string]any `json:"backups"`
+		URL      string                    `json:"url"`
+		ShareID  string                    `json:"share_id"`
+	}
+	var p panel
+	result(t, toolCall(t, s, "tok", "share_desktop", map[string]any{"action": "create", "session_id": desk.ID, "_confirmed": true}), &p)
+	if !strings.HasPrefix(p.Note, "Shared My desktop for 60 min.") || len(p.Shares) != 1 || p.URL == "" || p.ShareID == "" {
+		t.Fatalf("share result: %+v", p)
+	}
+	id := p.ShareID
+	p = panel{}
+	result(t, toolCall(t, s, "tok", "share_desktop", map[string]any{"action": "revoke", "share_id": id}), &p)
+	if p.Note != "Revoked the screen-share link." || len(p.Shares) != 0 {
+		t.Fatalf("revoke result: %+v", p)
+	}
+	p = panel{}
+	result(t, toolCall(t, s, "tok", "manage_snapshots", map[string]any{"action": "create", "workspace": "desk"}), &p)
+	if p.Note != "Backup created for desk." || len(p.Backups["desk"]["snapshots"].([]any)) != 1 {
+		t.Fatalf("snapshot result: %+v", p)
+	}
+	p = panel{}
+	result(t, toolCall(t, s, "tok", "destroy_session", map[string]any{"session_id": scratch.ID, "_confirmed": true}), &p)
+	if p.Note != "Stopped Scratch term." || len(p.Sessions) != 1 {
+		t.Fatalf("destroy result: %+v", p)
+	}
+	// Errors keep their old shape: no state, isError.
+	if resp := toolCall(t, s, "tok", "destroy_session", map[string]any{"session_id": "nope"}); resp.Error == nil {
+		t.Fatal("destroy without confirmation must still need confirmation")
+	}
+}

@@ -278,6 +278,7 @@ func (s *Server) homeTools() []tool {
 				if err := s.entitledSession(ctx, p, id); err != nil {
 					return nil, err
 				}
+				name := s.sessionName(ctx, p, id)
 				raw, err := hb.ResetSession(ctx, p, id)
 				if err != nil {
 					return nil, err
@@ -286,7 +287,7 @@ func (s *Server) homeTools() []tool {
 				if err := json.Unmarshal(raw, &out); err != nil {
 					return nil, errors.New("unexpected answer from the gateway")
 				}
-				return out, nil
+				return s.panelResult(ctx, p, "Reset "+name+".", out)
 			},
 		},
 		{
@@ -296,7 +297,13 @@ func (s *Server) homeTools() []tool {
 			destructive: true,
 			gate:        s.snapshotsGate,
 			confirmIf:   s.snapshotWouldPrune,
-			handle:      s.manageSnapshots,
+			handle: func(ctx context.Context, p Principal, args map[string]any) (any, error) {
+				out, err := s.manageSnapshots(ctx, p, args)
+				if err != nil || argString(args, "action") != "create" {
+					return out, err
+				}
+				return s.panelResult(ctx, p, "Backup created for "+argString(args, "workspace")+".", out)
+			},
 		},
 	}
 }
