@@ -76,6 +76,10 @@ type Config struct {
 	// (default 4); further ones wait, within their deadline. One active or
 	// queued export per user is allowed; overlapping requests return 429.
 	ExportConcurrency int
+	// ExportIdleTimeout aborts a home export when no bytes reach the client
+	// for this long, so a stalled reader releases the helper lock and slot
+	// well before ExportTimeout. Default 1m; <=0 disables the idle bound.
+	ExportIdleTimeout time.Duration
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
@@ -190,6 +194,9 @@ func New(cfg Config) (*Gateway, error) {
 	if cfg.ExportConcurrency <= 0 {
 		cfg.ExportConcurrency = 4
 	}
+	if cfg.ExportIdleTimeout == 0 {
+		cfg.ExportIdleTimeout = time.Minute
+	}
 	if cfg.AddrFor == nil {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }
 	}
@@ -208,6 +215,7 @@ func New(cfg Config) (*Gateway, error) {
 		offlineNetwork: cfg.OfflineNetwork,
 		exportLimits: exportLimits{
 			timeout:  cfg.ExportTimeout,
+			idle:     cfg.ExportIdleTimeout,
 			maxBytes: cfg.ExportMaxBytes,
 			slots:    make(chan struct{}, cfg.ExportConcurrency),
 		},

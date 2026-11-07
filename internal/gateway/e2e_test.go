@@ -1095,3 +1095,75 @@ func TestConfigHashUnchangedWithoutImage(t *testing.T) {
 		t.Fatal("a policy image must change the hash")
 	}
 }
+
+// wsAuthEcho opens a terminal socket, authenticates in-band and confirms the
+// proxy pipe is live (so the connection is counted) by echoing one keystroke.
+func wsAuthEcho(t *testing.T, gwURL, path, user string) net.Conn {
+	t.Helper()
+	c, br := wsDial(t, gwURL, path, user)
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	auth, _ := json.Marshal(map[string]string{"type": "auth", "token": testAPIKey})
+	if err := writeMaskedText(c, auth); err != nil {
+		c.Close()
+		t.Fatal(err)
+	}
+	frame := []byte{0x82, 0x80 | 1, 1, 2, 3, 4, 'x' ^ 1} // masked keystroke "x"
+	if _, err := c.Write(frame); err != nil {
+		c.Close()
+		t.Fatal(err)
+	}
+	if op, _ := readServerFrame(t, br); op != 0x2 {
+		c.Close()
+		t.Fatalf("expected echo frame, got op=%d", op)
+	}
+	return c
+}
+
+// One user must not pin the shared gateway with sockets: concurrent proxied
+// connections per container are capped like the preview/screen paths, and the
+// one past the cap is closed with 1013 (security audit run 4).
+func TestWebSocketConnectionCap(t *testing.T) {
+	h := newHarness(t)
+	var held []net.Conn
+	defer func() {
+		for _, c := range held {
+			c.Close()
+		}
+	}()
+	for i := 0; i < maxProxiedConns; i++ {
+		held = append(held, wsAuthEcho(t, h.gw.URL, "/api/terminals/sess1", "alice"))
+	}
+	// The next connection authenticates but is refused the proxy slot.
+	c, br := wsDial(t, h.gw.URL, "/api/terminals/sess1", "alice")
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	auth, _ := json.Marshal(map[string]string{"type": "auth", "token": testAPIKey})
+	if err := writeMaskedText(c, auth); err != nil {
+		t.Fatal(err)
+	}
+	op, body := readServerFrame(t, br)
+	if op != 0x8 || len(body) < 2 || binary.BigEndian.Uint16(body[:2]) != 1013 {
+		t.Fatalf("connection past the cap: op=%d body=%q", op, body)
+	}
+	// Freeing one connection lets a new one in again.
+	held[0].Close()
+	held = held[1:]
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		h.g.mgr.mu.Lock()
+		inst := h.g.mgr.instances[naming.Container("alice", "default")]
+		var n int
+		if inst != nil {
+			n = inst.conns
+		}
+		h.g.mgr.mu.Unlock()
+		if n < maxProxiedConns {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("closing a connection did not free a proxy slot")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	held = append(held, wsAuthEcho(t, h.gw.URL, "/api/terminals/sess1", "alice"))
+}

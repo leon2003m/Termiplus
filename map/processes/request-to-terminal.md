@@ -1,7 +1,7 @@
 ---
 type: process
 status: verified
-verified: 2026-11-04 (native integration)
+verified: 2026-11-07 (native integration; WS connection cap)
 consumes: [../objects/workspaces/policy.md, ../objects/identity/service-keys.md]
 produces: [../objects/workspaces/terminal-container.md, ../objects/workspaces/home-volume.md]
 ---
@@ -29,7 +29,7 @@ Open WebUI thinks it talks to *one* Open Terminal. The gateway must therefore be
 7. Inspect. Refuse on an owner label mismatch. Recreate when the config hash differs, the container is on any network besides its policy's one (`networkOK`), an ephemeral sandbox is stopped, or a stopped persistent container's image moved: `lifecycle.go:231-266`, `:173`.
 8. `admit` (capacity, making room for ephemerals), then `create` via [sockproxy-create](sockproxy-create.md), then start: `lifecycle.go:268-285`, `:335`, `:468`.
 9. Wait until ready, then record the instance: `lifecycle.go:287-314`, `:549`.
-10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:367-390`.
+10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:367-390`. A proxied WebSocket counts against the per-container `maxProxiedConns` cap via `tryTouch` (like the preview/screen paths); the one past the cap is closed with 1013 so one user cannot pin the shared gateway with sockets: `ws.go:serveWebSocket`, `e2e_test.go:TestWebSocketConnectionCap`.
 11. Later the reaper stops idle persistent containers and removes idle ephemeral ones: `lifecycle.go:657`. Every minute, before reaping, `checkNetworks` lists running managed containers from Docker and removes one that has gained a network its policy does not allow (`docker network connect`): `lifecycle.go:596`, `:697`.
 
 ## If you change this

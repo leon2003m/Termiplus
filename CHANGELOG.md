@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Security
+
+- Home exports now have an idle deadline (`EXPORT_IDLE_TIMEOUT`, default 1m)
+  alongside the absolute `EXPORT_TIMEOUT`: a client that stops reading releases
+  the archive-helper lock and export slot after the idle bound instead of
+  holding them for the full 2h timeout.
+- Proxied terminal WebSockets now count against the per-container
+  `maxProxiedConns` cap (like the preview/screen paths); the connection past
+  the cap is closed with 1013, so one user cannot pin the shared gateway with
+  open sockets.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource
