@@ -1,0 +1,221 @@
+# TEMPLATE: pinned tool version + SHA-256 updated atomically.
+#
+# House rule: every downloaded binary is pinned to a version and verified with
+# sha256sum -c. A bump therefore has to change the version AND the checksum
+# in one commit, or CI breaks. Each pipeline below does that: two sources (the
+# version, then the checksum published for exactly that version) and ONE
+# target that rewrites both lines, so one PR carries both.
+#
+# To adapt (copy a document, change four things):
+#   * the gittag url: the project's upstream git repository. gittag reads tags
+#     with git, so no API token and no rate limit.
+#   * versionfilter: semver, or a regex when tags are not semver.
+#   * the checksum source: a command that prints ONLY the sha256 of the asset
+#     for the pinned platform. Most projects publish a checksums file next to
+#     the release (used here). When none is published, download the asset in
+#     the command and hash it: curl -fsSL URL | sha256sum | cut -d' ' -f1
+#   * the target file and the two patterns (the NAME=value or NAME: "value"
+#     lines that hold version and checksum).
+# A checksum taken from the same release origin proves the download is intact,
+# not that the release is honest; the pull request is where a human looks.
+#
+# Version-only bumps (no checksum, e.g. a Go module run with go install) are
+# the last document.
+---
+name: 'updatecli tool'
+pipelineid: termiplus-tool-updatecli
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      # Never force-push published branches (AGENTS.md). A stale PR branch is
+      # left as is; close the PR and the next run opens a fresh one.
+      force: false
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): bump updatecli tool'
+{{- end }}
+sources:
+  version:
+    name: 'newest updatecli release'
+    kind: gittag
+    spec:
+      url: https://github.com/updatecli/updatecli.git
+      versionfilter:
+        kind: semver
+    transformers:
+      - trimprefix: v
+  sha256:
+    name: 'checksum of the linux amd64 tarball'
+    kind: shell
+    dependson: ['version']
+    spec:
+      command: >-
+        curl -fsSL "https://github.com/updatecli/updatecli/releases/download/v{{ source "version" }}/checksums.txt"
+        | awk '$2=="updatecli_Linux_x86_64.tar.gz" {print $1}'
+targets:
+  workflow-version:
+    name: 'updatecli {{ source "version" }}'
+    kind: file
+    sourceid: version
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .forgejo/workflows/updatecli.yml
+      matchpattern: 'UPDATECLI_VERSION: "[0-9.]+"'
+      replacepattern: 'UPDATECLI_VERSION: "{{ source "version" }}"'
+  workflow-sha256:
+    name: 'updatecli {{ source "version" }} sha256'
+    kind: file
+    sourceid: sha256
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .forgejo/workflows/updatecli.yml
+      matchpattern: 'UPDATECLI_SHA256: "[0-9a-f]{64}"'
+      replacepattern: 'UPDATECLI_SHA256: "{{ source "sha256" }}"'
+---
+name: 'actionlint tool'
+pipelineid: termiplus-tool-actionlint
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      # Never force-push published branches (AGENTS.md). A stale PR branch is
+      # left as is; close the PR and the next run opens a fresh one.
+      force: false
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): bump actionlint tool'
+{{- end }}
+sources:
+  version:
+    name: 'newest actionlint release'
+    kind: gittag
+    spec:
+      url: https://github.com/rhysd/actionlint.git
+      versionfilter:
+        kind: semver
+    transformers:
+      - trimprefix: v
+  sha256:
+    name: 'checksum of the linux amd64 tarball'
+    kind: shell
+    dependson: ['version']
+    spec:
+      command: >-
+        curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v{{ source "version" }}/actionlint_{{ source "version" }}_checksums.txt"
+        | awk '$2=="actionlint_{{ source "version" }}_linux_amd64.tar.gz" {print $1}'
+targets:
+  version:
+    name: 'actionlint {{ source "version" }}'
+    kind: file
+    sourceid: version
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .github/scripts/install-tools.sh
+      matchpattern: 'ACTIONLINT_VERSION=[0-9.]+'
+      replacepattern: 'ACTIONLINT_VERSION={{ source "version" }}'
+  sha256:
+    name: 'actionlint {{ source "version" }} sha256'
+    kind: file
+    sourceid: sha256
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .github/scripts/install-tools.sh
+      matchpattern: 'ACTIONLINT_SHA256=[0-9a-f]{64}'
+      replacepattern: 'ACTIONLINT_SHA256={{ source "sha256" }}'
+---
+name: 'staticcheck version'
+pipelineid: termiplus-tool-staticcheck
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      # Never force-push published branches (AGENTS.md). A stale PR branch is
+      # left as is; close the PR and the next run opens a fresh one.
+      force: false
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): bump staticcheck'
+{{- end }}
+# Version only: staticcheck is built with go install, which verifies modules
+# through the Go checksum database, so there is no separate checksum to keep.
+# Both CI files pin the same version; one PR bumps both.
+sources:
+  version:
+    name: 'newest staticcheck release'
+    kind: gittag
+    spec:
+      url: https://github.com/dominikh/go-tools.git
+      versionfilter:
+        kind: regex
+        pattern: '^20[0-9]{2}\.[0-9]+(\.[0-9]+)?$'
+targets:
+  staticcheck:
+    name: 'staticcheck {{ source "version" }}'
+    kind: file
+    sourceid: version
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      files:
+        - .forgejo/workflows/ci.yml
+        - .github/workflows/ci.yml
+      matchpattern: 'STATICCHECK_VERSION: "[0-9.]+"'
+      replacepattern: 'STATICCHECK_VERSION: "{{ source "version" }}"'

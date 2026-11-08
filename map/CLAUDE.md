@@ -27,7 +27,7 @@ verification dates. Lines may move; cited symbols are the stable anchor.
 2. **sockproxy** (`cmd/sockproxy`, `internal/sockproxy`) is the only holder of the Docker socket. It allows a handful of endpoints and rebuilds every create request. The gateway never reaches Docker directly.
 3. **mcp** (`cmd/mcp`, `internal/mcp`) is the alpha control plane: limited MCP lifecycle/storage tools for chat, a human management console and expiring image-only screen shares. It calls the gateway's `/control/v1/` API; it never touches Docker.
 4. **netpolicy** (`internal/netpolicy`) plus `deploy/firewall.sh` and `deploy/dns-forwarder` decide what a terminal may reach. Public egress is allowed, internal is denied except admin-set entries.
-5. **deploy/** is compose files (base plus overlays), host firewall and systemd units. **image/** is the terminal and desktop images.
+5. **deploy/** is compose files (base plus overlays), host firewall and systemd units. **image/** is the terminal and desktop images. Image digests, pinned CI tools and the Go toolchain are kept current by weekly Updatecli pull requests (`updatecli.d/`, `.forgejo/workflows/updatecli.yml`), not by hand.
 
 ## Names that collide (read before any card)
 

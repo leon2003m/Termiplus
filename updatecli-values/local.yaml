@@ -1,0 +1,5 @@
+# Dry-run override: no Forgejo, no token, no clone. Pass after values.yaml:
+#   updatecli diff --config updatecli.d --values updatecli-values/values.yaml \
+#                  --values updatecli-values/local.yaml
+scm:
+  enabled: false

@@ -1,0 +1,123 @@
+name: Updatecli
+
+# Weekly dependency updates: Updatecli opens pull requests against
+# scm.branch (values: updatecli-values/values.yaml) on this Forgejo.
+# Replaces Dependabot. See updatecli.d/README.md.
+#
+# TEMPLATE for other repositories: copy this file, then change nothing except
+# the schedule if you like. Repository, branch and manifests live in
+# updatecli.d/. Needs the secret UPDATECLI_TOKEN and the variable REGISTRY.
+#
+# Rules this workflow follows (house rules, same as ci.yml):
+#   * no Node.js and no third-party actions; plain shell on Debian
+#   * every downloaded binary is pinned to a version and verified with
+#     sha256sum -c; updatecli.d/tools.yaml and updatecli.d/go.yaml keep the
+#     version and checksum below up to date, one PR for both
+#   * pull requests only: never pushes to the target branch, never merges
+
+on:
+  schedule:
+    # Mondays 04:17 UTC. Scheduled runs use the default branch's workflow.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only show what would change ("true"), do not open pull requests'
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: updatecli
+  cancel-in-progress: false
+
+env:
+  # Clone depth for the repository checkout: 0 = full history (default).
+  # Set to 1 for a shallow clone when no job step needs history.
+  CLONE_DEPTH: "0"
+  # Linux amd64 release tarballs. Version and checksum change together.
+  UPDATECLI_VERSION: "0.123.0"
+  UPDATECLI_SHA256: "a0cc40caee73c6efb217762a94ab90ef57617b651409d0077524f13cc07e0760"
+  # Go is needed by Updatecli's golang/gomod autodiscovery and `go mod tidy`.
+  GO_VERSION: "1.27.3"
+  GO_SHA256: "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
+
+jobs:
+  updatecli:
+    runs-on: docker
+    container:
+      # Registry host from the repository variable REGISTRY (a pull-through
+      # proxy of Docker Hub), so no real hostname is committed.
+      image: ${{ vars.REGISTRY }}/dockerhub/library/debian:trixie-slim
+    timeout-minutes: 30
+    steps:
+      - name: Install base tools
+        env:
+          # Optional PEM of the internal root CA (a public certificate), kept
+          # in the repository variable INTERNAL_CA when Forgejo uses it.
+          INTERNAL_CA: ${{ vars.INTERNAL_CA }}
+        run: |
+          set -eu
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates curl git >/dev/null
+          if [ -n "$INTERNAL_CA" ]; then
+            printf '%s\n' "$INTERNAL_CA" > /usr/local/share/ca-certificates/internal-ca.crt
+            update-ca-certificates >/dev/null
+          fi
+      - name: Clone
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          depth=""
+          if [ "$CLONE_DEPTH" != "0" ]; then depth="--depth=$CLONE_DEPTH"; fi
+          git config --global --add safe.directory "$PWD/src"
+          # shellcheck disable=SC2086  # $depth is empty or one flag
+          git -c http.extraHeader="Authorization: token $TOKEN" \
+            clone --quiet $depth --no-checkout \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" src
+          git -C src -c http.extraHeader="Authorization: token $TOKEN" \
+            fetch --quiet origin "$GITHUB_SHA"
+          git -C src checkout --quiet "$GITHUB_SHA"
+      - name: Install Go
+        run: |
+          set -eu
+          f="go${GO_VERSION}.linux-amd64.tar.gz"
+          curl -fsSL --retry 3 -o "/tmp/$f" "https://go.dev/dl/$f"
+          echo "$GO_SHA256  /tmp/$f" | sha256sum -c --quiet -
+          tar -xzf "/tmp/$f" -C /usr/local
+          ln -s /usr/local/go/bin/go /usr/local/bin/go
+          ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+          rm "/tmp/$f"
+          go version
+      - name: Install Updatecli
+        run: |
+          set -eu
+          f="updatecli_Linux_x86_64.tar.gz"
+          curl -fsSL --retry 3 -o "/tmp/$f" \
+            "https://github.com/updatecli/updatecli/releases/download/v${UPDATECLI_VERSION}/$f"
+          echo "$UPDATECLI_SHA256  /tmp/$f" | sha256sum -c --quiet -
+          tar -xzf "/tmp/$f" -C /usr/local/bin updatecli
+          rm "/tmp/$f"
+          updatecli version
+      - name: Updatecli
+        env:
+          # Bot token from the Forgejo secret; empty means dry run.
+          UPDATECLI_TOKEN: ${{ secrets.UPDATECLI_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -eu
+          export FORGEJO_URL="$GITHUB_SERVER_URL"
+          cd src
+          if [ -z "$UPDATECLI_TOKEN" ] || [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run: showing changes only, no pull requests."
+            unset UPDATECLI_TOKEN
+            updatecli pipeline diff --config updatecli.d \
+              --values updatecli-values/values.yaml \
+              --values updatecli-values/local.yaml
+          else
+            updatecli pipeline apply --config updatecli.d \
+              --values updatecli-values/values.yaml
+          fi
