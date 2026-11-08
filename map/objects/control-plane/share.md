@@ -51,3 +51,19 @@ The console's named-recipient picker requires ownership and entitlement and
 only returns exact enabled usernames; it never enumerates the directory.
 Protocol/ownership tests live in `internal/gateway/mcp_homes_e2e_test.go`.
 See [native desktop](../../processes/desktop-stream.md).
+
+## Kill-switch (`MCP_SHARES=off`, `-tags noshare`)
+
+`MCP_SHARES=off` (default: on) makes `cmd/mcp/main.go` call
+`Server.DisableSharing`: `share_desktop` is never in `s.tools`
+(`assembleTools`), `WithShares` is a no-op, `OpenShareStore` is not called, the
+console `shares` routes in `internal/mcp/ui.go` return 404, `overview` reports
+`sharing:false` and the panel (`app/workspaces.html`) omits the button. The
+`STREAM_LISTEN_ADDR` block is skipped, so `NewDesktopHandler` and the listener
+do not exist; the variable is ignored with a warning. Rationale: removing the
+surface means a bug in `shares.go`/`stream.go` cannot be reached. A
+`-tags noshare` build also compiles out `stream.go` (stub in
+`sharing_off.go`) and forces sharing off; `shares.go` itself stays compiled.
+The gateway's `serveScreen` has the share listener as its only caller and is
+unchanged. Tests: `internal/mcp/sharing_off_test.go`.
+

@@ -30,6 +30,21 @@ All notable changes to this project are documented here. The format is based on 
   the cap is closed with 1013, so one user cannot pin the shared gateway with
   open sockets.
 
+### Added
+
+- MCP App workspace panel: the read-only `open_workspaces` tool opens an inline
+  panel (sessions, home backups, screen links) in MCP Apps hosts. The
+  management tools are app-only in `tools/list`; server-side gates are
+  unchanged. See [Workspace panel](docs/mcp.md#workspace-panel-mcp-app).
+
+### Fixed
+
+- The workspace panel shows a newly created screen-share link once, with a copy
+  button; the server keeps only its hash, so it could not be recovered later.
+- A refused factory reset (`wipe_home`) no longer leaves workspaces stopped:
+  prerequisites are checked before stopping anything, and workspaces that were
+  running are started again if the snapshot or removal fails.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource

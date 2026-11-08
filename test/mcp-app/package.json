@@ -1,0 +1,8 @@
+{
+  "name": "termiplus-mcp-app-test",
+  "private": true,
+  "type": "module",
+  "description": "Browser validation of the MCP App panel against the in-memory stub MCP server",
+  "dependencies": { "playwright": "1.64.0" },
+  "scripts": { "test": "node panel.spec.mjs" }
+}

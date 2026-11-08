@@ -32,18 +32,44 @@ type Server struct {
 	uiBase      string    // browser-facing console base URL, for download links
 	desktopBase string    // browser-facing desktop origin, for share links
 	shares      *ShareStore
+	noSharing   bool // DisableSharing: no share tool, store, console route or panel button
 	departed    *departed
 }
 
 // NewServer builds the server with its fixed tool surface.
 func NewServer(auth Authenticator, backend Backend, version string) *Server {
 	s := &Server{auth: auth, backend: backend, version: version}
-	s.tools = s.buildTools()
-	for _, extra := range [][]tool{s.homeTools(), s.shareTools(), s.departedTools()} {
-		s.tools = append(s.tools, extra...)
-	}
+	s.noSharing = !sharingCompiled
+	s.assembleTools()
 	return s
 }
+
+// assembleTools builds the tool list. share_desktop is registered only when
+// sharing is enabled, so a disabled server cannot invoke or list it.
+func (s *Server) assembleTools() {
+	s.tools = s.buildTools()
+	extras := [][]tool{s.homeTools()}
+	if !s.noSharing {
+		extras = append(extras, s.shareTools())
+	}
+	extras = append(extras, s.departedTools(), []tool{s.appTool()})
+	for _, extra := range extras {
+		s.tools = append(s.tools, extra...)
+	}
+}
+
+// DisableSharing is the screen-sharing kill-switch (MCP_SHARES=off). It
+// unregisters share_desktop and makes WithShares a no-op. Call it before
+// serving and before WithShares.
+func (s *Server) DisableSharing() *Server {
+	s.noSharing = true
+	s.shares = nil
+	s.assembleTools()
+	return s
+}
+
+// SharingEnabled reports whether the share subsystem is wired into s.
+func (s *Server) SharingEnabled() bool { return !s.noSharing }
 
 // WithEntitlements restricts which workspaces callers may see and launch.
 // Without it every workspace is open to every authenticated caller.
@@ -209,8 +235,9 @@ type contentBlock struct {
 }
 
 type toolResult struct {
-	Content []contentBlock `json:"content"`
-	IsError bool           `json:"isError,omitempty"`
+	Content           []contentBlock  `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
 }
 
 type toolAnnotations struct {
@@ -225,6 +252,7 @@ type toolSpec struct {
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
 	Annotations toolAnnotations `json:"annotations"`
+	Meta        map[string]any  `json:"_meta,omitempty"`
 }
 
 // ServeHTTP dispatches a single JSON-RPC request per POST.
@@ -254,6 +282,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.ID) == 0 || string(req.ID) == "null" {
+		// A JSON-RPC notification gets no response body (Streamable HTTP: 202).
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
 	resp := &rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
@@ -267,7 +300,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resp.Result = result
 		}
-	case "notifications/initialized", "ping":
+	case "resources/list", "resources/read", "resources/templates/list":
+		result, rerr := s.handleResources(r, req.Method, req.Params)
+		if rerr != nil {
+			resp.Error = rerr
+		} else {
+			resp.Result = result
+		}
+	case "ping":
 		resp.Result = map[string]any{}
 	default:
 		resp.Error = &rpcError{Code: codeMethodNotFound, Message: "unknown method " + req.Method}
@@ -278,8 +318,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) initialize() map[string]any {
 	return map[string]any{
 		"protocolVersion": protocolVersion,
-		"capabilities":    map[string]any{"tools": map[string]any{}},
-		"serverInfo":      map[string]any{"name": "termiplus", "version": s.version},
+		"capabilities": map[string]any{
+			"tools":      map[string]any{},
+			"resources":  map[string]any{},
+			"extensions": map[string]any{appExtension: map[string]any{"mimeTypes": []string{appMIMEType}}},
+		},
+		"serverInfo": map[string]any{"name": "termiplus", "version": s.version},
 	}
 }
 
@@ -303,6 +347,7 @@ func (s *Server) listTools() []toolSpec {
 				DestructiveHint:      t.destructive,
 				RequiresConfirmation: t.destructive,
 			},
+			Meta: toolMeta(t.name),
 		})
 	}
 	return out
@@ -362,10 +407,12 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 }
 
 // modelTool is deliberately an allowlist. New console operations are never
-// exposed to models automatically, even for an administrator's chat.
+// exposed to models automatically, even for an administrator's chat. The
+// list is only an upper bound: with sharing disabled share_desktop is not in
+// s.tools at all, which is the real gate.
 func modelTool(name string) bool {
 	switch name {
-	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "manage_snapshots", "share_desktop":
+	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "wipe_home", "manage_snapshots", "share_desktop", appToolName:
 		return true
 	}
 	return false
@@ -408,7 +455,11 @@ func (s *Server) invoke(ctx context.Context, p Principal, name string, args map[
 	if err != nil {
 		return nil, &rpcError{Code: codeInternal, Message: "marshal result"}
 	}
-	return &toolResult{Content: []contentBlock{{Type: "text", Text: string(js)}}}, nil
+	res := &toolResult{Content: []contentBlock{{Type: "text", Text: string(js)}}}
+	if t.name == appToolName {
+		res.StructuredContent = js
+	}
+	return res, nil
 }
 
 func (s *Server) findTool(name string) *tool {
@@ -514,10 +565,11 @@ func (s *Server) buildTools() []tool {
 				if id == "" {
 					return nil, fmt.Errorf("session_id is required")
 				}
+				name := s.sessionName(ctx, p, id)
 				if err := s.backend.DestroySession(ctx, p, id); err != nil {
 					return nil, err
 				}
-				return map[string]any{"destroyed": id}, nil
+				return s.panelResult(ctx, p, "Stopped "+name+".", map[string]any{"destroyed": id})
 			},
 		},
 		{

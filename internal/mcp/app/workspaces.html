@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>termiplus workspaces</title>
+<style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6b6b70;--line:#e3e3e6;--accent:#2f6fde;--danger:#c4372d;--chip:#f2f2f4}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1c1c1e;--fg:#f2f2f4;--muted:#a0a0a6;--line:#38383c;--accent:#6b9cff;--danger:#ff6b5f;--chip:#2a2a2d}}
+:root[data-theme=dark]{--bg:#1c1c1e;--fg:#f2f2f4;--muted:#a0a0a6;--line:#38383c;--accent:#6b9cff;--danger:#ff6b5f;--chip:#2a2a2d}
+*{box-sizing:border-box}
+body{margin:0;padding:12px 16px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 6px}
+header{display:flex;align-items:center;gap:8px}
+header strong{flex:1;font-size:15px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid var(--line)}
+.row .name{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+.chip{background:var(--chip);border-radius:10px;padding:1px 8px;font-size:12px;color:var(--muted)}
+button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;padding:3px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.armed{border-color:var(--danger);color:var(--danger)}
+button.danger{color:var(--danger);border-color:var(--danger)}
+button.danger.armed{background:var(--danger);color:#fff;border-color:var(--danger)}
+button:disabled{opacity:.5;cursor:default}
+.empty,.note{color:var(--muted);font-size:13px;padding:4px 0}
+#status{min-height:1.4em;font-size:13px;margin-top:6px}
+#status.err{color:var(--danger)}
+#newshare:empty{display:none}
+#newshare{border:1px solid var(--accent);border-radius:8px;padding:8px 10px;margin-top:8px}
+#newshare .hint{color:var(--muted);font-size:12px;margin:0 0 6px}
+#newshare .line{display:flex;gap:6px;align-items:center}
+#newshare input{flex:1;min-width:0;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--bg);color:var(--fg)}
+</style>
+</head>
+<body>
+<header><strong>Workspaces</strong><button id="refresh" type="button">Refresh</button></header>
+<div id="status" role="status"></div>
+<div id="newshare"></div>
+<h2>Sessions</h2><div id="sessions"></div>
+<h2>Home backups</h2><div id="backups"></div>
+<h2>Screen-share links</h2><div id="shares"></div>
+<h2>Workspaces you can use</h2><div id="workspaces"></div>
+<p class="note">Commands, files, Desktop and Browser run in the chat's native terminal connection. Restoring or deleting a backup, and all administration, stay in the termiplus console.</p>
+<script>
+"use strict";
+// MCP Apps guest. Talks only to the embedding host (window.parent) over
+// JSON-RPC postMessage. Data is rendered with textContent only, never as HTML.
+(function () {
+  var nextId = 1, pending = {}, host = window.parent;
+  function send(msg) { host.postMessage(msg, "*"); }
+  function request(method, params) {
+    var id = nextId++;
+    send({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
+    return new Promise(function (resolve, reject) { pending[id] = { resolve: resolve, reject: reject }; });
+  }
+  function notify(method, params) { send({ jsonrpc: "2.0", method: method, params: params || {} }); }
+
+  window.addEventListener("message", function (e) {
+    if (e.source !== host) return;
+    var m = e.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.id != null && pending[m.id] && (("result" in m) || ("error" in m))) {
+      var p = pending[m.id]; delete pending[m.id];
+      if (m.error) p.reject(new Error(m.error.message || "request failed")); else p.resolve(m.result);
+      return;
+    }
+    if (m.method === "ui/notifications/tool-result") render(parseResult(m.params));
+    else if (m.method === "ui/notifications/host-context-changed") applyContext(m.params);
+    else if (m.id != null && m.method) send({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "unsupported" } });
+  });
+
+  function parseResult(r) {
+    if (!r) throw new Error("empty result");
+    var text = (r.content || []).map(function (c) { return c && c.type === "text" ? c.text : ""; }).join("");
+    if (r.isError) throw new Error(text || "the operation failed");
+    if (r.structuredContent && typeof r.structuredContent === "object") return r.structuredContent;
+    try { return JSON.parse(text); } catch (_) { return { message: text }; }
+  }
+
+  function applyContext(ctx) {
+    if (ctx && (ctx.theme === "dark" || ctx.theme === "light")) document.documentElement.setAttribute("data-theme", ctx.theme);
+  }
+
+  var statusEl = document.getElementById("status");
+  function status(text, err) { statusEl.textContent = text || ""; statusEl.className = err ? "err" : ""; resize(); }
+  function resize() { notify("ui/notifications/size-changed", { height: document.documentElement.scrollHeight }); }
+
+  function el(tag, text, cls) { var n = document.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; }
+  function chip(text) { return el("span", text, "chip"); }
+  function safeURL(u) { try { var x = new URL(u); return (x.protocol === "https:" || x.protocol === "http:") ? x.href : null; } catch (_) { return null; } }
+  // showNewShare shows a just-created screen-share URL once, as text in a
+  // read-only field (never HTML), with a copy control. The server keeps only
+  // the token hash, so the URL cannot be shown again after it is dismissed.
+  function showNewShare(url) {
+    var box = document.getElementById("newshare"); box.textContent = "";
+    var href = safeURL(url); if (!href) { resize(); return; }
+    box.appendChild(el("p", "New screen-share link. It is shown only now; copy it before dismissing.", "hint"));
+    var line = el("div", null, "line");
+    var inp = el("input"); inp.type = "text"; inp.readOnly = true; inp.value = href; inp.id = "newshare-url";
+    inp.setAttribute("aria-label", "Screen-share link");
+    inp.onfocus = function () { inp.select(); };
+    line.appendChild(inp);
+    var copy = el("button", "Copy"); copy.type = "button";
+    copy.onclick = function () {
+      var ok = function () { copy.textContent = "Copied"; };
+      var fallback = function () {
+        inp.focus(); inp.select();
+        var done = false; try { done = document.execCommand("copy"); } catch (_) {}
+        if (done) ok(); else copy.textContent = "Select and copy";
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(href).then(ok, fallback); else fallback();
+    };
+    line.appendChild(copy);
+    var close = el("button", "Dismiss"); close.type = "button";
+    close.onclick = function () { box.textContent = ""; resize(); };
+    line.appendChild(close);
+    box.appendChild(line); resize();
+  }
+  function linkButton(label, url) {
+    var href = safeURL(url); if (!href) return null;
+    var b = el("button", label); b.type = "button";
+    b.onclick = function () { request("ui/open-link", { url: href }).catch(function (e) { status(e.message, true); }); };
+    return b;
+  }
+
+  // call runs a management tool through the host. Destructive actions are
+  // armed by a first click and sent with _confirmed only on the second; the
+  // host adds its own confirmation, and the server still enforces every gate.
+  function call(name, args) {
+    status("Working…");
+    // A host that never answers must not leave the panel on "Working…".
+    var timer, limit = new Promise(function (_, reject) {
+      timer = setTimeout(function () { reject(new Error("No answer from the host. Press Refresh to see the current state.")); }, 120000);
+    });
+    var done = function () { clearTimeout(timer); };
+    var p = Promise.race([request("tools/call", { name: name, arguments: args }), limit]);
+    p.then(done, done);
+    return p.then(parseResult);
+  }
+  function isState(r) { return !!r && typeof r === "object" && (Array.isArray(r.sessions) || Array.isArray(r.workspaces)); }
+  function action(label, run, destructive) {
+    var b = el("button", label); b.type = "button";
+    var armed = false, timer = null;
+    b.onclick = function () {
+      if (destructive && !armed) {
+        armed = true; b.textContent = "Confirm " + label.toLowerCase(); b.classList.add("armed");
+        timer = setTimeout(function () { armed = false; b.textContent = label; b.classList.remove("armed"); }, 5000);
+        return;
+      }
+      clearTimeout(timer); b.disabled = true;
+      document.getElementById("newshare").textContent = "";
+      // The action tools return the rebuilt panel state with a note, so one
+      // round trip updates the panel. Only a reply without state (an older
+      // server) falls back to a separate open_workspaces call.
+      run().then(function (r) {
+        var note = (r && (r.note || r.message)) || "Done.";
+        if (r && typeof r.url === "string") showNewShare(r.url);
+        if (isState(r)) { render(r); if (!(r.errors && Object.keys(r.errors).length)) status(note); return; }
+        status(note); return refresh(true);
+      })
+        .catch(function (e) { status(e.message, true); })
+        .then(function () { b.disabled = false; armed = false; b.textContent = label; b.classList.remove("armed"); });
+    };
+    return b;
+  }
+  // dangerAction is action() for an irreversible control (factory reset): the
+  // same first-click arming, styled red so it is never mistaken for Restart.
+  function dangerAction(label, run) { var b = action(label, run, true); b.classList.add("danger"); return b; }
+
+  function list(id, items, row, emptyText) {
+    var box = document.getElementById(id); box.textContent = "";
+    if (!items || !items.length) { box.appendChild(el("div", emptyText, "empty")); return; }
+    items.forEach(function (it) { box.appendChild(row(it)); });
+  }
+
+  function render(state) {
+    state = state || {};
+    var names = {};
+    (state.workspaces || []).forEach(function (w) { if (w.label) names[w.name] = w.label; });
+    function wsName(n) { return names[n] || n; }
+    list("sessions", state.sessions, function (s) {
+      var r = el("div", null, "row");
+      r.appendChild(el("span", s.label || wsName(s.workspace), "name"));
+      r.appendChild(chip(s.persistent ? "persistent home" : "temporary"));
+      if (s.desktop) r.appendChild(chip("desktop"));
+      if (!s.running) r.appendChild(chip("stopped"));
+      // Restart (reset_workspace) gives a persistent session a fresh container
+      // with its home kept. On a temporary session the backend just removes it
+      // (no replacement), so "Restart" would be a lie there — offer it only for
+      // persistent sessions, like Reset below.
+      if (s.persistent) r.appendChild(action("Restart", function () { return call("reset_workspace", { session_id: s.session_id, _confirmed: true }); }, true));
+      // Factory reset wipes /home; only a persistent workspace has one. A
+      // snapshot is always taken first (the server refuses the wipe otherwise).
+      if (s.persistent) r.appendChild(dangerAction("Reset (wipe home)", function () { return call("wipe_home", { session_id: s.session_id, _confirmed: true }); }));
+      if (s.desktop && state.sharing !== false) r.appendChild(action("Share screen (1 h)", function () {
+        return call("share_desktop", { action: "create", session_id: s.session_id, minutes: 60, _confirmed: true });
+      }, true));
+      return r;
+    }, "No sessions. Open the native terminal in this chat to start one.");
+
+    var homes = Object.keys(state.backups || {}).sort(), rows = [];
+    homes.forEach(function (ws) {
+      var b = state.backups[ws] || {};
+      rows.push({ ws: ws, head: true, b: b });
+      (b.snapshots || []).forEach(function (snap) { rows.push({ ws: ws, snap: snap }); });
+    });
+    list("backups", rows, function (x) {
+      var r = el("div", null, "row");
+      if (x.head) {
+        r.appendChild(el("strong", wsName(x.ws), "name"));
+        var keep = x.b.keep ? (x.b.snapshots || []).length + " of " + x.b.keep : null;
+        if (keep) r.appendChild(chip(keep));
+        // At capacity the server refuses create (it never prunes over MCP);
+        // removing an old backup happens in the termiplus console.
+        if (x.b.keep > 0 && (x.b.snapshots || []).length >= x.b.keep) r.appendChild(chip("full: free space in the console"));
+        else r.appendChild(action("Back up now", function () { return call("manage_snapshots", { action: "create", workspace: x.ws }); }, false));
+        var cur = linkButton("Download home", x.b.current_home_download_url); if (cur) r.appendChild(cur);
+      } else {
+        r.appendChild(el("span", x.snap.created ? new Date(x.snap.created).toLocaleString() : x.snap.id, "name"));
+        if (x.snap.size) r.appendChild(chip(Math.max(1, Math.round(x.snap.size / 1048576)) + " MiB"));
+        var dl = linkButton("Download", x.snap.download_url); if (dl) r.appendChild(dl);
+      }
+      return r;
+    }, "No persistent homes in use.");
+
+    list("shares", state.shares, function (sh) {
+      var r = el("div", null, "row");
+      r.appendChild(el("span", sh.workspace ? wsName(sh.workspace) : (sh.session_id || sh.share_id), "name"));
+      if (sh.for_user) r.appendChild(chip("only " + sh.for_user));
+      if (sh.expires) r.appendChild(chip("until " + new Date(sh.expires).toLocaleString()));
+      r.appendChild(action("Revoke", function () { return call("share_desktop", { action: "revoke", share_id: sh.share_id }); }, true));
+      return r;
+    }, "No active links.");
+
+    list("workspaces", state.workspaces, function (w) {
+      var r = el("div", null, "row");
+      r.appendChild(el("span", w.label || w.name, "name"));
+      r.appendChild(chip(w.persistent ? "persistent" : "temporary"));
+      if (w.desktop) r.appendChild(chip("desktop"));
+      if (w.description) r.appendChild(el("span", w.description, "note"));
+      return r;
+    }, "No workspaces are available to you.");
+
+    var errs = state.errors ? Object.keys(state.errors) : [];
+    if (errs.length) status("Some sections could not be loaded: " + errs.map(function (k) { return k + ": " + state.errors[k]; }).join("; "), true);
+    resize();
+  }
+
+  function refresh(quiet) {
+    if (!quiet) status("Loading…");
+    return call("open_workspaces", {}).then(function (s) { render(s); if (!quiet) status(""); })
+      .catch(function (e) { status(e.message, true); });
+  }
+  document.getElementById("refresh").onclick = function () { refresh(false); };
+
+  request("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    appInfo: { name: "termiplus-workspaces", version: "1" },
+    appCapabilities: {}
+  }).then(function (r) {
+    applyContext(r && r.hostContext);
+    notify("ui/notifications/initialized", {});
+  }).catch(function () { status("This host did not accept the panel.", true); });
+})();
+</script>
+</body>
+</html>

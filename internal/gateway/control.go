@@ -176,6 +176,21 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 		default:
 			writeJSON(w, http.StatusOK, s)
 		}
+	case strings.HasPrefix(rest, "sessions/") && strings.HasSuffix(rest, "/wipe-home") && r.Method == http.MethodPost:
+		name := strings.TrimSuffix(strings.TrimPrefix(rest, "sessions/"), "/wipe-home")
+		s, snap, err := g.wipeHome(r.Context(), userID, name)
+		switch {
+		case errors.Is(err, errNoSession):
+			httpError(w, http.StatusNotFound, "no such session")
+		case errors.Is(err, errNotPersistent), errors.Is(err, errUnknownWorkspace):
+			httpError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, errNoBackups), errors.Is(err, errNoHome):
+			httpError(w, http.StatusConflict, "home not wiped: "+err.Error())
+		case err != nil:
+			g.ensureError(w, userID, name, err)
+		default:
+			writeJSON(w, http.StatusOK, map[string]any{"session": s, "snapshot": snap})
+		}
 	case strings.HasPrefix(rest, "preview/"):
 		g.servePreview(w, r, userID, strings.TrimPrefix(rest, "preview/"))
 	case strings.HasPrefix(rest, "screen/"):

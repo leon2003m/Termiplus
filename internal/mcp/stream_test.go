@@ -1,3 +1,5 @@
+//go:build !noshare
+
 package mcp
 
 import (

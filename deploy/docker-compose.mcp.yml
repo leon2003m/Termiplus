@@ -103,6 +103,9 @@ services:
       MCP_IDENTITY_FILE: /data/identities.json
       MCP_AUDIT_FILE: /data/audit.log
       MCP_SHARES_FILE: /data/shares.json
+      # Screen-share kill-switch: set MCP_SHARES=off in .env to fully disable
+      # desktop sharing (no tool, listener, store or console route is wired up).
+      MCP_SHARES: ${MCP_SHARES:-}
     volumes:
       - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]

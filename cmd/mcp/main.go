@@ -30,12 +30,14 @@ func main() {
 	// The real backend drives the gateway's /control/v1 API with CONTROL_API_KEY.
 	// The in-memory stub is only for local development and must be asked for.
 	var backend mcp.Backend
+	stubMode := false
 	switch controlKey := config.Secret("CONTROL_API_KEY", false); {
 	case config.Get("MCP_STUB_BACKEND", "") == "1":
 		// Asked for explicitly; wins over CONTROL_API_KEY so that tests can
 		// combine it with the screen-share viewer, which needs the key.
 		log.Print("WARNING: using the in-memory stub backend (MCP_STUB_BACKEND=1); no real sessions are created")
-		backend = mcp.NewStubBackend(publicURL)
+		backend = mcp.NewStubDevBackend(publicURL)
+		stubMode = true
 	case controlKey != "":
 		backend = mcp.NewGatewayBackend(gatewayURL, publicURL, controlKey, config.Secret("ADMIN_API_KEY", false))
 	default:
@@ -74,6 +76,23 @@ func main() {
 	}
 
 	srv := mcp.NewServer(auth, backend, version)
+	// Kill-switch: with MCP_SHARES=off (or a -tags noshare build) the share
+	// tool, store, console routes and stream listener are never wired up. A
+	// security switch must not fail open on a typo: every common "off" spelling
+	// disables, and an unrecognized value warns loudly instead of silently
+	// staying enabled. Empty/unset keeps the default (enabled).
+	switch v := strings.ToLower(strings.TrimSpace(config.Get("MCP_SHARES", ""))); v {
+	case "off", "false", "0", "no", "disable", "disabled":
+		srv.DisableSharing()
+	case "", "on", "true", "1", "yes", "enable", "enabled":
+		// default and explicit enable: sharing stays on
+	default:
+		log.Printf("WARNING: MCP_SHARES=%q is not recognized; sharing remains ENABLED (set MCP_SHARES=off to disable)", v)
+	}
+	sharing := srv.SharingEnabled()
+	if !sharing {
+		log.Print("screen sharing disabled (MCP_SHARES=off)")
+	}
 	entDesc := "all workspaces open to every signed-in user (no MCP_ENTITLEMENTS_FILE)"
 	if f := config.Get("MCP_ENTITLEMENTS_FILE", ""); f != "" {
 		if _, err := srv.WithEntitlementsFile(f); err != nil {
@@ -117,6 +136,12 @@ func main() {
 		log.Fatal("STREAM_PUBLIC_URL (desktops) must be a different origin from CONSOLE_PUBLIC_URL (console)")
 	}
 	srv.WithUIBase(consoleURL).WithDesktopBase(desktopURL)
+	if stubMode {
+		// In-memory shares, snapshots and links so every panel control works.
+		if err := mcp.ConfigureStubServer(srv); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	// Which Open WebUI user each OIDC subject belongs to, learned from plugin
 	// calls; the management UI needs it.
@@ -159,12 +184,14 @@ func main() {
 			// proxy the request itself cannot tell it.
 			log.Fatal("UI_LISTEN_ADDR needs CONSOLE_PUBLIC_URL (the console's https:// origin)")
 		}
-		// View-only desktop share links (share_desktop).
-		shares, err := mcp.OpenShareStore(config.Get("MCP_SHARES_FILE", ""))
-		if err != nil {
-			log.Fatal(err)
+		if sharing {
+			// View-only desktop share links (share_desktop).
+			shares, err := mcp.OpenShareStore(config.Get("MCP_SHARES_FILE", ""))
+			if err != nil {
+				log.Fatal(err)
+			}
+			srv.WithShares(shares)
 		}
-		srv.WithShares(shares)
 		ui := &http.Server{Addr: uiAddr, Handler: mcp.NewUI(srv, ids), ReadHeaderTimeout: 10 * time.Second}
 		go func() { log.Fatal(ui.ListenAndServe()) }()
 		log.Printf("management UI listening on %s", uiAddr)
@@ -172,7 +199,10 @@ func main() {
 
 	// Image-only screen shares: own listener, own origin, own sign-in proxy
 	// (desk-stream-auth), never the console's.
-	if streamAddr := config.Get("STREAM_LISTEN_ADDR", ""); streamAddr != "" {
+	// With MCP_SHARES=off the handler and listener are never constructed.
+	if streamAddr := config.Get("STREAM_LISTEN_ADDR", ""); streamAddr != "" && !sharing {
+		log.Print("WARNING: STREAM_LISTEN_ADDR is ignored because MCP_SHARES=off")
+	} else if streamAddr != "" {
 		controlKey := config.Secret("CONTROL_API_KEY", false)
 		if config.Get("MCP_AUTH", "") != "proxy" || ids == nil || controlKey == "" {
 			log.Fatal("STREAM_LISTEN_ADDR needs MCP_AUTH=proxy, MCP_IDENTITY_FILE and CONTROL_API_KEY")

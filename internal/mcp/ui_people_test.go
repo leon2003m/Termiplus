@@ -1,3 +1,7 @@
+//go:build !noshare
+
+// The recipient picker is a share-purpose console route, so it is gated off
+// when sharing is disabled; these tests only apply when sharing is compiled in.
 package mcp
 
 import (
