@@ -85,3 +85,7 @@ With `MCP_SHARES=off` (or `-tags noshare`) `share_desktop` is not registered at
 all (`Server.assembleTools`); `modelTool`/`appOnly` keep it only as a static
 upper bound. See [Share](share.md#kill-switch-mcp_sharesoff--tags-noshare).
 See [tool call](../../processes/mcp-tool-call.md) and [Share](share.md).
+
+Console modal scroll locking and consistent heading/preview/action card layout
+are in `internal/mcp/ui/app.js:ask` and `loadSessions`; failed desktop previews
+collapse until an image loads, styled by `ui/app.css`.
