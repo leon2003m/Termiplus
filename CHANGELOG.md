@@ -11,6 +11,18 @@ All notable changes to this project are documented here. The format is based on 
   longer aborts the IPv4 policy; all IPv6 frames on the bridges are dropped with ebtables instead. The
   policy fingerprint now covers host-local DNS upstream addresses.
 
+### Added
+
+- MCP App workspace panel: the read-only `open_workspaces` tool opens an inline
+  panel (sessions, home backups, screen links) in MCP Apps hosts. The
+  management tools are app-only in `tools/list`; server-side gates are
+  unchanged. See [Workspace panel](docs/mcp.md#workspace-panel-mcp-app).
+
+- MCP: `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES` name your own groups or roles (e.g. `ki-nutzer`, `ki-admin`) for the persist and admin roles. When set, forwarded group names are normalised (`/name`, `role:name` and `name` are the same) for roles and workspace entitlements, in MCP tools, the management UI and the share page. Unset, names match exactly as before.
+
+- Images: tools for models working in a workspace (`docs/agents.md`). Each start writes a manifest to `~/AGENTS.md` (mode, root, desktop, rules, tools), which Open WebUI reads into every turn, links bundled skills into `~/.agents/skills` and `tp-status` shows it plus live facts. The terminal image adds pandoc, LibreOffice (nogui), poppler, openpyxl, python-docx, Pillow, tesseract (English, German), recoll and all locales.
+- Policies: `locale` sets `LANG`; for desktops, `keyboard` sets the XKB layout and `record` records the desktop into `~/recordings` (2 fps, kept 2 days). The gateway validates them and the image checks them again.
+
 ### Fixed
 
 - Integration test (`test/integration/run.sh`): the sandbox bridge runs with
@@ -30,34 +42,17 @@ All notable changes to this project are documented here. The format is based on 
   the cap is closed with 1013, so one user cannot pin the shared gateway with
   open sockets.
 
-### Added
-
-- MCP App workspace panel: the read-only `open_workspaces` tool opens an inline
-  panel (sessions, home backups, screen links) in MCP Apps hosts. The
-  management tools are app-only in `tools/list`; server-side gates are
-  unchanged. See [Workspace panel](docs/mcp.md#workspace-panel-mcp-app).
-
-### Fixed
-
 - The workspace panel shows a newly created screen-share link once, with a copy
   button; the server keeps only its hash, so it could not be recovered later.
 - A refused factory reset (`wipe_home`) no longer leaves workspaces stopped:
   prerequisites are checked before stopping anything, and workspaces that were
   running are started again if the snapshot or removal fails.
 
-### Fixed
-
 - Console dialogs lock background scrolling; missing previews collapse and workspace/session cards use a consistent layout.
-
-### Fixed
 
 - Make Kate follow the configured desktop palette on fresh homes.
 
 - The console has a green terminal favicon, served from `/ui/`.
-
-### Added
-
-- MCP: `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES` name your own groups or roles (e.g. `ki-nutzer`, `ki-admin`) for the persist and admin roles. When set, forwarded group names are normalised (`/name`, `role:name` and `name` are the same) for roles and workspace entitlements, in MCP tools, the management UI and the share page. Unset, names match exactly as before.
 
 ## [1.0.0] - 2026-11-05
 

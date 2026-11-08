@@ -24,7 +24,7 @@ Homes are Docker volumes, so a reset or a departure would otherwise destroy data
 - Snapshots and departed archives share export admission and byte limits: one running or queued export per user, global export slots, a deadline, and (when configured) caps on raw tar bytes and cumulative logical member sizes. Oversized sparse members are refused before reading their body.
 - Without `BACKUP_DIR`, snapshots, user archives and departed handling answer "not configured". The MCP overlay sets it to `/data/backups`.
 
-Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:46` (Backup), `:52` (backupStore), `:59` (newBackupStore), `:71` (homeDir), `:113` (create), `internal/gateway/gateway.go:57-59`, `:191-192`, `cmd/gateway/main.go:76-77`, `internal/gateway/userhomes.go`: `restoreBackup`, `archiveUser`, `restoreUser`; `internal/gateway/homes.go`: `exportHome`, `copyHomeArchive`; `deploy/docker-compose.mcp.yml:118`.
+Citations: `internal/gateway/backups.go:20-27` (doc), `:36` (id regexp), `:46` (Backup), `:52` (backupStore), `:59` (newBackupStore), `:71` (homeDir), `:113` (create), `internal/gateway/gateway.go:57-59`, `:200-201`, `cmd/gateway/main.go:76-77`, `internal/gateway/userhomes.go`: `restoreBackup`, `archiveUser`, `restoreUser`; `internal/gateway/homes.go`: `exportHome`, `copyHomeArchive`; `deploy/docker-compose.mcp.yml:118`.
 
 ## Connected to
 

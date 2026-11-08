@@ -34,4 +34,20 @@ timeout 5 gdbus call --session --dest org.freedesktop.DBus \
   --object-path /org/freedesktop/DBus \
   --method org.freedesktop.DBus.StartServiceByName \
   org.freedesktop.FileManager1 0 >/dev/null 2>&1 || true
+# Policy "keyboard" and "record". Open Terminal hands this session a sanitized
+# environment (no OPEN_TERMINAL_*), so the image's start script leaves the
+# validated values in /etc/termiplus/desktop.conf. They are checked again here,
+# and nothing below may stop the desktop from coming up.
+conf=/etc/termiplus/desktop.conf
+conf_get() { sed -n "s/^$1=//p" "$conf" 2>/dev/null | head -n 1; }
+if [ -r "$conf" ]; then
+  keyboard="$(conf_get KEYBOARD)"
+  if echo "$keyboard" | grep -Eq '^[a-z]{2,8}$'; then
+    setxkbmap -layout "$keyboard" || echo "startxfce4: could not set keyboard layout $keyboard" >&2
+  fi
+  # The recorder is a child of this session: it ends with the display.
+  if [ "$(conf_get RECORD)" = 1 ]; then
+    /usr/local/libexec/termiplus/record-desktop >/dev/null 2>&1 &
+  fi
+fi
 exec /usr/bin/startxfce4 "$@"

@@ -233,6 +233,9 @@ There are no separate terminal-only choices in the shipped configuration.
 | `home` | Persistent only. Policies with the same `home` share the user's volume |
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
+| `locale` | Optional. `LANG` in the workspace, e.g. `de_DE.UTF-8` (default `C.UTF-8`) |
+| `keyboard` | Desktop only. XKB layout of the desktop, e.g. `de` |
+| `record` | Desktop only. `true` records the desktop at 2 fps into `~/recordings`, kept for 2 days, so the user can review what a model did |
 | `image` | Optional. Runs this policy on another image than `TERMINAL_IMAGE`, e.g. a Python or Node image. The socket proxy must list it in `EXTRA_IMAGES` |
 | `egress` | `internet` (default) or `offline`: no internet, no LAN, no DNS. Needs the offline overlay, see *Offline workspaces* |
 

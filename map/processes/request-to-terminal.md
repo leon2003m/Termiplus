@@ -20,17 +20,17 @@ Open WebUI thinks it talks to *one* Open Terminal. The gateway must therefore be
 
 ## Steps
 
-1. Reject encoded slashes and non-canonical paths: `internal/gateway/gateway.go:241-254`.
-2. Admin and control APIs are tried first, each with its own key: `gateway.go:258-264`.
-3. Split `/p/<policy>`, defaulting to `default`. An unknown policy is 404: `gateway.go:266-275`, `:394`.
-4. Bearer check, except for WebSockets, which authenticate in their first message (`ws.go:78`): `gateway.go:277-283`, `:354`.
-5. Validate `X-User-Id` and `X-Session-Id`. Spec paths use a shared spec user: `gateway.go:291-325`.
-6. `ensure`: name = `naming.Container` or `naming.Ephemeral`, lock per name, fast path for a ready instance: `internal/gateway/lifecycle.go:205-229`.
-7. Inspect. Refuse on an owner label mismatch. Recreate when the config hash differs, the container is on any network besides its policy's one (`networkOK`), an ephemeral sandbox is stopped, or a stopped persistent container's image moved: `lifecycle.go:231-266`, `:173`.
-8. `admit` (capacity, making room for ephemerals), then `create` via [sockproxy-create](sockproxy-create.md), then start: `lifecycle.go:268-285`, `:335`, `:468`.
-9. Wait until ready, then record the instance: `lifecycle.go:287-314`, `:549`.
-10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:367-390`. A proxied WebSocket counts against the per-container `maxProxiedConns` cap via `tryTouch` (like the preview/screen paths); the one past the cap is closed with 1013 so one user cannot pin the shared gateway with sockets: `ws.go:serveWebSocket`, `e2e_test.go:TestWebSocketConnectionCap`.
-11. Later the reaper stops idle persistent containers and removes idle ephemeral ones: `lifecycle.go:657`. Every minute, before reaping, `checkNetworks` lists running managed containers from Docker and removes one that has gained a network its policy does not allow (`docker network connect`): `lifecycle.go:596`, `:697`.
+1. Reject encoded slashes and non-canonical paths: `internal/gateway/gateway.go:250-263`.
+2. Admin and control APIs are tried first, each with its own key: `gateway.go:267-273`.
+3. Split `/p/<policy>`, defaulting to `default`. An unknown policy is 404: `gateway.go:275-284`, `:403`.
+4. Bearer check, except for WebSockets, which authenticate in their first message (`ws.go:78`): `gateway.go:286-292`, `:363`.
+5. Validate `X-User-Id` and `X-Session-Id`. Spec paths use a shared spec user: `gateway.go:300-334`.
+6. `ensure`: name = `naming.Container` or `naming.Ephemeral`, lock per name, fast path for a ready instance: `internal/gateway/lifecycle.go:218-242`.
+7. Inspect. Refuse on an owner label mismatch. Recreate when the config hash differs, the container is on any network besides its policy's one (`networkOK`), an ephemeral sandbox is stopped, or a stopped persistent container's image moved: `lifecycle.go:244-279`, `:186`.
+8. `admit` (capacity, making room for ephemerals), then `create` via [sockproxy-create](sockproxy-create.md), then start: `lifecycle.go:281-298`, `:348`, `:481`.
+9. Wait until ready, then record the instance: `lifecycle.go:300-327`, `:573`.
+10. Proxy with `Authorization: Bearer <container key>`, removing `Cookie` and `X-Proxy-Token`: `gateway.go:376-399`. A proxied WebSocket counts against the per-container `maxProxiedConns` cap via `tryTouch` (like the preview/screen paths); the one past the cap is closed with 1013 so one user cannot pin the shared gateway with sockets: `ws.go:serveWebSocket`, `e2e_test.go:TestWebSocketConnectionCap`.
+11. Later the reaper stops idle persistent containers and removes idle ephemeral ones: `lifecycle.go:681`. Every minute, before reaping, `checkNetworks` lists running managed containers from Docker and removes one that has gained a network its policy does not allow (`docker network connect`): `lifecycle.go:620`, `:721`.
 
 ## If you change this
 
