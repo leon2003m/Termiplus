@@ -12,7 +12,7 @@ for app in qt6ct gtk-3.0; do
     [ -e "$target" ] || cp "$config" "$target"
   done
 done
-for config in kdeglobals dolphinrc; do
+for config in kdeglobals dolphinrc katerc; do
   [ -e "$config_home/$config" ] || cp "/etc/xdg/$config" "$config_home/$config"
 done
 # Native processes sanitize their environment; set Qt preferences here too.

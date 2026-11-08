@@ -49,6 +49,10 @@ All notable changes to this project are documented here. The format is based on 
 
 - Console dialogs lock background scrolling; missing previews collapse and workspace/session cards use a consistent layout.
 
+### Fixed
+
+- Make Kate follow the configured desktop palette on fresh homes.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource
