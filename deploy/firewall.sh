@@ -88,12 +88,29 @@ policy_destination_ok() {
 # Render only validated tokens; never interpolate a policy line as shell code.
 filter_rule() { printf '%s\n' "$*"; }
 
+# The admin exception file must be a regular file, never a symlink: a link
+# could point at any readable file and turn the diagnostics below into a leak,
+# or let a writer of the link's directory swap the policy. Anything else is
+# treated as "no admin exceptions" (default-deny stays in force). Diagnostics
+# never print file content, only line numbers.
+egress_file_usable() { [ -f "$1" ] && [ ! -L "$1" ]; }
+
 apply_egress_allow() {
-  [ -f "${APPLY_RULES:-$EGRESS_RULES}" ] || return 0
+  ea_file=${APPLY_RULES:-$EGRESS_RULES}
+  if [ -e "$ea_file" ] || [ -L "$ea_file" ]; then
+    egress_file_usable "$ea_file" || {
+      echo "firewall: egress rules file is a symlink or not a regular file - ignoring it (no admin exceptions)" >&2
+      return 0
+    }
+  else
+    return 0
+  fi
+  ea_line=0
   while read -r ea_cidr ea_port ea_proto ea_extra || [ -n "${ea_cidr:-}" ]; do
+    ea_line=$((ea_line + 1))
     case "$ea_cidr" in '' | '#'*) continue ;; esac
     if [ -n "$ea_extra" ] || ! policy_destination_ok "$ea_cidr"; then
-      echo "firewall: skipping malformed or never-allowed destination '$ea_cidr'" >&2
+      echo "firewall: skipping malformed or never-allowed destination on egress rules line $ea_line" >&2
       continue
     fi
     case "$ea_proto" in tcp | udp) ;; *) continue ;; esac
@@ -102,9 +119,9 @@ apply_egress_allow() {
     elif echo "$ea_port" | grep -Eq '^[0-9]{1,5}$' && [ "$ea_port" -ge 1 ] && [ "$ea_port" -le 65535 ]; then
       filter_rule -A TERMIPLUS -i "$BRIDGE" -s "$SANDBOX" -d "$ea_cidr" -p "$ea_proto" --dport "$ea_port" -j RETURN
     else
-      echo "firewall: skipping bad port '$ea_port' for $ea_cidr" >&2
+      echo "firewall: skipping bad port on egress rules line $ea_line" >&2
     fi
-  done <"${APPLY_RULES:-$EGRESS_RULES}"
+  done <"$ea_file"
 }
 
 # Bridge-netfilter must be on BEFORE any DROP rule is installed. Same-bridge
@@ -507,18 +524,87 @@ policy_fingerprint() {
   pf_script=$(sha256sum <"$SCRIPT_FILE") || return 1
   {
     printf '%s\n' "$pf_script"
-    if [ -f "$EGRESS_RULES" ]; then sha256sum <"$EGRESS_RULES"; else echo no-egress-file; fi
+    if egress_file_usable "$EGRESS_RULES"; then sha256sum <"$EGRESS_RULES"; else echo no-egress-file; fi
     printf '%s\n' "$DNS_UPSTREAM" "$GATEWAY" "$FORWARDER"
+    printf 'ipv6-filter=%s\n' "${IPV6_FILTER:-1}"
+    host_upstreams
     printf '%s %s\n' "$mac" "$port" "$forwarder_mac" "$forwarder_port" \
       "$offline_gateway_mac" "$offline_gateway_port"
   } | sha256sum | cut -d ' ' -f 1
 }
 
+# The configured DNS upstreams that are addresses of this host. render_ipv4
+# opens INPUT for them, so a host address change must invalidate the marker.
+host_has_ip() { ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$1"; }
+host_upstreams() {
+  for hu_up in $(upstreams); do
+    if upstream_ok "$hu_up" && host_has_ip "$hu_up"; then echo "host-upstream $hu_up"; fi
+  done
+}
+
+# IPv6 is dropped for both bridges by ip6tables. Without a usable
+# ip6tables/ip6tables-restore that is impossible, so IPv4 policy is still
+# enforced and IPv6 is closed another way: disable_ipv6 on the bridges.
+detect_ipv6_filter() {
+  if command -v ip6tables >/dev/null 2>&1 && command -v ip6tables-restore >/dev/null 2>&1 &&
+    ip6tables -w 10 -S FORWARD >/dev/null 2>&1; then
+    IPV6_FILTER=1
+  else
+    IPV6_FILTER=0
+    echo "firewall: ip6tables unavailable - enforcing IPv4 policy and dropping all IPv6 frames on the termiplus bridges with ebtables" >&2
+  fi
+}
+
+# Without ip6tables the real gate is an ebtables drop of every IPv6 frame
+# entering either bridge (bridged terminal<->terminal link-local traffic never
+# reaches the host stack, and bridge-nf-call-ip6tables filters nothing). It
+# lives in TERMIPLUS-AS, which every run flushes and rebuilds, so it vanishes
+# again once ip6tables works. It is part of the verified state.
+ipv6_frame_drop_current() {
+  fd_listing=$(ebtables -t filter -L TERMIPLUS-AS --Lmac2 2>/dev/null) || return 1
+  for fd_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    printf '%s\n' "$fd_listing" | awk -v br="$fd_br" '{
+      p = i = d = 0
+      for (n = 1; n < NF; n++) {
+        if ($n == "-p" && $(n + 1) == "IPv6") p = 1
+        if ($n == "--logical-in" && $(n + 1) == br) i = 1
+        if ($n == "-j" && $(n + 1) == "DROP") d = 1
+      }
+      if (p && i && d) f = 1
+    } END { exit !f }' || return 1
+  done
+}
+
+ensure_ipv6_frame_drop() {
+  ! ipv6_frame_drop_current || return 0
+  for ef_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    ebtables -t filter -I TERMIPLUS-AS 1 -p IPv6 --logical-in "$ef_br" -j DROP || return 1
+  done
+  ipv6_frame_drop_current
+}
+
+# Additional layer: the host's own IPv6 stack on the bridges. Best effort; a
+# bridge that does not exist yet is covered by the ebtables drop.
+ipv6_bridges_closed() {
+  sysctl -n net.ipv6.conf.all.disable_ipv6 >/dev/null 2>&1 || return 0
+  for ic_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
+    ic_key=net.ipv6.conf.$ic_br.disable_ipv6
+    ic_val=$(sysctl -n "$ic_key" 2>/dev/null) || continue
+    if [ "$ic_val" != 1 ] && [ "${1:-}" = set ]; then
+      sysctl -qw "$ic_key=1" 2>/dev/null || true
+      ic_val=$(sysctl -n "$ic_key" 2>/dev/null) || ic_val=
+    fi
+    [ "$ic_val" = 1 ] || return 1
+  done
+}
+
 policy_rules() {
   iptables -w 10 -S TERMIPLUS || return 1
   iptables -w 10 -S TERMIPLUS-IN || return 1
-  ip6tables -w 10 -S TERMIPLUS6 || return 1
-  ip6tables -w 10 -S TERMIPLUS6-IN || return 1
+  if [ "${IPV6_FILTER:-1}" = 1 ]; then
+    ip6tables -w 10 -S TERMIPLUS6 || return 1
+    ip6tables -w 10 -S TERMIPLUS6-IN || return 1
+  fi
   ebtables -t filter -L TERMIPLUS-AS --Lmac2 || return 1
   ebtables -t nat -L TERMIPLUS-PORT --Lmac2 || return 1
 }
@@ -537,8 +623,12 @@ rules_current() {
   [ "$rc_rules" = "$(printf '%s\n' "$rc_actual" | sha256sum | cut -d ' ' -f 1)" ] || return 1
   hook_current iptables DOCKER-USER TERMIPLUS || return 1
   hook_current iptables INPUT TERMIPLUS-IN || return 1
-  hook_current ip6tables FORWARD TERMIPLUS6 || return 1
-  hook_current ip6tables INPUT TERMIPLUS6-IN || return 1
+  if [ "${IPV6_FILTER:-1}" = 1 ]; then
+    hook_current ip6tables FORWARD TERMIPLUS6 || return 1
+    hook_current ip6tables INPUT TERMIPLUS6-IN || return 1
+  else
+    ipv6_frame_drop_current || return 1
+  fi
   for rc_br in "$BRIDGE" "$OFFLINE_BRIDGE"; do
     source_pins_current "$rc_br" "$(port_macs "$rc_br")" || return 1
   done
@@ -589,6 +679,7 @@ prepare_policy_snapshot() {
 
 if [ "${1:-}" = --if-needed ]; then
   prepare_policy_snapshot || exit 1
+  detect_ipv6_filter
   lock_rc=0
   sync_all || lock_rc=$?
   if [ "$lock_rc" -eq 1 ]; then
@@ -732,7 +823,7 @@ render_ipv4() {
   # An upstream resolver on this host itself: only the forwarder may ask it.
   if [ -n "${forwarder_mac:-}" ]; then
     for up in $(upstreams); do
-      if upstream_ok "$up" && ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -qx "$up"; then
+      if upstream_ok "$up" && host_has_ip "$up"; then
         for p in udp tcp; do
           filter_rule -A TERMIPLUS-IN -i "$BRIDGE" -s "$FORWARDER" -d "$up" -p "$p" --dport 53 -j RETURN
         done
@@ -768,18 +859,37 @@ render_ipv6() {
 # If one family fails, its previous policy remains and no completion is recorded.
 apply_ip_policy() {
   umask 077
+  [ -n "${IPV6_FILTER:-}" ] || detect_ipv6_filter
   ap_dir=$(mktemp -d "$PORTLOCK_DIR/apply.XXXXXX") || return 1
   trap 'rm -rf "$ap_dir"' EXIT
   ap_fingerprint=$(policy_fingerprint) || return 1
   APPLY_RULES=$ap_dir/egress.rules
-  if [ -f "$EGRESS_RULES" ]; then cp "$EGRESS_RULES" "$APPLY_RULES" || return 1; else : >"$APPLY_RULES" || return 1; fi
+  : >"$APPLY_RULES" || return 1
+  if egress_file_usable "$EGRESS_RULES"; then
+    # cp -P never follows the source: a link swapped in after the check is
+    # copied as a link, which apply_egress_allow then refuses.
+    rm -f "$APPLY_RULES"
+    cp -P "$EGRESS_RULES" "$APPLY_RULES" || return 1
+  elif [ -e "$EGRESS_RULES" ] || [ -L "$EGRESS_RULES" ]; then
+    echo "firewall: egress rules file is a symlink or not a regular file - ignoring it (no admin exceptions)" >&2
+  fi
   rm -f "$PORTLOCK_DIR/policy.applied"
   render_ipv4 >"$ap_dir/ipv4" || return 1
-  render_ipv6 >"$ap_dir/ipv6" || return 1
   iptables-restore -w 10 --noflush --test <"$ap_dir/ipv4" || return 1
-  ip6tables-restore -w 10 --noflush --test <"$ap_dir/ipv6" || return 1
+  if [ "$IPV6_FILTER" = 1 ]; then
+    render_ipv6 >"$ap_dir/ipv6" || return 1
+    ip6tables-restore -w 10 --noflush --test <"$ap_dir/ipv6" || return 1
+  fi
   iptables-restore -w 10 --noflush <"$ap_dir/ipv4" || return 1
-  ip6tables-restore -w 10 --noflush <"$ap_dir/ipv6" || return 1
+  if [ "$IPV6_FILTER" = 1 ]; then
+    ip6tables-restore -w 10 --noflush <"$ap_dir/ipv6" || return 1
+  else
+    if ! ensure_ipv6_frame_drop; then
+      echo "firewall: cannot drop IPv6 frames on the termiplus bridges - refusing to certify the policy (IPv4 rules are installed)" >&2
+      return 1
+    fi
+    ipv6_bridges_closed set || echo "firewall: could not disable IPv6 on a termiplus bridge (the ebtables drop still applies)" >&2
+  fi
   [ "$ap_fingerprint" = "$(policy_fingerprint)" ] || return 1
   ap_rules=$(policy_rules) || return 1
   printf '%s %s\n' "$ap_fingerprint" "$(printf '%s\n' "$ap_rules" | sha256sum | cut -d ' ' -f 1)" >"$ap_dir/completed"
