@@ -1,9 +1,9 @@
 # Per-user terminal image. Plain Debian plus the Open Terminal server.
 # Runs under gVisor (runsc) or Sysbox, so sudo inside is root only inside
 # the sandbox, not on the host.
-# The base is pinned to a release tag; Dependabot proposes updates. Pin to a
-# digest (debian:trixie-slim@sha256:...) for fully reproducible builds.
-ARG BASE=debian:trixie-slim
+# The base is pinned to a tag and digest; Updatecli refreshes the digest
+# (updatecli.d/docker-images.yaml).
+ARG BASE=debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 FROM ${BASE}
 
 ARG OPEN_TERMINAL_VERSION=0.16.0

@@ -1,0 +1,210 @@
+# TEMPLATE: container image tag + digest pinning.
+#
+# Each YAML document below is one pipeline and becomes one pull request:
+#   1. versioned images (oauth2-proxy, keycloak): newest semver tag from the
+#      UPSTREAM registry, then that tag's digest; both rewritten together.
+#   2. rolling tags (postgres:17-alpine, debian:trixie-slim): the tag stays,
+#      only the @sha256 digest moves. One PR covers all of them.
+#
+# To adapt:
+#   * image / tagfilter in the sources: the UPSTREAM registry path (Docker Hub,
+#     quay.io, ghcr.io). Updatecli reads tags and digests there, never from a
+#     proxy.
+#   * the target pattern: the path exactly as written in YOUR file. If the file
+#     uses a pull-through proxy path (for example
+#     REGISTRY/dockerhub/library/golang:1.27), put that path in
+#     matchpattern/replacepattern and keep the upstream name in the source.
+#     The proxy has to serve the same digests (it does for a pull-through
+#     cache of a single-origin repository).
+#   * files: every file that carries the reference. Keep digest references to
+#     tag@digest form; Docker ignores the tag when a digest is present, but
+#     the tag is what humans and this file read.
+#   * scm values (owner, repository, branch) live in updatecli-values/values.yaml.
+#
+# The three `scms`/`scmid`/`actions` blocks are identical in every manifest and
+# switch off together with scm.enabled (dry run, see README.md).
+---
+name: 'oauth2-proxy image'
+pipelineid: termiplus-oauth2-proxy
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): bump oauth2-proxy image'
+{{- end }}
+sources:
+  tag:
+    name: 'newest oauth2-proxy release tag'
+    kind: dockerimage
+    spec:
+      image: quay.io/oauth2-proxy/oauth2-proxy
+      tagfilter: '^v\d+\.\d+\.\d+$'
+      versionfilter:
+        kind: semver
+  digest:
+    name: 'digest of that tag'
+    kind: dockerdigest
+    dependson: ['tag']
+    spec:
+      image: quay.io/oauth2-proxy/oauth2-proxy
+      tag: '{{ source "tag" }}'
+      # hidetag makes the value "@sha256:<hex>" (leading @ included).
+      hidetag: true
+targets:
+  compose:
+    name: 'oauth2-proxy {{ source "tag" }}'
+    kind: file
+    sourceid: digest
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      files:
+        - deploy/docker-compose.desktop.yml
+        - deploy/docker-compose.mcp.yml
+      matchpattern: 'image: quay\.io/oauth2-proxy/oauth2-proxy:v[0-9.]+@sha256:[0-9a-f]{64}'
+      replacepattern: 'image: quay.io/oauth2-proxy/oauth2-proxy:{{ source "tag" }}{{ source "digest" }}'
+---
+name: 'keycloak image'
+pipelineid: termiplus-keycloak
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): bump keycloak image'
+{{- end }}
+sources:
+  tag:
+    name: 'newest keycloak release tag'
+    kind: dockerimage
+    spec:
+      image: quay.io/keycloak/keycloak
+      tagfilter: '^\d+\.\d+\.\d+$'
+      versionfilter:
+        kind: semver
+  digest:
+    name: 'digest of that tag'
+    kind: dockerdigest
+    dependson: ['tag']
+    spec:
+      image: quay.io/keycloak/keycloak
+      tag: '{{ source "tag" }}'
+      hidetag: true
+targets:
+  compose:
+    name: 'keycloak {{ source "tag" }}'
+    kind: file
+    sourceid: digest
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      files:
+        - deploy/docker-compose.keycloak.yml
+      matchpattern: 'image: quay\.io/keycloak/keycloak:[0-9.]+@sha256:[0-9a-f]{64}'
+      replacepattern: 'image: quay.io/keycloak/keycloak:{{ source "tag" }}{{ source "digest" }}'
+---
+name: 'rolling image digests'
+pipelineid: termiplus-image-digests
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): refresh image digests'
+{{- end }}
+# Rolling tags: the tag in the file is kept, only the digest is refreshed.
+sources:
+  postgres:
+    name: 'digest of postgres:17-alpine'
+    kind: dockerdigest
+    spec:
+      image: postgres
+      tag: 17-alpine
+      hidetag: true
+  debian:
+    name: 'digest of debian:trixie-slim'
+    kind: dockerdigest
+    spec:
+      image: debian
+      tag: trixie-slim
+      hidetag: true
+targets:
+  postgres:
+    name: 'postgres:17-alpine digest'
+    kind: file
+    sourceid: postgres
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      files:
+        - deploy/docker-compose.keycloak.yml
+      matchpattern: 'image: postgres:17-alpine@sha256:[0-9a-f]{64}'
+      replacepattern: 'image: postgres:17-alpine{{ source "postgres" }}'
+  debian-base:
+    name: 'debian:trixie-slim base digest'
+    kind: file
+    sourceid: debian
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      files:
+        - image/Dockerfile
+        - deploy/dns-forwarder/Dockerfile
+      matchpattern: 'ARG BASE=debian:trixie-slim(@sha256:[0-9a-f]{64})?'
+      replacepattern: 'ARG BASE=debian:trixie-slim{{ source "debian" }}'

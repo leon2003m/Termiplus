@@ -2,9 +2,9 @@
 # operator's resolver, serving the admin-set static records from a watched
 # hostsdir. Terminals are pinned to this resolver by the gateway; the socket
 # proxy accepts no other DNS address.
-# The base is pinned to a release tag; Dependabot proposes updates. Pin to a
-# digest (debian:trixie-slim@sha256:...) for fully reproducible builds.
-ARG BASE=debian:trixie-slim
+# The base is pinned to a tag and digest; Updatecli refreshes the digest
+# (updatecli.d/docker-images.yaml).
+ARG BASE=debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 FROM ${BASE}
 
 ARG VERSION=dev

@@ -1,0 +1,180 @@
+# TEMPLATE: Go toolchain and Go module updates.
+#
+# Document 1 keeps every place that names the Go toolchain consistent in one
+# PR:
+#   * Dockerfile ARG GO_VERSION and the CI GO_VERSION / golang image: the
+#     MINOR release (1.27), as written today.
+#   * the Go tarball pinned in .forgejo/workflows/updatecli.yml: the full
+#     release (1.27.3) plus its sha256, atomically (see tools.yaml).
+# The go.mod "go" directive is the minimum language version the code needs,
+# not the toolchain in use, so it is NOT bumped with the toolchain (this
+# repository supports Go 1.24+ on purpose). Repositories that want go.mod to
+# follow the toolchain set go.sync_gomod: true in updatecli-values/values.yaml.
+# staticcheck lags new Go releases: the Forgejo lint job and LINT_GO_VERSION
+# stay on the previous release by hand and are not touched here.
+#
+# Document 2 updates Go modules with Updatecli's golang/gomod autodiscovery:
+# one PR per module bump, go.sum maintained by Updatecli. termiplus is
+# standard-library only, so it finds nothing and ends with "no change"; the
+# document is the template for repositories that do have dependencies. If the
+# repository has a vendor/ directory, run go mod vendor in a follow-up shell
+# target (see README.md).
+#
+# To adapt: change the file paths and patterns in the targets, and
+# go.sync_gomod in updatecli-values/values.yaml.
+---
+name: 'go toolchain'
+pipelineid: termiplus-go-toolchain
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): bump Go toolchain'
+{{- end }}
+sources:
+  go:
+    name: 'newest stable Go release'
+    kind: golang
+  minor:
+    name: 'its minor release'
+    kind: golang
+    transformers:
+      - findsubmatch:
+          pattern: '^([0-9]+\.[0-9]+)\.[0-9]+$'
+          captureindex: 1
+  sha256:
+    name: 'checksum of the linux amd64 tarball'
+    kind: shell
+    dependson: ['go']
+    spec:
+      command: curl -fsSL "https://dl.google.com/go/go{{ source "go" }}.linux-amd64.tar.gz.sha256"
+targets:
+  dockerfile:
+    name: 'Go {{ source "minor" }} in the Dockerfile'
+    kind: file
+    sourceid: minor
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: Dockerfile
+      matchpattern: 'ARG GO_VERSION=[0-9.]+'
+      replacepattern: 'ARG GO_VERSION={{ source "minor" }}'
+  github-ci:
+    name: 'Go {{ source "minor" }} in the GitHub workflows'
+    kind: file
+    sourceid: minor
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      files:
+        - .github/workflows/ci.yml
+        - .github/workflows/security.yml
+      matchpattern: '(\n  GO_VERSION: )"[0-9.]+"'
+      replacepattern: '$1"{{ source "minor" }}"'
+  forgejo-test-image:
+    name: 'Go {{ source "minor" }} in the Forgejo test image'
+    kind: file
+    sourceid: minor
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .forgejo/workflows/ci.yml
+      # Only the test job's image; the lint image is held back by hand.
+      matchpattern: '(dockerhub/library/golang:)[0-9.]+(-bookworm\n    timeout-minutes: 20)'
+      replacepattern: '${1}{{ source "minor" }}${2}'
+  workflow-version:
+    name: 'Go {{ source "go" }} tarball'
+    kind: file
+    sourceid: go
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .forgejo/workflows/updatecli.yml
+      matchpattern: 'GO_VERSION: "[0-9.]+"'
+      replacepattern: 'GO_VERSION: "{{ source "go" }}"'
+  workflow-sha256:
+    name: 'Go {{ source "go" }} tarball sha256'
+    kind: file
+    sourceid: sha256
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: .forgejo/workflows/updatecli.yml
+      matchpattern: 'GO_SHA256: "[0-9a-f]{64}"'
+      replacepattern: 'GO_SHA256: "{{ source "sha256" }}"'
+{{- if .go.sync_gomod }}
+  gomod-directive:
+    name: 'go.mod go directive {{ source "minor" }}'
+    kind: file
+    sourceid: minor
+    {{- if .scm.enabled }}
+    scmid: forgejo
+    {{- end }}
+    spec:
+      file: go.mod
+      matchpattern: '(?m)^go [0-9.]+$'
+      replacepattern: 'go {{ source "minor" }}'
+{{- end }}
+---
+name: 'go modules'
+pipelineid: termiplus-go-modules
+# Go modules. Needs the go binary (the workflow installs it) and, with scm
+# enabled, runs go mod tidy after each module bump.
+{{- if .scm.enabled }}
+scms:
+  forgejo:
+    kind: gitea
+    spec:
+      url: '{{ requiredEnv "FORGEJO_URL" }}'
+      owner: '{{ .scm.owner }}'
+      repository: '{{ .scm.repository }}'
+      branch: '{{ .scm.branch }}'
+      username: '{{ .scm.username }}'
+      token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
+      user: '{{ .scm.user }}'
+      email: '{{ .scm.email }}'
+      commitmessage:
+        type: chore
+        scope: deps
+        hidecredit: true
+        footers: '{{ .scm.footers }}'
+actions:
+  pr:
+    kind: gitea/pullrequest
+    scmid: forgejo
+    title: 'chore(deps): update Go modules'
+{{- end }}
+autodiscovery:
+  {{- if .scm.enabled }}
+  scmid: forgejo
+  actionid: pr
+  {{- end }}
+  groupby: all
+  crawlers:
+    golang/gomod:
+      rootdir: .
+      # The Go version is handled by document 1; modules only here.
+      onlygomodule: true

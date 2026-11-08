@@ -48,6 +48,7 @@ Citations: `deploy/docker-compose.yml:1-20`, `:26`, `:55`, `:77`, `:87-102`, `de
 
 - **Hits:** `deploy/firewall.sh` (subnets, fixed addresses such as `172.30.0.2`), README quick start, `test/integration/*` start lines, live deployments that stack these files
 - **Does not hit:** Go code, unless an environment variable name changes
+- **Automated edits:** the `image:` tag and `@sha256` digests of oauth2-proxy, keycloak and postgres in `docker-compose.{desktop,mcp,keycloak}.yml` are rewritten by Updatecli pull requests (`updatecli.d/docker-images.yaml`, weekly workflow `.forgejo/workflows/updatecli.yml`). Keep each `image:` line in the `name:tag@sha256:<64 hex>` form its patterns match.
 
 ## Surfaces
 

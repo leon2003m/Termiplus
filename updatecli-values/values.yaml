@@ -1,0 +1,29 @@
+# Values shared by every manifest in updatecli.d/. This is the ONLY file another
+# repository has to edit after copying updatecli.d/ (plus the version pins and
+# file paths inside the manifests themselves).
+#
+# Real hostnames and secrets never live here: the Forgejo URL comes from the
+# environment (FORGEJO_URL, set by the workflow from the server URL) and the
+# bot token from UPDATECLI_TOKEN (a Forgejo secret).
+scm:
+  # false = local dry run: targets edit the checked-out working tree and no
+  # pull request is opened (see updatecli-values/local.yaml).
+  enabled: true
+  owner: leonm
+  repository: termiplus
+  # Pull requests target this branch. Updatecli pushes to a working branch
+  # named updatecli_<branch>_<pipelineid>, never to the branch itself.
+  branch: dev
+  # Forgejo user that owns UPDATECLI_TOKEN. Needs write access to the repo
+  # (push branches, open PRs) and nothing more.
+  username: updatecli-bot
+  # Author of the update commits. Use an address the bot account owns.
+  user: updatecli-bot
+  email: updatecli-bot@noreply.invalid
+  # Extra commit footers, e.g. for repositories that require a DCO sign-off:
+  #   footers: "Signed-off-by: updatecli-bot <updatecli-bot@noreply.invalid>"
+  footers: ""
+go:
+  # true = the go.mod "go" directive follows the newest Go minor release.
+  # false = it stays the minimum version the code supports (termiplus: 1.24).
+  sync_gomod: false
