@@ -43,4 +43,4 @@ networks:
     internal: true
 
 secrets:
-  mcp_kc_admin_client_secret: { file: ./secrets/mcp_kc_admin_client_secret }
+  mcp_kc_admin_client_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_kc_admin_client_secret" }

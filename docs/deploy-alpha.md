@@ -14,7 +14,15 @@ release. Follow the security guidance in the repository README.
 
 ## 1. Prepare (once)
 
+Keep the secrets outside the source checkout, in the deployment's own
+directory, for example `/opt/docker/termiplus/secrets`. Every compose file
+reads them from `TERMIPLUS_SECRETS_DIR` (absolute path, stored in
+`deploy/.env` by the script); without it they land in `deploy/secrets/`, which
+only suits tests and quick trials.
+
 ```sh
+sudo install -d -o "$USER" -m 0700 /opt/docker/termiplus/secrets
+TERMIPLUS_SECRETS_DIR=/opt/docker/termiplus/secrets \
 WEBUI_URL=https://chat.example.com \
 KEYCLOAK_PUBLIC_URL=https://sso.example.com \
 DESKTOP_PUBLIC_URL=https://desk.example.com \
@@ -23,7 +31,7 @@ deploy/setup-alpha.sh
 sudo chown -R 65534:65534 deploy/mcp-data deploy/backups
 ```
 
-`setup-alpha.sh` creates every missing secret under `deploy/secrets/` (it
+`setup-alpha.sh` creates every missing secret in that directory (it
 never overwrites one), renders the Keycloak realm (clients `owui`,
 `termiplus-mcp`, `termiplus-desktop`; groups `termiplus-users`,
 `termiplus-persist`, `termiplus-admin`), writes `deploy/.env` and prints the

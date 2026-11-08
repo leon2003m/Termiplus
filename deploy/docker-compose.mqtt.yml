@@ -34,4 +34,4 @@ networks:
     driver: bridge
 
 secrets:
-  mqtt_password: { file: ./secrets/mqtt_password }
+  mqtt_password: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mqtt_password" }

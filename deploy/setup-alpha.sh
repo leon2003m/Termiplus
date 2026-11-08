@@ -8,15 +8,33 @@
 #   DESKTOP_STREAM_URL=https://desktops.example.com \
 #   deploy/setup-alpha.sh
 #
-# Creates every missing secret in deploy/secrets/ (existing files are never
-# overwritten), renders deploy/secrets/realm-termiplus.json for Keycloak's first
-# start, writes deploy/.env for docker compose and prints what to set in Open
-# WebUI and in the plugin. Runs no containers and changes nothing outside
-# deploy/.
+# Secrets go to TERMIPLUS_SECRETS_DIR, an absolute path outside the source
+# checkout (e.g. /opt/docker/termiplus/secrets; create it first with
+# `sudo install -d -o "$USER" -m 0700 DIR`). Without it they go to
+# deploy/secrets/, which only suits tests and quick trials.
+#
+# Creates every missing secret there (existing files are never overwritten),
+# renders realm-termiplus.json for Keycloak's first start, writes deploy/.env
+# for docker compose and prints what to set in Open WebUI and in the plugin.
+# Runs no containers and changes nothing outside deploy/ and the secrets
+# directory.
 set -euo pipefail
 
 DEPLOY="$(cd "$(dirname "$0")" && pwd)"
-SECRETS="$DEPLOY/secrets"
+# Secrets directory: TERMIPLUS_SECRETS_DIR from the environment, else from
+# deploy/.env (as compose reads it), else deploy/secrets.
+SECRETS="${TERMIPLUS_SECRETS_DIR:-}"
+if [ -z "$SECRETS" ] && [ -f "$DEPLOY/.env" ]; then
+  SECRETS="$(sed -n 's/^TERMIPLUS_SECRETS_DIR=//p' "$DEPLOY/.env" | tail -n1)"
+  SECRETS="${SECRETS#\"}"; SECRETS="${SECRETS%\"}"
+  SECRETS="${SECRETS#\'}"; SECRETS="${SECRETS%\'}"
+fi
+SECRETS_SET="$SECRETS"
+SECRETS="${SECRETS:-$DEPLOY/secrets}"
+case "$SECRETS" in
+  /*) ;;
+  *) echo "$(basename "$0"): TERMIPLUS_SECRETS_DIR must be an absolute path" >&2; exit 1 ;;
+esac
 : "${WEBUI_URL:?set WEBUI_URL (how browsers reach Open WebUI, https://...)}"
 : "${KEYCLOAK_PUBLIC_URL:?set KEYCLOAK_PUBLIC_URL (https://... in front of Keycloak)}"
 : "${DESKTOP_PUBLIC_URL:?set DESKTOP_PUBLIC_URL (https://... in front of desk-auth)}"
@@ -41,7 +59,7 @@ mkdir -p "$SECRETS"
 # the host out, also when it was created earlier with a looser umask.
 chmod 0700 "$SECRETS"
 
-# secret NAME BYTES: create deploy/secrets/NAME with random hex, unless present.
+# secret NAME BYTES: create $SECRETS/NAME with random hex, unless present.
 secret() {
   local f="$SECRETS/$1"
   if [ -s "$f" ]; then
@@ -137,6 +155,7 @@ fi
   echo "KEYCLOAK_PUBLIC_URL=$KEYCLOAK_PUBLIC_URL"
   echo "DESKTOP_PUBLIC_URL=$DESKTOP_PUBLIC_URL"
   echo "DESKTOP_STREAM_URL=$DESKTOP_STREAM_URL"
+  [ -z "$SECRETS_SET" ] || echo "TERMIPLUS_SECRETS_DIR=$SECRETS"
 } >"$ENVFILE"
 [ "$ENVFILE" = /dev/stdout ] || echo "wrote    deploy/.env"
 
@@ -154,7 +173,7 @@ Next steps
        -f docker-compose.desktop.yml -f docker-compose.keycloak.yml \\
        -f docker-compose.mcp-users.yml up -d
 3. Keycloak admin console ($KEYCLOAK_PUBLIC_URL/admin, user admin, password in
-   deploy/secrets/keycloak_admin_password): realm "termiplus", create users,
+   $SECRETS/keycloak_admin_password): realm "termiplus", create users,
    put them into termiplus-persist / termiplus-admin as needed.
 4. Open WebUI environment (then restart it). Existing local accounts with the
    same e-mail are merged, so their Open WebUI ids - and terminal homes - stay.
@@ -162,15 +181,15 @@ Next steps
    login lasts; without it the token Open WebUI forwards ends with Keycloak's
    browser session (30 min idle) and the tool asks users to sign in again:
      OAUTH_CLIENT_ID=owui
-     OAUTH_CLIENT_SECRET=<deploy/secrets/owui_oidc_client_secret>
+     OAUTH_CLIENT_SECRET=<$SECRETS/owui_oidc_client_secret>
      OPENID_PROVIDER_URL=$ISSUER/.well-known/openid-configuration
      OAUTH_PROVIDER_NAME=Keycloak
      OAUTH_SCOPES=openid email profile offline_access
      ENABLE_OAUTH_SIGNUP=true
      OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
-     OAUTH_SESSION_TOKEN_ENCRYPTION_KEY=<deploy/secrets/owui_oauth_session_key>
+     OAUTH_SESSION_TOKEN_ENCRYPTION_KEY=<$SECRETS/owui_oauth_session_key>
 5. Open WebUI tool (integrations/openwebui/termiplus_workspaces.py), valves:
      mcp_url    = http://mcp-auth:4180/
-     plugin_key = <deploy/secrets/mcp_owui_plugin_key>
+     plugin_key = <$SECRETS/mcp_owui_plugin_key>
      ui_url     = $DESKTOP_PUBLIC_URL/ui/
 EOF
