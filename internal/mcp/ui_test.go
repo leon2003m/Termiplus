@@ -97,6 +97,13 @@ func TestUIStaticAndHeaders(t *testing.T) {
 			t.Fatalf("legacy interactive desktop %s still exposed: %d", old, code)
 		}
 	}
+	// The page names the icon, and it is served as SVG (nosniff needs the type).
+	if _, body, _ := f.do(t, http.MethodGet, "/ui/", "", "", "", nil); !strings.Contains(body, `rel="icon" href="favicon.svg"`) {
+		t.Fatalf("/ui/: no favicon link")
+	}
+	if code, _, h := f.do(t, http.MethodGet, "/ui/favicon.svg", "", "", "", nil); code != http.StatusOK || h.Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("favicon: %d %q", code, h.Get("Content-Type"))
+	}
 	if code, _, _ := f.do(t, http.MethodGet, "/other", "", "", "", nil); code != http.StatusNotFound {
 		t.Fatalf("outside /ui/: %d", code)
 	}
