@@ -22,12 +22,13 @@ Open WebUI only knows "a terminal connection with a URL". Putting runtime, limit
 - `home`: groups policies that share one home volume (default: the policy name; ignored for ephemeral)
 - `idle_timeout`, `max_per_user` (ephemeral cap, default 3; the least recently used idle sandbox is evicted)
 - `desktop`: native Open Terminal Desktop/Browser with XFCE (needs the desktop image)
+- `locale` (`LANG`), and for desktops `keyboard` (XKB layout) and `record` (screen recording into `~/recordings`). Validated in `gateway.New`, passed as `OPEN_TERMINAL_LOCALE/KEYBOARD/RECORD`; see [Agent manifest](agent-manifest.md) and [docs/agents.md](../../../docs/agents.md).
 - `label`, `description`: display name and one-line help shown by the console and `list_workspaces` (at most 60 and 300 bytes, printable, checked at start). Not hashed.
 - `image`: another image built on the terminal image. It must be in the sockproxy's `EXTRA_IMAGES`.
 - `egress`: `internet` (default) | `offline`. Offline terminals join `OFFLINE_NETWORK` (ot-offline, internal-only) with no resolver; without that network the gateway refuses to start. A container found on the wrong network is recreated (`manager.networkFor`, adoption check in `ensure`).
 - Name: `[a-z0-9]{1,24}` (`naming.go:31-44`)
 
-Citations: `internal/gateway/lifecycle.go:23-60` (Policy), `internal/gateway/lifecycle.go:194-201` (configHash), `internal/gateway/gateway.go:207` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
+Citations: `internal/gateway/lifecycle.go:24-70` (Policy, localeRe, keyboardRe), `internal/gateway/lifecycle.go:198-208` (configHash), `internal/gateway/gateway.go:216` (specPolicies), `cmd/gateway/main.go:32-35` (POLICIES_FILE), `deploy/policies.json`
 
 ## Connected to
 

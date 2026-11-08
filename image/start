@@ -26,4 +26,47 @@ if grep -q sysboxfs /proc/self/mountinfo 2>/dev/null; then
   OPEN_TERMINAL_EXECUTE_DESCRIPTION="${OPEN_TERMINAL_EXECUTE_DESCRIPTION:-} Docker works in this container: if docker is missing, sudo apt-get update && sudo apt-get install -y docker.io starts it too; then use docker without sudo. If the daemon is not running, run start-docker."
   export OPEN_TERMINAL_EXECUTE_DESCRIPTION
 fi
+# Locale for commands and documents (policy "locale", checked by the gateway
+# too); locales-all provides every one.
+locale="${OPEN_TERMINAL_LOCALE:-C.UTF-8}"
+unset OPEN_TERMINAL_LOCALE
+if echo "$locale" | grep -Eq '^(C|[a-z]{2,3}(_[A-Z]{2})?)\.UTF-8$'; then
+  LANG="$locale"
+else
+  echo "start: ignoring malformed OPEN_TERMINAL_LOCALE" >&2
+  LANG=C.UTF-8
+fi
+export LANG
+# Desktop keyboard layout and screen recording (policies "keyboard" and
+# "record"). Open Terminal starts the display on demand and hands its children
+# a sanitized environment without OPEN_TERMINAL_*, so the values are checked
+# here and handed over in a root-written file that the desktop session script
+# (startxfce4 wrapper) reads. The file is rewritten on every start, so a policy
+# without these fields leaves nothing behind.
+keyboard="${OPEN_TERMINAL_KEYBOARD:-}"
+record="${OPEN_TERMINAL_RECORD:-}"
+unset OPEN_TERMINAL_KEYBOARD OPEN_TERMINAL_RECORD
+desktop_conf=""
+if [ "${OPEN_TERMINAL_ENABLE_DESKTOP:-}" = true ]; then
+  if [ -n "$keyboard" ]; then
+    if echo "$keyboard" | grep -Eq '^[a-z]{2,8}$'; then
+      desktop_conf="KEYBOARD=$keyboard
+"
+    else
+      echo "start: ignoring malformed OPEN_TERMINAL_KEYBOARD" >&2
+    fi
+  fi
+  if [ "$record" = 1 ]; then
+    desktop_conf="${desktop_conf}RECORD=1
+"
+  fi
+fi
+if [ -n "$desktop_conf" ] || [ -e /etc/termiplus/desktop.conf ]; then
+  printf '%s' "$desktop_conf" | sudo -n tee /etc/termiplus/desktop.conf >/dev/null 2>&1 ||
+    echo "start: could not write /etc/termiplus/desktop.conf" >&2
+fi
+# Tell the model what this workspace is (~/AGENTS.md) and link the skills.
+/usr/local/libexec/termiplus/agent-setup || echo "start: agent setup failed" >&2
+OPEN_TERMINAL_EXECUTE_DESCRIPTION="${OPEN_TERMINAL_EXECUTE_DESCRIPTION:-} Before your first command, read ~/AGENTS.md (or run tp-status): it says what this workspace is and which tools to use."
+export OPEN_TERMINAL_EXECUTE_DESCRIPTION
 exec "$@"

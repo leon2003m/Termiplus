@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- Images: tools for models working in a workspace (`docs/agents.md`). Each start writes a manifest to `~/AGENTS.md` (mode, root, desktop, rules, tools), which Open WebUI reads into every turn, links bundled skills into `~/.agents/skills` and `tp-status` shows it plus live facts. The terminal image adds pandoc, LibreOffice (nogui), poppler, openpyxl, python-docx, Pillow, tesseract (English, German), recoll and all locales.
+- Policies: `locale` sets `LANG`; for desktops, `keyboard` sets the XKB layout and `record` records the desktop into `~/recordings` (2 fps, kept 2 days). The gateway validates them and the image checks them again.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource

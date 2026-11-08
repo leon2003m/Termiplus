@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -58,9 +59,21 @@ type Policy struct {
 	// out and no DNS; only the gateway reaches it. The gateway refuses to start
 	// with an offline policy when OFFLINE_NETWORK is not configured.
 	Egress string `json:"egress,omitempty"`
+	// Locale sets LANG in the workspace, e.g. "de_DE.UTF-8" (default C.UTF-8).
+	Locale string `json:"locale,omitempty"`
+	// Keyboard is the desktop's XKB layout, e.g. "de". Needs Desktop.
+	Keyboard string `json:"keyboard,omitempty"`
+	// Record records the desktop screen to ~/recordings (2 fps, kept two
+	// days) so the user can review what a model did. Needs Desktop.
+	Record bool `json:"record,omitempty"`
 
 	idle time.Duration
 }
+
+var (
+	localeRe   = regexp.MustCompile(`^(C|[a-z]{2,3}(_[A-Z]{2})?)\.UTF-8$`)
+	keyboardRe = regexp.MustCompile(`^[a-z]{2,8}$`)
+)
 
 func (p Policy) ephemeral() bool { return p.Storage == storageEphemeral }
 
@@ -511,6 +524,17 @@ func (m *manager) create(ctx context.Context, name, userID, policyName string, p
 		env = append(env, "OPEN_TERMINAL_RESOLVER="+m.forwarderDNS)
 	}
 	env = append(env, fmt.Sprintf("OPEN_TERMINAL_ENABLE_DESKTOP=%t", pol.Desktop), fmt.Sprintf("OPEN_TERMINAL_ENABLE_BROWSER=%t", pol.Desktop))
+	if pol.Desktop {
+		if pol.Keyboard != "" {
+			env = append(env, "OPEN_TERMINAL_KEYBOARD="+pol.Keyboard)
+		}
+		if pol.Record {
+			env = append(env, "OPEN_TERMINAL_RECORD=1")
+		}
+	}
+	if pol.Locale != "" {
+		env = append(env, "OPEN_TERMINAL_LOCALE="+pol.Locale)
+	}
 	spec := map[string]any{
 		"Image":      m.imageFor(pol),
 		"Env":        env,

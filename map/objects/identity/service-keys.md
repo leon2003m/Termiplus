@@ -19,14 +19,14 @@ Each hop has its own blast radius. Open WebUI may start terminals but not read h
 
 | Key | Env / secret | Held by | Proves | Checked at |
 |---|---|---|---|---|
-| gateway API key | `GATEWAY_API_KEY` / `gateway_api_key` | Open WebUI | may use `/p/<policy>/` | `internal/gateway/gateway.go:354` (checkBearer), `internal/gateway/ws.go:78` (first WS message) |
+| gateway API key | `GATEWAY_API_KEY` / `gateway_api_key` | Open WebUI | may use `/p/<policy>/` | `internal/gateway/gateway.go:363` (checkBearer), `internal/gateway/ws.go:78` (first WS message) |
 | control key | `CONTROL_API_KEY` | MCP server | may use `/control/v1/` and name any user | `internal/gateway/control.go:29`, `:73` |
 | admin key | `ADMIN_API_KEY` | MCP server (admin tools) | may set network policy, manage homes | `internal/gateway/admin.go:97` |
 | proxy token | `PROXY_TOKEN` / `proxy_token` | gateway | may talk to the sockproxy | `internal/sockproxy/proxy.go:98` (`X-Proxy-Token`) |
-| key secret | `KEY_SECRET` / `key_secret` | gateway | derives each container's API key (HMAC over the name)  | `internal/gateway/lifecycle.go:97`, `:154` |
+| key secret | `KEY_SECRET` / `key_secret` | gateway | derives each container's API key (HMAC over the name)  | `internal/gateway/lifecycle.go:110`, `:167` |
 | plugin key | `MCP_OWUI_PLUGIN_KEY` | Open WebUI tool (valve `plugin_key`) | may name the Open WebUI user to the MCP server | `internal/mcp/auth.go:21-23`, `:45` |
 
-Rotating the key secret changes every container's config hash (`lifecycle.go:195-201`), so running terminals are recreated on their next request.
+Rotating the key secret changes every container's config hash (`lifecycle.go:208-214`), so running terminals are recreated on their next request.
 
 ## Connected to
 

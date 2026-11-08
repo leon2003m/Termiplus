@@ -38,7 +38,7 @@ cover: ## Tests with coverage report
 	go tool cover -func=coverage.out | tail -1
 
 lint: fmt-check vet staticcheck ## Go linters
-	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/start image/start-docker
+	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh image/start image/start-docker image/agent/agent-setup image/agent/bin/tp-status image/desktop/record-desktop image/desktop/files/usr/local/bin/startxfce4
 	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
 	actionlint
 	@# Scripts that hosts and tests run directly must stay executable in git.

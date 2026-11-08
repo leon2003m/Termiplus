@@ -22,7 +22,7 @@ The name *is* the lookup key. The gateway finds a user's container by hashing th
 - Env: `OPEN_TERMINAL_API_KEY` = HMAC(`KEY_SECRET`, name). DNS is pinned to the [DNS forwarder](../sandbox/dns-forwarder.md).
 - Lifecycle: `ensure` adopts, creates or recreates it on a config-hash mismatch or when it is on any network but its policy's one. `adopt` (at startup) and `checkNetworks` (every minute) list running managed containers from Docker, remove any that has gained an extra network and register the rest, so a removal or inspection that failed once is retried. The reaper stops persistent containers and removes ephemeral ones once idle. Admission enforces `MAX_RUNNING` and `max_per_user`.
 
-Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Container, Ephemeral, IsManagedContainer, UserHash), `internal/gateway/lifecycle.go:154` (containerKey), `:173` (networkOK), `:205` (ensure), `:241-244` (owner check), `:335` (admit), `:468` (create), `:587` (adopt), `:596` (checkNetworks), `:657` (reap)
+Citations: `internal/naming/naming.go:31-44` (regexes), `:49-82` (Suffix, Container, Ephemeral, IsManagedContainer, UserHash), `internal/gateway/lifecycle.go:167` (containerKey), `:186` (networkOK), `:218` (ensure), `:254-257` (owner check), `:348` (admit), `:481` (create), `:611` (adopt), `:620` (checkNetworks), `:681` (reap)
 
 ## Connected to
 

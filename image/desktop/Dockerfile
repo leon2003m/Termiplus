@@ -44,7 +44,7 @@ RUN python3 -m venv /opt/workspace \
     && /opt/workspace/bin/python -m ipykernel install --prefix=/opt/open-terminal --name=python3 \
     && chown -R 1000:1000 /opt/workspace
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        vim gawk diffutils patch lsof docker-cli \
+        vim gawk diffutils patch lsof docker-cli x11-xkb-utils wmctrl \
     && rm -rf /var/lib/apt/lists/*
 # Keep desktop applications and branding independent of the native transport.
 # Seed missing preferences and repair obsolete app/session controls on startup.
@@ -58,6 +58,11 @@ RUN dpkg-divert --quiet --local --rename --add /usr/share/backgrounds/xfce/xfce-
     && apt-get purge -y libglib2.0-dev-bin \
     && chmod 755 /usr/local/bin/startxfce4 /usr/local/bin/thunar /usr/local/bin/xdotool \
     && rm -rf /var/lib/apt/lists/*
+# Policies keyboard and record: the startxfce4 wrapper (files/) applies them
+# when Open Terminal starts the display.
+COPY record-desktop /usr/local/libexec/termiplus/record-desktop
+COPY skills/ /usr/share/termiplus/skills/
+RUN chmod 755 /usr/local/libexec/termiplus/record-desktop && chmod -R a+rX /usr/share/termiplus
 COPY prepare.py /usr/local/libexec/termiplus/prepare-desktop.py
 RUN chown -R 1000:1000 /home/user
 ENV PATH="/home/user/.local/bin:/opt/workspace/bin:${PATH}" \

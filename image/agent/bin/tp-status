@@ -1,0 +1,22 @@
+#!/bin/bash
+# Shows what this workspace is and what is running in it: the manifest's
+# rules, then live facts. Read-only.
+set -uo pipefail
+
+if [ -r "$HOME/AGENTS.md" ]; then
+  cat "$HOME/AGENTS.md"
+  echo
+fi
+echo "## Now"
+echo
+echo "- Disk (home): $(df -h "$HOME" 2>/dev/null | awk 'NR==2 {print $3 " used, " $4 " free"}')"
+echo "- Memory: $(free -h 2>/dev/null | awk '/^Mem:/ {print $3 " used of " $2}')"
+echo "- Outputs: $(find "$HOME/outputs" -maxdepth 1 -type f 2>/dev/null | wc -l) file(s) in ~/outputs"
+if grep -q "Desktop: \*\*yes" "$HOME/AGENTS.md" 2>/dev/null; then
+  echo "- Desktop: enabled; Open Terminal starts it on demand"
+fi
+if [ -d "$HOME/recordings" ]; then
+  echo "- Recordings: $(find "$HOME/recordings" -maxdepth 1 -name '*.mkv' -type f 2>/dev/null | wc -l) file(s) in ~/recordings"
+fi
+echo "- Top processes (CPU):"
+ps -eo pcpu=,comm= --sort=-pcpu 2>/dev/null | head -5 | awk '{print "  - " $2 " " $1 "%"}'
