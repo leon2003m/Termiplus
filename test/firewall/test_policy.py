@@ -16,8 +16,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "deploy/firewall.sh").read_text()
 VALIDATION = SOURCE[SOURCE.index("policy_destination_ok() {"):SOURCE.index("# Bridge-netfilter")]
-CURRENT = SOURCE[SOURCE.index("policy_fingerprint() {"):SOURCE.index('if [ "${1:-}" = --if-needed ]')]
-RENDER = SOURCE[SOURCE.index("upstream_ok() {"):SOURCE.index("\napply_ip_policy\n")]
+CURRENT = SOURCE[SOURCE.index("# Each forwarder upstream"):SOURCE.index('if [ "${1:-}" = --if-needed ]')]
+RENDER = SOURCE[SOURCE.index("# Remove only our unconditional hooks"):SOURCE.index("\napply_ip_policy\n")]
 DISCOVERY = SOURCE[SOURCE.index("mac_of() {"):SOURCE.index("# pin_ip IP")]
 PORT_DISCOVERY = SOURCE[SOURCE.index("port_macs() {"):SOURCE.index("# ebtables -C")]
 FUNCTIONS = VALIDATION + CURRENT + RENDER
@@ -425,6 +425,14 @@ apply_ip_policy
         self.shell("apply_ip_policy; rules_current")
         text = "\n".join(" ".join(r) for r in json.loads(self.state.read_text())["v4"]["TERMIPLUS-IN"])
         self.assertNotIn("192.0.2.53", text)
+
+    def test_if_needed_check_only_uses_helpers_defined_before_it(self):
+        # --if-needed runs rules_current before the rest of the script is
+        # parsed; a helper defined later is "command not found" there.
+        branch = SOURCE.index('if [ "${1:-}" = --if-needed ]')
+        for helper in ("upstreams() {", "upstream_ok() {", "host_upstreams() {",
+                       "policy_fingerprint() {", "rules_current() {"):
+            self.assertLess(SOURCE.index(helper), branch, helper)
 
 if __name__ == "__main__":
     unittest.main()

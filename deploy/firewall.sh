@@ -513,6 +513,11 @@ mkdir -p "$PORTLOCK_DIR"
 exec 8>"$PORTLOCK_DIR/apply.lock"
 flock 8 || exit 1
 
+# Each forwarder upstream (DNS_UPSTREAM, comma-separated) must be a plain IPv4
+# address outside the never-allowed ranges; anything else gets no rule.
+upstream_ok() { policy_destination_ok "$1" 1; }
+upstreams() { echo "$DNS_UPSTREAM" | tr -s ', ' '\n' | grep -v '^$' || true; }
+
 # --if-needed (for the termiplus-firewall-watch timer): only (re)apply when the
 # rules are missing or a pinned MAC no longer matches the running gateway or
 # forwarder, e.g. after a reboot or a recreated gateway. Full applies replace
@@ -729,11 +734,6 @@ if [ "$initial_lock_rc" -eq 1 ]; then
   exit 1
 fi
 ensure_gateway_antispoof
-
-# Each forwarder upstream (DNS_UPSTREAM, comma-separated) must be a plain IPv4
-# address outside the never-allowed ranges; anything else gets no rule.
-upstream_ok() { policy_destination_ok "$1" 1; }
-upstreams() { echo "$DNS_UPSTREAM" | tr -s ', ' '\n' | grep -v '^$' || true; }
 
 # Remove only our unconditional hooks and insert one at the front. These
 # operations and both owned chains commit together under the xtables lock.
