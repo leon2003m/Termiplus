@@ -79,9 +79,14 @@ if [ "${BUILD:-1}" = 1 ]; then
   docker build -q --build-arg BASE="$REG/termiplus-terminal:$TAG" -t "$REG/termiplus-desktop:$TAG" "$ROOT/image/desktop" >/dev/null
 fi
 
-log "prepare deployment in $WORK/deploy (existing secrets are kept)"
+log "prepare deployment in $WORK/deploy (preview-generated secrets are kept)"
 mkdir -p "$WORK/deploy"
-cp -r "$ROOT"/deploy/. "$WORK/deploy/"
+# Copy only files git does not ignore: the checkout's own deploy/secrets,
+# .env, mcp-data and backups are real deployment state and must never reach
+# this deliberately unhardened preview. Secrets come only from $WORK.
+git -C "$ROOT" ls-files -z --cached --others --exclude-standard -- deploy |
+  sed -z 's|^deploy/||' |
+  tar -C "$ROOT/deploy" --null -T - -cf - | tar -C "$WORK/deploy" -xf -
 rm -f "$WORK/deploy/.env"
 mkdir -p "$WORK/deploy/secrets"
 for s in proxy_token gateway_api_key key_secret; do
