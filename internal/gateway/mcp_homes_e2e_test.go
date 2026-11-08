@@ -671,3 +671,20 @@ func TestMCPWipeHomeRejectsTemporary(t *testing.T) {
 		t.Fatal("temporary sandbox removed by a refused wipe")
 	}
 }
+
+// The refusal that triggers recovery is often a cancelled request, so the
+// restart must not reuse that context.
+func TestRestartPoliciesSurvivesCancelledRequest(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, true))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	unlock, stopped, err := c.h.g.mgr.lockHomeTracked(context.Background(), "bob", "default")
+	if err != nil || len(stopped) == 0 {
+		t.Fatalf("lock: stopped=%v err=%v", stopped, err)
+	}
+	unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.h.g.mgr.restartPolicies(ctx, "bob", stopped)
+	assertRunning(t, c, s.ID)
+}

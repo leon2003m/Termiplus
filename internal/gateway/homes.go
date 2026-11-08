@@ -293,6 +293,13 @@ func (m *manager) lockHomeTracked(ctx context.Context, userID, home string) (fun
 // operation that stopped them was refused. Best effort: failures are logged.
 // The caller must not hold the locks.
 func (m *manager) restartPolicies(ctx context.Context, userID string, policies []string) {
+	if len(policies) == 0 {
+		return
+	}
+	// Recovery must outlive a cancelled request: the refusal is often caused
+	// by exactly that cancellation.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
 	for _, p := range policies {
 		if _, err := m.ensure(ctx, userID, "", p, m.policies[p]); err != nil {
 			log.Printf("restart %q/%q after a refused home operation: %q", userID, p, err)
