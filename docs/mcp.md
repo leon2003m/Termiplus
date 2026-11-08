@@ -172,6 +172,27 @@ Keep MCP listeners private to their oauth2-proxies. Never expose trusted identit
 headers directly to browsers. The append-only audit log records changes through
 the dispatcher; direct gateway admin calls appear in the gateway log instead.
 
+**Your own group or role names.** `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES`
+(comma-separated) name the groups that grant the `termiplus-persist` and
+`termiplus-admin` roles, e.g. `MCP_PERSIST_ROLES=ki-nutzer` and
+`MCP_ADMIN_ROLES=ki-admin`. A user has the role when any of their groups is
+listed; `termiplus-persist` / `termiplus-admin` then only count if you list
+them too. An unset variable keeps the default name for that role. When either
+variable is set, every forwarded group name is normalised first, for these
+roles and for workspace entitlements: one leading `role:` (oauth2-proxy's
+`keycloak-oidc` provider adds it to realm roles) and then one leading `/`
+(Keycloak's "Full group path") are stripped, so `ki-nutzer`, `/ki-nutzer` and
+`role:ki-nutzer` are the same. Subgroups are not flattened: `/org/ki-nutzer`
+stays `org/ki-nutzer` and matches only if listed as such. With neither variable
+set, names are matched exactly as forwarded. The startup log prints the mapping
+in use (`roles: ...`). `manage_user` and `manage_group` still only manage
+top-level `termiplus-*` groups; members of your own groups are managed in your
+directory.
+`manage_user` refuses to remove someone from an admin group when no other
+enabled user would remain in any top-level admin group, so an obsolete admin
+group can be emptied while admins remain elsewhere. Admins only in a subgroup
+do not count there.
+
 ## Migration from the alpha checkpoint
 
 Checkpoint: `808cc87`. Rebuild terminal and desktop images together. Upgrade the

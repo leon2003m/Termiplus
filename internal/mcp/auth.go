@@ -37,8 +37,12 @@ const (
 // groups. Trust is the same as the gateway's: whoever holds the Open WebUI
 // side's key may name the user, exactly as Open WebUI does towards the gateway
 // with X-User-Id.
+//
+// Roles (optional) maps the organisation's groups onto termiplus's roles; see
+// RoleMap.
 type ProxyHeaderAuthenticator struct {
 	OWUIKey string
+	Roles   *RoleMap
 }
 
 // Authenticate implements Authenticator.
@@ -67,7 +71,7 @@ func (a ProxyHeaderAuthenticator) Authenticate(r *http.Request) (Principal, erro
 			}
 		}
 	}
-	return Principal{UserID: userID, Roles: roles, Subject: subject}, nil
+	return Principal{UserID: userID, Roles: a.Roles.apply(roles), Subject: subject}, nil
 }
 
 // StaticAuthenticator maps fixed bearer tokens to principals. It exists for

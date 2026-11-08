@@ -55,6 +55,10 @@ All notable changes to this project are documented here. The format is based on 
 
 - The console has a green terminal favicon, served from `/ui/`.
 
+### Added
+
+- MCP: `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES` name your own groups or roles (e.g. `ki-nutzer`, `ki-admin`) for the persist and admin roles. When set, forwarded group names are normalised (`/name`, `role:name` and `name` are the same) for roles and workspace entitlements, in MCP tools, the management UI and the share page. Unset, names match exactly as before.
+
 ## [1.0.0] - 2026-11-05
 
 - Deploy: `TERMIPLUS_SECRETS_DIR` moves all secrets out of the source checkout (e.g. `/opt/docker/termiplus/secrets`). Every compose file, `setup-alpha.sh` and `add-mcp-admin-client.sh` use it; `setup-alpha.sh` writes it to `deploy/.env`. Without it, `deploy/secrets/` stays the default.
