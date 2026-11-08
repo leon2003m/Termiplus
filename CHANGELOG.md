@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Security
+
+- Firewall: a symlinked or non-regular `egress.rules` is ignored, and malformed
+  lines are logged by number, not content. A missing `ip6tables-restore` no
+  longer aborts the IPv4 policy; all IPv6 frames on the bridges are dropped with ebtables instead. The
+  policy fingerprint now covers host-local DNS upstream addresses.
+
 ### Fixed
 
 - Integration test (`test/integration/run.sh`): the sandbox bridge runs with

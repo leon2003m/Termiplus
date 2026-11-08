@@ -5,8 +5,10 @@ exercised in a fresh network namespace by integration/firewall-policy.py.
 """
 import ipaddress
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -14,8 +16,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "deploy/firewall.sh").read_text()
 VALIDATION = SOURCE[SOURCE.index("policy_destination_ok() {"):SOURCE.index("# Bridge-netfilter")]
-CURRENT = SOURCE[SOURCE.index("policy_fingerprint() {"):SOURCE.index('if [ "${1:-}" = --if-needed ]')]
-RENDER = SOURCE[SOURCE.index("upstream_ok() {"):SOURCE.index("\napply_ip_policy\n")]
+CURRENT = SOURCE[SOURCE.index("# Each forwarder upstream"):SOURCE.index('if [ "${1:-}" = --if-needed ]')]
+RENDER = SOURCE[SOURCE.index("# Remove only our unconditional hooks"):SOURCE.index("\napply_ip_policy\n")]
 DISCOVERY = SOURCE[SOURCE.index("mac_of() {"):SOURCE.index("# pin_ip IP")]
 PORT_DISCOVERY = SOURCE[SOURCE.index("port_macs() {"):SOURCE.index("# ebtables -C")]
 FUNCTIONS = VALIDATION + CURRENT + RENDER
@@ -72,6 +74,13 @@ else:
  for r in s[family][a[1]]:print(' '.join(r))
 '''
 
+SYSCTL = """#!/bin/sh
+d=$SYSCTL_DIR
+if [ "$1" = -n ]; then cat "$d/$2" 2>/dev/null; exit $?; fi
+[ -e "$d/ro" ] && exit 0
+kv=$2; printf '%s\\n' "${kv#*=}" >"$d/${kv%%=*}"
+"""
+
 
 def verdict(text, chain="TERMIPLUS", src="172.30.0.150", dst="192.168.1.5",
             proto="tcp", dport="443", sport="40000", state="NEW",
@@ -120,11 +129,33 @@ class Policy(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def run_shell(self, code, env=None):
+        return subprocess.run(["/bin/sh"], input="set -eu\n" + VARIABLES + FUNCTIONS + "\n" + code,
+                              env=env or self.env, capture_output=True, text=True, timeout=15)
+
     def shell(self, code, success=True):
-        p = subprocess.run(["/bin/sh"], input="set -eu\n" + VARIABLES + FUNCTIONS + "\n" + code,
-                           env=self.env, capture_output=True, text=True, timeout=15)
+        p = self.run_shell(code)
         self.assertEqual(p.returncode == 0, success, p.stderr)
         return p.stdout
+
+    def no_ip6_restore_env(self):
+        """PATH without any ip6tables-restore (the host tools are not reachable)."""
+        bin_dir = self.root / "nov6"
+        bin_dir.mkdir()
+        for name in ("iptables", "ip6tables", "iptables-restore", "ip"):
+            shutil.copy(self.root / name, bin_dir / name)
+        for name in ("awk", "sha256sum", "cut", "tr", "grep", "sed", "cp", "mktemp", "rm", "mv",
+                     "cat", "mkdir", "dirname", "basename", "head", "sort"):
+            shutil.copy(shutil.which(name), bin_dir / name)
+        # sysctl model: one file per key; a "ro" file makes writes silent no-ops.
+        sysctl = bin_dir / "sysctl"
+        sysctl.write_text(SYSCTL)
+        sysctl.chmod(0o755)
+        sdir = self.root / "sysctl"
+        sdir.mkdir()
+        for key in ("all", "ot-sandbox", "ot-offline"):
+            (sdir / ("net.ipv6.conf.%s.disable_ipv6" % key)).write_text("0\n")
+        return dict(self.env, PATH=str(bin_dir), SYSCTL_DIR=str(sdir))
 
     def test_canonical_cidr_and_never_range_overlap(self):
         good = ("10.0.0.0/8", "192.0.2.1/32", "192.168.0.0/16", "172.31.0.0/16")
@@ -290,6 +321,118 @@ snapshot_services
                 self.shell("apply_ip_policy; rules_current")
                 self.assertEqual(len(json.loads(self.state.read_text())["v4"]["DOCKER-USER"]), 1)
 
+
+    def test_symlinked_egress_file_is_ignored_and_never_logged(self):
+        secret = self.root / "secret"
+        secret.write_text("TOKEN-sk-fake-1234 443 tcp extra\n10.2.0.0/16 443 tcp\n")
+        self.rules.unlink()
+        self.rules.symlink_to(secret)
+        p = self.run_shell("apply_ip_policy; rules_current")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("TOKEN-sk-fake", p.stderr + p.stdout)
+        self.assertIn("symlink", p.stderr)
+        text = "\n".join(" ".join(r) for r in json.loads(self.state.read_text())["v4"]["TERMIPLUS"])
+        # A valid-looking target is not applied either: no admin exceptions.
+        self.assertEqual(verdict(text, dst="10.2.1.1"), "DROP")
+        # Direct rendering with the link refuses it as well.
+        p = self.run_shell("render_ipv4")
+        self.assertEqual(verdict(p.stdout, dst="10.2.1.1"), "DROP")
+        self.assertNotIn("TOKEN-sk-fake", p.stderr)
+        # Replacing the link with a real file is a policy change.
+        self.rules.unlink()
+        self.rules.write_text("10.2.0.0/16 443 tcp\n")
+        self.shell("rules_current", success=False)
+
+    def test_malformed_lines_are_reported_by_number_not_content(self):
+        self.rules.write_text("# c\nTOKEN-sk-fake-1234 443 tcp\n10.2.0.0/16 TOKEN-port tcp\n"
+                              "10.2.0.0/16 443 tcp junk-TOKEN\n")
+        p = self.run_shell("render_ipv4")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("TOKEN", p.stderr)
+        for n in ("line 2", "line 3", "line 4"):
+            self.assertIn(n, p.stderr)
+
+    EBTABLES = r"""
+ebtables() {
+  case "$*" in
+    *"-L TERMIPLUS-AS"*) cat "$EB" 2>/dev/null || true ;;
+    *"-I TERMIPLUS-AS 1 "*) [ ! -e "$EB.ro" ] || return 1; shift 5; echo "$*" >>"$EB" ;;
+  esac
+}
+"""
+
+    def test_missing_ip6tables_restore_still_enforces_ipv4_and_drops_ipv6_frames(self):
+        env = dict(self.no_ip6_restore_env(), EB=str(self.root / "eb"))
+        key = str(self.root / "sysctl/net.ipv6.conf.%s.disable_ipv6")
+        p = self.run_shell(self.EBTABLES + "apply_ip_policy; rules_current", env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        state = json.loads(self.state.read_text())
+        text = "\n".join(" ".join(r) for r in state["v4"]["TERMIPLUS"])
+        self.assertEqual(verdict(text, dst="192.168.1.5"), "DROP")
+        self.assertEqual(len(state["v4"]["DOCKER-USER"]), 1)
+        self.assertEqual(state["v6"], {"FORWARD": [], "INPUT": []})
+        # The L2 drop is the real gate; it covers both bridges.
+        drops = (self.root / "eb").read_text().splitlines()
+        for br in ("ot-sandbox", "ot-offline"):
+            self.assertIn("-p IPv6 --logical-in %s -j DROP" % br, drops)
+            self.assertEqual(Path(key % br).read_text().strip(), "1")
+        # Re-applying does not stack duplicates.
+        self.run_shell(self.EBTABLES + "apply_ip_policy; rules_current", env)
+        self.assertEqual((self.root / "eb").read_text().splitlines(), drops)
+        # A missing drop for either bridge makes the completed policy stale.
+        for keep in (drops[:1], drops[1:], []):
+            (self.root / "eb").write_text("".join(x + "\n" for x in keep))
+            p = self.run_shell(self.EBTABLES + "IPV6_FILTER=0; rules_current", env)
+            self.assertNotEqual(p.returncode, 0)
+
+    def test_missing_ip6tables_restore_refuses_when_ipv6_frames_cannot_be_dropped(self):
+        env = dict(self.no_ip6_restore_env(), EB=str(self.root / "eb"))
+        (self.root / "eb.ro").write_text("")
+        p = self.run_shell(self.EBTABLES + "apply_ip_policy", env)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("refusing", p.stderr)
+        self.assertFalse((self.root / "policy.applied").exists())
+        # IPv4 enforcement is installed regardless; only the marker is withheld.
+        state = json.loads(self.state.read_text())
+        self.assertEqual(verdict("\n".join(" ".join(r) for r in state["v4"]["TERMIPLUS"]),
+                                 dst="192.168.1.5"), "DROP")
+
+    def test_link_swapped_in_during_copy_is_refused_not_followed(self):
+        secret = self.root / "secret"
+        secret.write_text("TOKEN-sk-fake-1234 443 tcp extra\n10.2.0.0/16 443 tcp\n")
+        real = self.root / "egress.real"
+        # Swap a link in, run the real cp, swap the file back before any re-check.
+        code = f'''
+cp() {{
+  mv "{self.rules}" "{real}"; ln -s "{secret}" "{self.rules}"
+  command cp "$@" || true
+  rm "{self.rules}"; mv "{real}" "{self.rules}"
+}}
+apply_ip_policy
+'''
+        p = self.run_shell(code)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("symlink", p.stderr)
+        self.assertNotIn("TOKEN-sk-fake", p.stderr + p.stdout)
+        text = "\n".join(" ".join(r) for r in json.loads(self.state.read_text())["v4"]["TERMIPLUS"])
+        self.assertEqual(verdict(text, dst="10.2.1.1"), "DROP")
+
+    def test_host_address_change_invalidates_completed_policy(self):
+        self.shell("apply_ip_policy; rules_current")
+        (self.root / "ip").write_text(
+            '#!/bin/sh\nprintf "1: dummy inet 192.0.2.99/32 scope global dummy\\n"\n')
+        self.shell("rules_current", success=False)
+        self.shell("apply_ip_policy; rules_current")
+        text = "\n".join(" ".join(r) for r in json.loads(self.state.read_text())["v4"]["TERMIPLUS-IN"])
+        self.assertNotIn("192.0.2.53", text)
+
+    def test_if_needed_check_only_uses_helpers_defined_before_it(self):
+        # --if-needed runs rules_current before the rest of the script is
+        # parsed; a helper defined later is "command not found" there.
+        branch = SOURCE.index('if [ "${1:-}" = --if-needed ]')
+        for helper in ("upstreams() {", "upstream_ok() {", "host_upstreams() {",
+                       "policy_fingerprint() {", "rules_current() {"):
+            self.assertLess(SOURCE.index(helper), branch, helper)
 
 if __name__ == "__main__":
     unittest.main()
