@@ -58,7 +58,7 @@ The runtime `runc` must never be allowed in production configuration. `ALLOW_RUN
 
 ## Secrets
 
-- Never commit secrets, keys, tokens or real hostnames. `deploy/secrets/` is gitignored.
+- Never commit secrets, keys, tokens or real hostnames. `deploy/secrets/` is gitignored; real deployments keep secrets outside the checkout (`TERMIPLUS_SECRETS_DIR`).
 - Never print secrets in logs, test output or CI summaries.
 - Test fixtures use obviously fake values.
 

@@ -30,7 +30,7 @@ services:
       options: { max-size: 10m, max-file: "3" }
     depends_on:
       keycloak-db: { condition: service_healthy }
-    env_file: [./secrets/keycloak.env]
+    env_file: ["${TERMIPLUS_SECRETS_DIR:-./secrets}/keycloak.env"]
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
@@ -40,7 +40,7 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
     volumes:
-      - ./secrets/realm-termiplus.json:/opt/keycloak/data/import/realm-termiplus.json:ro
+      - ${TERMIPLUS_SECRETS_DIR:-./secrets}/realm-termiplus.json:/opt/keycloak/data/import/realm-termiplus.json:ro
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
     networks: [kc-db, owui]
@@ -83,4 +83,4 @@ volumes:
   keycloak-db:
 
 secrets:
-  keycloak_db_password: { file: ./secrets/keycloak_db_password }
+  keycloak_db_password: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/keycloak_db_password" }

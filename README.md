@@ -119,6 +119,9 @@ docker build --build-arg BASE=ot-terminal:0.16.0 -t ot-desktop:0.16.0 image/desk
 # 3. Secrets, each 64 hex chars. gateway and sockproxy run as uid/gid 65534 and
 #    read them through Compose's file secrets, which keep the host file mode:
 #    readable for you and group 65534 only, independent of your umask.
+#    For a real deployment keep them outside the checkout: create the files in
+#    e.g. /opt/docker/termiplus/secrets and set TERMIPLUS_SECRETS_DIR to it in
+#    deploy/.env (docs/deploy-alpha.md).
 mkdir -p deploy/secrets
 for s in proxy_token gateway_api_key key_secret; do
   openssl rand -hex 32 | sudo install -m 0640 -o "$USER" -g 65534 /dev/stdin deploy/secrets/$s

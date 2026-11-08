@@ -133,7 +133,7 @@ networks:
     internal: true
 
 secrets:
-  control_api_key: { file: ./secrets/control_api_key }
-  mcp_oidc_client_secret: { file: ./secrets/mcp_oidc_client_secret }
-  mcp_oidc_cookie_secret: { file: ./secrets/mcp_oidc_cookie_secret }
-  mcp_owui_plugin_key: { file: ./secrets/mcp_owui_plugin_key }
+  control_api_key: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/control_api_key" }
+  mcp_oidc_client_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_oidc_client_secret" }
+  mcp_oidc_cookie_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_oidc_cookie_secret" }
+  mcp_owui_plugin_key: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_owui_plugin_key" }

@@ -57,10 +57,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [1.0.0] - 2026-11-05
 
-Republished with the firewall isolation, home-export and screenshot resource
-bounds fixes below.
-The original 1.0.0 release was withdrawn. Upgrade the gateway image and the
-host firewall together; container images alone do not install the source guards.
+- Deploy: `TERMIPLUS_SECRETS_DIR` moves all secrets out of the source checkout (e.g. `/opt/docker/termiplus/secrets`). Every compose file, `setup-alpha.sh` and `add-mcp-admin-client.sh` use it; `setup-alpha.sh` writes it to `deploy/.env`. Without it, `deploy/secrets/` stays the default.
 
 ### Security
 
