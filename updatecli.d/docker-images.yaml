@@ -39,6 +39,9 @@ scms:
       token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
       user: '{{ .scm.user }}'
       email: '{{ .scm.email }}'
+      # Never force-push published branches (AGENTS.md). A stale PR branch is
+      # left as is; close the PR and the next run opens a fresh one.
+      force: false
       commitmessage:
         type: chore
         scope: deps
@@ -98,6 +101,9 @@ scms:
       token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
       user: '{{ .scm.user }}'
       email: '{{ .scm.email }}'
+      # Never force-push published branches (AGENTS.md). A stale PR branch is
+      # left as is; close the PR and the next run opens a fresh one.
+      force: false
       commitmessage:
         type: chore
         scope: deps
@@ -155,6 +161,9 @@ scms:
       token: '{{ requiredEnv "UPDATECLI_TOKEN" }}'
       user: '{{ .scm.user }}'
       email: '{{ .scm.email }}'
+      # Never force-push published branches (AGENTS.md). A stale PR branch is
+      # left as is; close the PR and the next run opens a fresh one.
+      force: false
       commitmessage:
         type: chore
         scope: deps
