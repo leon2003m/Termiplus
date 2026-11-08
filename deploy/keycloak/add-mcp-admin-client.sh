@@ -20,6 +20,13 @@ if [ -z "$SECRETS" ] && [ -f "$DEPLOY/.env" ]; then
   SECRETS="$(sed -n 's/^TERMIPLUS_SECRETS_DIR=//p' "$DEPLOY/.env" | tail -n1)"
   SECRETS="${SECRETS#\"}"; SECRETS="${SECRETS%\"}"
   SECRETS="${SECRETS#\'}"; SECRETS="${SECRETS%\'}"
+  # Compose strips inline comments and expands variables; this parser does
+  # not, so refuse anything but a plain path rather than guess.
+  case "$SECRETS" in
+    *[[:space:]#\$]*)
+      echo "$(basename "$0"): TERMIPLUS_SECRETS_DIR in deploy/.env must be a plain absolute path (no comments, spaces or variables)" >&2
+      exit 1 ;;
+  esac
 fi
 SECRETS="${SECRETS:-$DEPLOY/secrets}"
 case "$SECRETS" in

@@ -31,6 +31,18 @@ deploy/setup-alpha.sh
 sudo chown -R 65534:65534 deploy/mcp-data deploy/backups
 ```
 
+**Existing deployment with secrets in `deploy/secrets/`:** copy them over
+*before* switching, otherwise the script generates new ones (new API keys,
+new Keycloak client and database passwords) that no longer match the running
+stack and its stored data:
+
+```sh
+sudo install -d -o "$USER" -m 0700 /opt/docker/termiplus/secrets
+cp -a deploy/secrets/. /opt/docker/termiplus/secrets/
+```
+
+Keep the old directory until the stack has come up cleanly on the new path.
+
 `setup-alpha.sh` creates every missing secret in that directory (it
 never overwrites one), renders the Keycloak realm (clients `owui`,
 `termiplus-mcp`, `termiplus-desktop`; groups `termiplus-users`,
