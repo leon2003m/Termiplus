@@ -95,3 +95,8 @@ shared Desktop Chromium and native Browser. It covers all published actions,
 repeated clicks, batch preflight and Desktop/Browser partial failures through the actual
 Open WebUI callables. It also asserts the live published coordinate descriptions;
 this is separate from model inference and recipient shares.
+
+Kate joins Dolphin in missing-only per-user palette seeding from /etc/xdg
+(`image/desktop/files/usr/local/bin/startxfce4` and `files/etc/xdg/katerc`);
+existing personal settings still win. UiSettings ColorScheme=* follows the Qt
+platform palette.
