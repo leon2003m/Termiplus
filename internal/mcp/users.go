@@ -169,18 +169,12 @@ func (s *Server) manageUser(ctx context.Context, p Principal, args map[string]an
 		}
 		if s.roles.isAdminGroup(g.Name) {
 			// Never leave the deployment without an enabled admin.
-			members, err := s.dir.Members(ctx, g.ID)
+			ok, err := s.otherEnabledAdmin(ctx, u.ID)
 			if err != nil {
 				return nil, err
 			}
-			others := 0
-			for _, m := range members {
-				if m.ID != u.ID && m.Enabled {
-					others++
-				}
-			}
-			if others == 0 {
-				return nil, fmt.Errorf("refusing to remove the last enabled member of %s", g.Name)
+			if !ok {
+				return nil, fmt.Errorf("refusing to remove the last enabled admin (%s is their last admin group)", g.Name)
 			}
 		}
 		if err := s.dir.RemoveFromGroup(ctx, u.ID, g.ID); err != nil {
@@ -194,6 +188,34 @@ func (s *Server) manageUser(ctx context.Context, p Principal, args map[string]an
 		"username": u.Username, "group": g.Name, "changed": true,
 		"note": "takes effect when the user's sign-in token is next refreshed (at the latest on their next login)",
 	}, nil
+}
+
+// otherEnabledAdmin reports whether an enabled user other than userID is a
+// member of any admin group. Only top-level groups count: for them the
+// directory name and the forwarded group (name or full path) normalise to the
+// same string, so membership really grants the admin role. A subgroup may or
+// may not match depending on the token mapper, so it is left out, which can
+// only refuse a removal, never allow the last real admin to go.
+func (s *Server) otherEnabledAdmin(ctx context.Context, userID string) (bool, error) {
+	all, err := s.dir.Groups(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, g := range all {
+		if g.Path != "/"+g.Name || !s.roles.isAdminGroup(g.Name) {
+			continue
+		}
+		members, err := s.dir.Members(ctx, g.ID)
+		if err != nil {
+			return false, err
+		}
+		for _, m := range members {
+			if m.ID != userID && m.Enabled {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func logAdmin(p Principal, action, username, group string) {
