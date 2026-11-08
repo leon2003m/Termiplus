@@ -61,14 +61,10 @@ await test("panel renders seeded sessions and workspaces", async () => {
   assert.equal(await statusIsErr(), false, "initial status: " + await statusText());
 });
 
-await test("Stop: one tools/call, no refresh, row gone, note shown", async () => {
+await test("temporary session has neither Stop nor Restart (restart would just delete it)", async () => {
   const row = panel.locator("#sessions .row", { hasText: "Scratch term" });
-  const made = await act(row, "Stop", true);
-  assert.deepEqual(made, [{ method: "tools/call", name: "destroy_session" }]);
-  assert.equal(await panel.locator("#sessions .row", { hasText: "Scratch term" }).count(), 0);
-  assert.equal(await panel.locator("#sessions .row", { hasText: "My desktop" }).count(), 1);
-  assert.equal(await statusText(), "Stopped Scratch term.");
-  assert.equal(await statusIsErr(), false);
+  assert.equal(await row.getByRole("button", { name: "Stop", exact: true }).count(), 0, "Stop must be gone");
+  assert.equal(await row.getByRole("button", { name: "Restart", exact: true }).count(), 0, "Restart is persistent-only");
 });
 
 await test("Share screen: one tools/call, share row appears, clear note", async () => {
@@ -100,12 +96,25 @@ await test("Revoke: one tools/call, share row gone", async () => {
   assert.equal(await statusText(), "Revoked the screen-share link.");
 });
 
-await test("Reset: one tools/call, session stays, note shown", async () => {
+await test("Restart: one tools/call, session stays, note shown", async () => {
   const row = panel.locator("#sessions .row", { hasText: "My desktop" });
-  const made = await act(row, "Reset", true);
+  const made = await act(row, "Restart", true);
   assert.deepEqual(made, [{ method: "tools/call", name: "reset_workspace" }]);
   assert.equal(await panel.locator("#sessions .row", { hasText: "My desktop" }).count(), 1);
-  assert.equal(await statusText(), "Reset My desktop.");
+  assert.equal(await statusText(), "Restarted My desktop.");
+});
+
+await test("temporary session has no Reset (wipe home) button", async () => {
+  const row = panel.locator("#sessions .row", { hasText: "Scratch term" });
+  assert.equal(await row.getByRole("button", { name: "Reset (wipe home)", exact: true }).count(), 0);
+});
+
+await test("Reset (wipe home): one wipe_home call, note names the mandatory snapshot", async () => {
+  const row = panel.locator("#sessions .row", { hasText: "My desktop" });
+  const made = await act(row, "Reset (wipe home)", true);
+  assert.deepEqual(made, [{ method: "tools/call", name: "wipe_home" }]);
+  assert.equal(await panel.locator("#sessions .row", { hasText: "My desktop" }).count(), 1);
+  assert.match(await statusText(), /^Factory reset My desktop: the home is empty\. Snapshot .+ was saved first\.$/);
 });
 
 await test("Refresh button still does a full open_workspaces", async () => {

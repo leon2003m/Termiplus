@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>MCP App host harness</title></head>
 <body>
+<!--LIVE-->
 <!-- Mirrors the host side of Open WebUI's MCP App bridge (JSON-RPC 2.0 over
      postMessage). No approval gate: this validates the panel/server contract. -->
-<iframe id="panel" src="/panel.html" sandbox="allow-scripts" style="width:720px;height:700px;border:1px solid #888"></iframe>
+<iframe id="panel" src="/panel.html" sandbox="allow-scripts allow-popups" style="width:720px;height:700px;border:1px solid #888"></iframe>
 <script>
 "use strict";
 window.__mcpCalls = [];
@@ -16,7 +17,8 @@ async function mcp(method, params) {
   window.__mcpCalls.push({ method: method, name: params && params.name });
   var r = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: method, params: params }) });
-  return r.json();
+  try { return await r.json(); }
+  catch (_) { return { error: { code: -32000, message: "the server did not answer (HTTP " + r.status + ")" } }; }
 }
 
 window.addEventListener("message", async function (e) {
@@ -28,14 +30,16 @@ window.addEventListener("message", async function (e) {
       hostCapabilities: {}, hostContext: { theme: "light" } } });
   } else if (m.method === "ui/notifications/initialized") {
     var j = await mcp("tools/call", { name: "open_workspaces", arguments: {} });
+    if (!j.result) return;
     toPanel({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: j.result });
   } else if (m.method === "tools/call" && m.id != null) {
     var out = await mcp("tools/call", m.params);
     toPanel(out.error ? { jsonrpc: "2.0", id: m.id, error: out.error } : { jsonrpc: "2.0", id: m.id, result: out.result });
   } else if (m.method === "ui/open-link" && m.id != null) {
+    if (window.__live && m.params && /^https?:/.test(m.params.url || "")) window.open(m.params.url, "_blank", "noopener");
     toPanel({ jsonrpc: "2.0", id: m.id, result: {} });
   } else if (m.method === "ui/notifications/size-changed") {
-    /* ignored */
+    if (window.__live && m.params && m.params.height) frame.style.height = Math.max(300, m.params.height + 8) + "px";
   } else if (m.id != null && m.method) {
     toPanel({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "unsupported" } });
   }
