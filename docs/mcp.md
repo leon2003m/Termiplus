@@ -154,6 +154,16 @@ and `STREAM_PUBLIC_URL`. The last two names are retained for configuration
 compatibility but now serve **only `/share/`**. The console and share origin
 must differ. The optional `docker-compose.mcp-netpolicy.yml` grants the human
 console its network-policy backend; it does not expose a model tool.
+
+**Screen-sharing kill-switch.** `MCP_SHARES=off` (case-insensitive; default and
+any other value: enabled) removes all desktop screen sharing from the MCP
+process. `share_desktop` is not registered (tools/list omits it, a call is an
+unknown tool), no `ShareStore` is opened, the `/ui/api/shares` console routes
+return 404, the panel hides "Share screen", and the `STREAM_LISTEN_ADDR` handler
+and listener are never constructed (a set `STREAM_LISTEN_ADDR` is ignored with a
+warning). A latent bug in share code is then unreachable. For a binary without
+the `/share` handler, build with `go build -tags noshare ./cmd/mcp`; sharing is
+then permanently off.
 `docker-compose.mcp-users.yml` supplies the directory service account.
 
 `MCP_AUTH=dev` and the stub backend are for local tests only. Production proxy

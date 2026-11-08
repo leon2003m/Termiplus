@@ -96,6 +96,15 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 	}
 	p = Principal{UserID: owui, Roles: p.Roles}
 
+	// With sharing off, every share-purpose console route is gone: the share
+	// links and the recipient picker (desktops/<id>/people), whose only use is
+	// choosing who to share with. The owner's own desktop preview stays.
+	if u.srv.noSharing && (rest == "shares" || strings.HasPrefix(rest, "shares/") ||
+		(strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/people"))) {
+		uiError(w, http.StatusNotFound, "not found")
+		return
+	}
+
 	switch {
 	case rest == "workspaces" && r.Method == http.MethodGet:
 		u.run(w, r, p, "list_workspaces", nil)

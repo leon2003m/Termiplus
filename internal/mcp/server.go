@@ -32,18 +32,44 @@ type Server struct {
 	uiBase      string    // browser-facing console base URL, for download links
 	desktopBase string    // browser-facing desktop origin, for share links
 	shares      *ShareStore
+	noSharing   bool // DisableSharing: no share tool, store, console route or panel button
 	departed    *departed
 }
 
 // NewServer builds the server with its fixed tool surface.
 func NewServer(auth Authenticator, backend Backend, version string) *Server {
 	s := &Server{auth: auth, backend: backend, version: version}
-	s.tools = s.buildTools()
-	for _, extra := range [][]tool{s.homeTools(), s.shareTools(), s.departedTools(), {s.appTool()}} {
-		s.tools = append(s.tools, extra...)
-	}
+	s.noSharing = !sharingCompiled
+	s.assembleTools()
 	return s
 }
+
+// assembleTools builds the tool list. share_desktop is registered only when
+// sharing is enabled, so a disabled server cannot invoke or list it.
+func (s *Server) assembleTools() {
+	s.tools = s.buildTools()
+	extras := [][]tool{s.homeTools()}
+	if !s.noSharing {
+		extras = append(extras, s.shareTools())
+	}
+	extras = append(extras, s.departedTools(), []tool{s.appTool()})
+	for _, extra := range extras {
+		s.tools = append(s.tools, extra...)
+	}
+}
+
+// DisableSharing is the screen-sharing kill-switch (MCP_SHARES=off). It
+// unregisters share_desktop and makes WithShares a no-op. Call it before
+// serving and before WithShares.
+func (s *Server) DisableSharing() *Server {
+	s.noSharing = true
+	s.shares = nil
+	s.assembleTools()
+	return s
+}
+
+// SharingEnabled reports whether the share subsystem is wired into s.
+func (s *Server) SharingEnabled() bool { return !s.noSharing }
 
 // WithEntitlements restricts which workspaces callers may see and launch.
 // Without it every workspace is open to every authenticated caller.
@@ -381,10 +407,12 @@ func (s *Server) callTool(r *http.Request, raw json.RawMessage) (*toolResult, *r
 }
 
 // modelTool is deliberately an allowlist. New console operations are never
-// exposed to models automatically, even for an administrator's chat.
+// exposed to models automatically, even for an administrator's chat. The
+// list is only an upper bound: with sharing disabled share_desktop is not in
+// s.tools at all, which is the real gate.
 func modelTool(name string) bool {
 	switch name {
-	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "manage_snapshots", "share_desktop", appToolName:
+	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "wipe_home", "manage_snapshots", "share_desktop", appToolName:
 		return true
 	}
 	return false

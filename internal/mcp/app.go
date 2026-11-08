@@ -53,10 +53,11 @@ func appResourceContents() map[string]any {
 
 // appOnly lists the management tools the panel drives. They are also the
 // existing plugin's tools, so they keep working over tools/call; only their
-// tools/list metadata changes.
+// tools/list metadata changes. Like modelTool this is an upper bound; a tool
+// missing from s.tools (share_desktop with sharing disabled) is never listed.
 func appOnly(name string) bool {
 	switch name {
-	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "manage_snapshots", "share_desktop":
+	case "list_workspaces", "list_sessions", "request_session", "destroy_session", "reset_workspace", "wipe_home", "manage_snapshots", "share_desktop":
 		return true
 	}
 	return false
@@ -153,7 +154,7 @@ func (s *Server) sessionName(ctx context.Context, p Principal, id string) string
 }
 
 func (s *Server) overview(ctx context.Context, p Principal) map[string]any {
-	out := map[string]any{"workspaces": []Workspace{}, "sessions": []Session{}, "backups": map[string]any{}, "shares": []any{}}
+	out := map[string]any{"workspaces": []Workspace{}, "sessions": []Session{}, "backups": map[string]any{}, "shares": []any{}, "sharing": !s.noSharing}
 	// Section errors are generic: backend messages can name internal URLs.
 	errs := map[string]string{}
 	if all, err := s.backend.ListWorkspaces(ctx, p); err != nil {

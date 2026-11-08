@@ -34,7 +34,7 @@ MCP provisioning does not automatically attach a chat to a connection.
 MCP App: `internal/mcp/app.go` adds the read-only `open_workspaces` entry
 tool (model + app visible, `structuredContent`) and serves the embedded panel
 `internal/mcp/app/workspaces.html` via `resources/list|read` (authenticated).
-`toolMeta` marks the seven management tools `visibility:["app"]` in
+`toolMeta` marks the eight management tools `visibility:["app"]` in
 `tools/list` only; `callTool`/`invoke` gates are unchanged, so app-only is UX,
 not authorization. The panel never calls `request_session`. JSON-RPC
 notifications get HTTP 202 with no body.
@@ -52,9 +52,28 @@ every panel control works in the dev preview; the gateway path is unchanged.
 Browser-level validation: `test/mcp-app/` drives the panel in headless chromium
 through a host harness mirroring Open WebUI's AppBridge.
 
+Factory reset: `wipe_home` (`internal/mcp/homes.go`, tool; `GatewayBackend.WipeHome`
+-> `POST /control/v1/sessions/<id>/wipe-home`, `internal/gateway/control.go`)
+is a destructive, app-visible tool that always requires `_confirmed=true`
+(same gate as `destroy_session`). It is distinct from `reset_workspace`, which
+keeps the home. `gateway.wipeHome` (`internal/gateway/userhomes.go`) is
+fail-closed and ordered: (1) mandatory `g.snapshot(..., prune=false)` of the
+home; any error (backups not configured, snapshot limit reached, no home)
+aborts and nothing is removed; (2) `manager.removeHome` (the already-allowed
+home-remove, `ALLOW_HOME_REMOVE=1`; sockproxy is not widened); (3) `ensure`
+starts a fresh container on a new empty volume. Only persistent workspaces
+qualify (temporary ones: `errNotPersistent`). The result carries the snapshot
+id in the panel note and `snapshot` field. Tests:
+`internal/gateway/mcp_homes_e2e_test.go:TestMCPWipeHome*`,
+`internal/mcp/app_test.go:TestWipeHomeIsAppOnlyAndNeedsConfirmation`.
+
 Source: `internal/mcp/server.go:callTool`, `internal/mcp/server.go:invoke`,
 `internal/mcp/homes.go`, `internal/mcp/gateway_backend.go`,
 `integrations/openwebui/termiplus_workspaces.py`,
 `internal/mcp/server_test.go:TestModelCannotInvokeConsoleToolsEvenAsAdmin`,
 `internal/mcp/app_test.go`.
+
+With `MCP_SHARES=off` (or `-tags noshare`) `share_desktop` is not registered at
+all (`Server.assembleTools`); `modelTool`/`appOnly` keep it only as a static
+upper bound. See [Share](share.md#kill-switch-mcp_sharesoff--tags-noshare).
 See [tool call](../../processes/mcp-tool-call.md) and [Share](share.md).

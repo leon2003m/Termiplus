@@ -97,6 +97,29 @@ func (b *StubDevBackend) ResetSession(ctx context.Context, p Principal, id strin
 	return json.Marshal(map[string]any{"reset": id})
 }
 
+// WipeHome is the factory reset: it records a snapshot first (as the real
+// gateway does, and refuses when that fails), then resets the session.
+func (b *StubDevBackend) WipeHome(ctx context.Context, p Principal, id string) (json.RawMessage, error) {
+	b.seed(ctx, p)
+	b.StubBackend.mu.Lock()
+	s, ok := b.StubBackend.sessions[id]
+	b.StubBackend.mu.Unlock()
+	if !ok || s.UserID != p.UserID {
+		return nil, fmt.Errorf("no such session %q", id)
+	}
+	if !s.Persistent {
+		return nil, errors.New("temporary workspaces have no home")
+	}
+	snap, err := b.Snapshots(ctx, p, s.Workspace, "create", "", true)
+	if err != nil {
+		return nil, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", err)
+	}
+	if _, err := b.ResetSession(ctx, p, id); err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]any{"session": map[string]any{"id": id, "workspace": s.Workspace, "running": true}, "snapshot": json.RawMessage(snap)})
+}
+
 // Snapshots implements list and create (with prune when at the limit); restore
 // and delete are not offered to the panel or to models.
 func (b *StubDevBackend) Snapshots(_ context.Context, p Principal, workspace, action, id string, prune bool) (json.RawMessage, error) {

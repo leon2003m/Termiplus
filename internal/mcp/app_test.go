@@ -161,6 +161,9 @@ func TestNotificationsGet202(t *testing.T) {
 // The panel's action tools return the rebuilt panel state plus a note, so the
 // panel needs no second open_workspaces call.
 func TestActionToolsReturnPanelStateAndNote(t *testing.T) {
+	if !sharingCompiled {
+		t.Skip("share_desktop is compiled out (-tags noshare)")
+	}
 	auth := NewStaticAuthenticator(map[string]Principal{"tok": {UserID: "alice", Roles: []string{RolePersist}}})
 	s := NewServer(auth, NewStubDevBackend("https://gw.example"), "test")
 	if err := ConfigureStubServer(s); err != nil {
@@ -213,5 +216,35 @@ func TestActionToolsReturnPanelStateAndNote(t *testing.T) {
 	// Errors keep their old shape: no state, isError.
 	if resp := toolCall(t, s, "tok", "destroy_session", map[string]any{"session_id": "nope"}); resp.Error == nil {
 		t.Fatal("destroy without confirmation must still need confirmation")
+	}
+}
+
+func TestWipeHomeIsAppOnlyAndNeedsConfirmation(t *testing.T) {
+	s := newTestServer()
+	var out struct {
+		Tools []toolSpec `json:"tools"`
+	}
+	if err := json.Unmarshal(call(t, s, "", "tools/list", nil).Result, &out); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tl := range out.Tools {
+		if tl.Name != "wipe_home" {
+			continue
+		}
+		found = true
+		ui, _ := tl.Meta["ui"].(map[string]any)
+		if v, _ := json.Marshal(ui["visibility"]); string(v) != `["app"]` {
+			t.Fatalf("wipe_home visibility = %s", v)
+		}
+	}
+	if !found {
+		t.Fatal("wipe_home not listed")
+	}
+	for _, tok := range []string{"user-tok", "persist-tok", "admin-tok"} {
+		resp := toolCall(t, s, tok, "wipe_home", map[string]any{"session_id": "x"})
+		if resp.Error == nil || resp.Error.Code != codeConfirmRequired {
+			t.Fatalf("%s: wipe_home without _confirmed must be refused: %+v", tok, resp)
+		}
 	}
 }

@@ -243,7 +243,11 @@ func (s *ShareStore) relayContext(parent context.Context, sh Share) (context.Con
 }
 
 // WithShares enables share_desktop and the /share/ links.
+// It does nothing when sharing is disabled.
 func (s *Server) WithShares(st *ShareStore) *Server {
+	if s.noSharing {
+		return s
+	}
 	s.shares = st
 	return s
 }

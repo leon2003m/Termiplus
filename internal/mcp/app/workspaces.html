@@ -19,6 +19,8 @@ header strong{flex:1;font-size:15px}
 button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;padding:3px 10px;cursor:pointer}
 button:hover{border-color:var(--accent)}
 button.armed{border-color:var(--danger);color:var(--danger)}
+button.danger{color:var(--danger);border-color:var(--danger)}
+button.danger.armed{background:var(--danger);color:#fff;border-color:var(--danger)}
 button:disabled{opacity:.5;cursor:default}
 .empty,.note{color:var(--muted);font-size:13px;padding:4px 0}
 #status{min-height:1.4em;font-size:13px;margin-top:6px}
@@ -92,7 +94,14 @@ button:disabled{opacity:.5;cursor:default}
   // host adds its own confirmation, and the server still enforces every gate.
   function call(name, args) {
     status("Working…");
-    return request("tools/call", { name: name, arguments: args }).then(parseResult);
+    // A host that never answers must not leave the panel on "Working…".
+    var timer, limit = new Promise(function (_, reject) {
+      timer = setTimeout(function () { reject(new Error("No answer from the host. Press Refresh to see the current state.")); }, 120000);
+    });
+    var done = function () { clearTimeout(timer); };
+    var p = Promise.race([request("tools/call", { name: name, arguments: args }), limit]);
+    p.then(done, done);
+    return p.then(parseResult);
   }
   function isState(r) { return !!r && typeof r === "object" && (Array.isArray(r.sessions) || Array.isArray(r.workspaces)); }
   function action(label, run, destructive) {
@@ -118,6 +127,9 @@ button:disabled{opacity:.5;cursor:default}
     };
     return b;
   }
+  // dangerAction is action() for an irreversible control (factory reset): the
+  // same first-click arming, styled red so it is never mistaken for Restart.
+  function dangerAction(label, run) { var b = action(label, run, true); b.classList.add("danger"); return b; }
 
   function list(id, items, row, emptyText) {
     var box = document.getElementById(id); box.textContent = "";
@@ -127,15 +139,24 @@ button:disabled{opacity:.5;cursor:default}
 
   function render(state) {
     state = state || {};
+    var names = {};
+    (state.workspaces || []).forEach(function (w) { if (w.label) names[w.name] = w.label; });
+    function wsName(n) { return names[n] || n; }
     list("sessions", state.sessions, function (s) {
       var r = el("div", null, "row");
-      r.appendChild(el("span", s.label || s.workspace, "name"));
+      r.appendChild(el("span", s.label || wsName(s.workspace), "name"));
       r.appendChild(chip(s.persistent ? "persistent home" : "temporary"));
       if (s.desktop) r.appendChild(chip("desktop"));
       if (!s.running) r.appendChild(chip("stopped"));
-      r.appendChild(action("Reset", function () { return call("reset_workspace", { session_id: s.session_id, _confirmed: true }); }, true));
-      r.appendChild(action("Stop", function () { return call("destroy_session", { session_id: s.session_id, _confirmed: true }); }, true));
-      if (s.desktop) r.appendChild(action("Share screen (1 h)", function () {
+      // Restart (reset_workspace) gives a persistent session a fresh container
+      // with its home kept. On a temporary session the backend just removes it
+      // (no replacement), so "Restart" would be a lie there — offer it only for
+      // persistent sessions, like Reset below.
+      if (s.persistent) r.appendChild(action("Restart", function () { return call("reset_workspace", { session_id: s.session_id, _confirmed: true }); }, true));
+      // Factory reset wipes /home; only a persistent workspace has one. A
+      // snapshot is always taken first (the server refuses the wipe otherwise).
+      if (s.persistent) r.appendChild(dangerAction("Reset (wipe home)", function () { return call("wipe_home", { session_id: s.session_id, _confirmed: true }); }));
+      if (s.desktop && state.sharing !== false) r.appendChild(action("Share screen (1 h)", function () {
         return call("share_desktop", { action: "create", session_id: s.session_id, minutes: 60, _confirmed: true });
       }, true));
       return r;
@@ -150,7 +171,7 @@ button:disabled{opacity:.5;cursor:default}
     list("backups", rows, function (x) {
       var r = el("div", null, "row");
       if (x.head) {
-        r.appendChild(el("strong", x.ws, "name"));
+        r.appendChild(el("strong", wsName(x.ws), "name"));
         var keep = x.b.keep ? (x.b.snapshots || []).length + " of " + x.b.keep : null;
         if (keep) r.appendChild(chip(keep));
         // At capacity the server refuses create (it never prunes over MCP);
@@ -168,7 +189,7 @@ button:disabled{opacity:.5;cursor:default}
 
     list("shares", state.shares, function (sh) {
       var r = el("div", null, "row");
-      r.appendChild(el("span", sh.workspace || sh.session_id || sh.share_id, "name"));
+      r.appendChild(el("span", sh.workspace ? wsName(sh.workspace) : (sh.session_id || sh.share_id), "name"));
       if (sh.for_user) r.appendChild(chip("only " + sh.for_user));
       if (sh.expires) r.appendChild(chip("until " + new Date(sh.expires).toLocaleString()));
       r.appendChild(action("Revoke", function () { return call("share_desktop", { action: "revoke", share_id: sh.share_id }); }, true));
