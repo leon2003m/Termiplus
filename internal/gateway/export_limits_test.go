@@ -148,3 +148,56 @@ func TestExportDeadlineEndsBlockedWrite(t *testing.T) {
 	}
 	h.noHelpersLeft(t)
 }
+
+// A download that stalls is cut off by the idle deadline well before the much
+// larger ExportTimeout: no progress for ExportIdleTimeout frees the helper lock
+// and export slot, so one slow reader cannot hold them for the full 2h bound
+// (security audit run 4).
+func TestExportIdleDeadlineEndsStalledWrite(t *testing.T) {
+	h := newHarness(t, func(o *harnessOpts) {
+		o.gateway = func(c *Config) {
+			c.ControlKey = testControlKey
+			c.ExportTimeout = 30 * time.Second // the absolute bound stays long
+			c.ExportIdleTimeout = 300 * time.Millisecond
+			c.ExportConcurrency = 1
+		}
+	})
+	h.get(t, "/files/cwd", "alice", testAPIKey)
+	vol := naming.Volume("alice", "default")
+	h.docker.mu.Lock()
+	h.docker.files[vol] = map[string]string{"big": strings.Repeat("x", 64<<20)} // far beyond socket buffers
+	h.docker.mu.Unlock()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(h.gw.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close() // never read: the gateway's write stalls
+	fmt.Fprintf(conn, "GET /control/v1/workspaces/default/home/archive HTTP/1.1\r\nHost: gw\r\n%s: %s\r\nX-User-Id: alice\r\n\r\n", controlKeyHeader, testControlKey)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.g.mgr.exportLimits.slots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond) // wait for the download to take the slot
+	}
+	if len(h.g.mgr.exportLimits.slots) == 0 {
+		t.Fatal("the stalled download never took the export slot")
+	}
+	// The idle deadline (300ms), not the 30s ExportTimeout, must release it.
+	start := time.Now()
+	for len(h.g.mgr.exportLimits.slots) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the idle deadline did not release the export slot")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("slot released after %s, not by the idle deadline", elapsed)
+	}
+	h.docker.mu.Lock()
+	h.docker.files[vol] = map[string]string{"small": "after the stalled download"}
+	h.docker.mu.Unlock()
+	if err := h.g.mgr.exportHome(context.Background(), "alice", "default", io.Discard); err != nil {
+		t.Fatalf("export after the stalled one: %v", err)
+	}
+	h.noHelpersLeft(t)
+}

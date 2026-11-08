@@ -141,7 +141,12 @@ func (g *Gateway) serveWebSocket(w http.ResponseWriter, r *http.Request, userID,
 		}
 
 	}
-	g.mgr.touch(inst, +1)
+	// Cap concurrent connections per container like the preview/screen
+	// paths do, so one user cannot pin the shared gateway with sockets.
+	if !g.mgr.tryTouch(inst, maxProxiedConns) {
+		writeClose(conn, 1013, "Too many connections")
+		return
+	}
 	defer g.mgr.touch(inst, -1)
 
 	var once sync.Once

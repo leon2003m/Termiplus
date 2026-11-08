@@ -157,12 +157,21 @@ func (m *manager) exportHome(ctx context.Context, userID, home string, w io.Writ
 			return err
 		}
 		defer rc.Close()
+		// A client that reads slowly or stops reading would otherwise hold the
+		// helper lock, an export slot and the per-user flag until the absolute
+		// ExportTimeout (2h). Bound the stall with an idle deadline: each write
+		// must make progress within lim.idle (security audit run 4).
+		dst := w
 		if dw, ok := w.(deadlineWriter); ok {
-			if d, ok := ctx.Deadline(); ok {
-				_ = dw.SetWriteDeadline(d)
+			absD, hasAbs := ctx.Deadline()
+			if hasAbs {
+				_ = dw.SetWriteDeadline(absD)
+			}
+			if lim.idle > 0 {
+				dst = &idleDeadlineWriter{w: w, dw: dw, idle: lim.idle, max: absD, hasMax: hasAbs}
 			}
 		}
-		return copyHomeArchive(w, rc, lim.maxBytes)
+		return copyHomeArchive(dst, rc, lim.maxBytes)
 	})
 }
 
@@ -229,6 +238,7 @@ func (w *archiveLimitWriter) Write(p []byte) (int, error) {
 // ExportConcurrency).
 type exportLimits struct {
 	timeout  time.Duration
+	idle     time.Duration
 	maxBytes int64
 	slots    chan struct{}
 	mu       sync.Mutex
@@ -241,6 +251,27 @@ type exportLimits struct {
 // run 2).
 type deadlineWriter interface {
 	SetWriteDeadline(time.Time) error
+}
+
+// idleDeadlineWriter moves the destination's write deadline to now+idle
+// before every write (never past the absolute deadline), so a client that
+// stalls loses the helper lock and export slot after idle rather than only
+// at the overall ExportTimeout. A blocked write fails with os.ErrDeadline.
+type idleDeadlineWriter struct {
+	w      io.Writer
+	dw     deadlineWriter
+	idle   time.Duration
+	max    time.Time
+	hasMax bool
+}
+
+func (iw *idleDeadlineWriter) Write(p []byte) (int, error) {
+	d := time.Now().Add(iw.idle)
+	if iw.hasMax && d.After(iw.max) {
+		d = iw.max
+	}
+	_ = iw.dw.SetWriteDeadline(d)
+	return iw.w.Write(p)
 }
 
 // errExportTooLarge: the home's tar is larger than the export cap, usually

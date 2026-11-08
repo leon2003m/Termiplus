@@ -79,6 +79,7 @@ func main() {
 		SnapshotKeep:   config.SmallInt("SNAPSHOT_KEEP", 5, 0, 10000),
 		// Upper bound for one home export (download or backup).
 		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
+		ExportIdleTimeout: config.Duration("EXPORT_IDLE_TIMEOUT", time.Minute),
 		ExportMaxBytes:    exportMaxBytes(),
 		ExportConcurrency: config.SmallInt("EXPORT_CONCURRENCY", 4, 0, 1024),
 	})
