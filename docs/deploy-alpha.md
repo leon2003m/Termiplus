@@ -1,6 +1,6 @@
 # Deploying Termiplus
 
-Release **1.0.0** includes the MCP control plane, native desktop workspaces and
+Release **1.1.0** includes the MCP control plane, native desktop workspaces and
 management console on top of the hardened terminal stack. These components
 are enabled through Compose overlays. This guide and `setup-alpha.sh` retain
 their historical filenames for compatibility; they also apply to the stable
@@ -73,8 +73,8 @@ For the published amd64 desktop, set the following in `deploy/.env` after
 running setup:
 
 ```dotenv
-TERMIPLUS_VERSION=1.0.0
-TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.0.0
+TERMIPLUS_VERSION=1.1.0
+TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0
 ```
 
 Prefer digest references from the release assets when pinning deployed images.

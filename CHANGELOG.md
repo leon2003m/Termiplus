@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-08
+
+Adds the MCP App workspace panel, agent tooling in the workspace images, a
+factory reset for homes and secrets outside the checkout, plus firewall and
+resource-bound fixes.
+
+### Upgrade notes
+
+- Update the host checkout and reapply the firewall (`deploy/firewall.sh`)
+  together with the new gateway image; the Security entries below change host
+  rules, which container images alone do not install.
+- Running workspaces keep their old image. They get the new workspace image
+  (office tools, agent manifest, `locale`/`keyboard`/`record` policies) only
+  after they are stopped and started again.
+- In `deploy/.env`, set `TERMIPLUS_VERSION=1.1.0` (a tag, not a digest) and
+  `TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0` (a full image
+  reference; the release's digest reference also works here).
+- Optional new settings, all with unchanged defaults: `TERMIPLUS_SECRETS_DIR`,
+  `MCP_SHARES`, `MCP_PERSIST_ROLES`, `MCP_ADMIN_ROLES`, `EXPORT_IDLE_TIMEOUT`.
+- If you set `TERMIPLUS_SECRETS_DIR` on an existing deployment, copy
+  `deploy/secrets/` there first; otherwise `setup-alpha.sh` generates new,
+  mismatching secrets. Values with comments, spaces or variables in
+  `deploy/.env` are refused by the scripts. See
+  [deployment](docs/deploy-alpha.md).
+
 ### Security
 
 - Firewall: a symlinked or non-regular `egress.rules` is ignored, and malformed
@@ -12,6 +37,14 @@ All notable changes to this project are documented here. The format is based on 
   policy fingerprint now covers host-local DNS upstream addresses.
 
 ### Added
+
+- Deploy: `TERMIPLUS_SECRETS_DIR` moves all secrets out of the source checkout (e.g. `/opt/docker/termiplus/secrets`). Every compose file, `setup-alpha.sh` and `add-mcp-admin-client.sh` use it; `setup-alpha.sh` writes it to `deploy/.env`. Without it, `deploy/secrets/` stays the default. The scripts refuse an ambiguous value.
+
+- MCP: `wipe_home` tool and gateway control API call: a factory reset of the
+  caller's persistent home, with confirmation. `MCP_SHARES=off` (or building
+  with `-tags noshare`) removes desktop screen sharing entirely: no
+  `share_desktop` tool, share store, console routes or stream listener, and the
+  panel hides Share. See [docs/mcp.md](docs/mcp.md).
 
 - MCP App workspace panel: the read-only `open_workspaces` tool opens an inline
   panel (sessions, home backups, screen links) in MCP Apps hosts. The
@@ -22,6 +55,15 @@ All notable changes to this project are documented here. The format is based on 
 
 - Images: tools for models working in a workspace (`docs/agents.md`). Each start writes a manifest to `~/AGENTS.md` (mode, root, desktop, rules, tools), which Open WebUI reads into every turn, links bundled skills into `~/.agents/skills` and `tp-status` shows it plus live facts. The terminal image adds pandoc, LibreOffice (nogui), poppler, openpyxl, python-docx, Pillow, tesseract (English, German), recoll and all locales.
 - Policies: `locale` sets `LANG`; for desktops, `keyboard` sets the XKB layout and `record` records the desktop into `~/recordings` (2 fps, kept 2 days). The gateway validates them and the image checks them again.
+
+### Changed
+
+- MCP: with several `MCP_ADMIN_ROLES` groups, `manage_user` counts enabled
+  admins across all top-level admin groups before refusing to empty one;
+  at least one other enabled top-level admin must still remain.
+- Workspace panel actions return the refreshed state in one round-trip.
+- Dependency updates use Updatecli instead of Dependabot (maintainer tooling,
+  no runtime effect).
 
 ### Fixed
 
@@ -56,7 +98,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [1.0.0] - 2026-11-05
 
-- Deploy: `TERMIPLUS_SECRETS_DIR` moves all secrets out of the source checkout (e.g. `/opt/docker/termiplus/secrets`). Every compose file, `setup-alpha.sh` and `add-mcp-admin-client.sh` use it; `setup-alpha.sh` writes it to `deploy/.env`. Without it, `deploy/secrets/` stays the default.
+Republished with the firewall isolation, home-export and screenshot resource
+bounds fixes below.
+The original 1.0.0 release was withdrawn. Upgrade the gateway image and the
+host firewall together; container images alone do not install the source guards.
 
 ### Security
 
