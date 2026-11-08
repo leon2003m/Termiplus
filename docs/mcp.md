@@ -148,6 +148,9 @@ set, names are matched exactly as forwarded. The startup log prints the mapping
 in use (`roles: ...`). `manage_user` and `manage_group` still only manage
 top-level `termiplus-*` groups; members of your own groups are managed in your
 directory.
+With several admin groups, `manage_user` still refuses to remove the last
+enabled member of *each* of them, even if admins remain in another; empty an
+obsolete admin group in your directory.
 
 ## Migration from the alpha checkpoint
 
