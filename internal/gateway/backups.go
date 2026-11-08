@@ -105,6 +105,16 @@ func (b *backupStore) list(kind, volume string) ([]Backup, error) {
 	return out, nil
 }
 
+// wouldPrune reports whether a snapshot of volume taken now (without prune)
+// would be refused because the limit is reached. It is an early check only;
+// create decides under its lock.
+func (b *backupStore) wouldPrune(volume string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	existing, err := b.list(kindSnapshot, volume)
+	return err == nil && len(existing) >= b.keep
+}
+
 // create writes a new backup from write (which produces the plain tar) and,
 // for snapshots, deletes the oldest beyond keep. Without prune, a snapshot
 // that would push out the oldest is refused with errWouldPrune instead; the

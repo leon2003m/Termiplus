@@ -3,7 +3,7 @@ type: object
 cluster: control-plane
 universe: live
 status: verified
-verified: 2026-11-07 (MCP App panel)
+verified: 2026-11-08 (MCP App panel)
 entity: internal/mcp/server.go
 ---
 
@@ -46,7 +46,10 @@ rebuilt panel state plus a human `note` via `app.go:panelResult` (built on
 one `tools/call` — no second `open_workspaces` refresh, which halves a host's
 per-call approval prompts. The merge keeps each tool's original result fields
 (e.g. share `url`) for model-only hosts, so the change is additive and the
-gates/`_confirmed` rule are untouched. `cmd/mcp` under `MCP_STUB_BACKEND=1`
+gates/`_confirmed` rule are untouched. The panel shows a just-created share
+`url` once (`showNewShare` in `app/workspaces.html`: read-only input set as
+text, Copy and Dismiss buttons, cleared on the next action), because the share
+store keeps only the token hash and the URL cannot be recovered later. `cmd/mcp` under `MCP_STUB_BACKEND=1`
 uses `NewStubDevBackend`+`ConfigureStubServer` (in-memory shares/snapshots) so
 every panel control works in the dev preview; the gateway path is unchanged.
 Browser-level validation: `test/mcp-app/` drives the panel in headless chromium
@@ -57,12 +60,17 @@ Factory reset: `wipe_home` (`internal/mcp/homes.go`, tool; `GatewayBackend.WipeH
 is a destructive, app-visible tool that always requires `_confirmed=true`
 (same gate as `destroy_session`). It is distinct from `reset_workspace`, which
 keeps the home. `gateway.wipeHome` (`internal/gateway/userhomes.go`) is
-fail-closed and ordered: (1) mandatory `g.snapshot(..., prune=false)` of the
+fail-closed and ordered: (0) known prerequisites are checked before anything
+is stopped (backups configured, home exists, snapshot limit not reached via
+`backupStore.wouldPrune`); (1) mandatory `g.snapshot(..., prune=false)` of the
 home; any error (backups not configured, snapshot limit reached, no home)
 aborts and nothing is removed; (2) `manager.removeHome` (the already-allowed
 home-remove, `ALLOW_HOME_REMOVE=1`; sockproxy is not widened); (3) `ensure`
 starts a fresh container on a new empty volume. Only persistent workspaces
-qualify (temporary ones: `errNotPersistent`). The result carries the snapshot
+qualify (temporary ones: `errNotPersistent`). `lockHomeTracked`
+(`internal/gateway/homes.go`) stops the home's containers and reports which were
+running; if the snapshot or `removeHome` then fails, `restartPolicies` starts
+them again, so a refused wipe does not leave workspaces stopped. The result carries the snapshot
 id in the panel note and `snapshot` field. Tests:
 `internal/gateway/mcp_homes_e2e_test.go:TestMCPWipeHome*`,
 `internal/mcp/app_test.go:TestWipeHomeIsAppOnlyAndNeedsConfirmation`.

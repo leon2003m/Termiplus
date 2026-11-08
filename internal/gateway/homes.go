@@ -253,8 +253,18 @@ var errExportBusy = errors.New("a home export for this user is already in progre
 // none of them is started while the home is rewritten, and stops the running
 // ones. The returned function releases the locks.
 func (m *manager) lockHome(ctx context.Context, userID, home string) (func(), error) {
+	unlock, _, err := m.lockHomeTracked(ctx, userID, home)
+	return unlock, err
+}
+
+// lockHomeTracked is lockHome that also reports the policies whose container
+// it stopped because it was running, so a caller that then refuses its
+// operation can start them again (restartPolicies). On error the locks are
+// already released, and the policies stopped so far are still returned.
+func (m *manager) lockHomeTracked(ctx context.Context, userID, home string) (func(), []string, error) {
 	pols := m.policiesForHome(home)
 	var held []func()
+	var stopped []string
 	unlock := func() {
 		for i := len(held) - 1; i >= 0; i-- {
 			held[i]()
@@ -268,12 +278,26 @@ func (m *manager) lockHome(ctx context.Context, userID, home string) (func(), er
 		m.mu.Lock()
 		delete(m.instances, name)
 		m.mu.Unlock()
+		if ct, err := m.docker.Inspect(ctx, name); err == nil && ct.State.Running {
+			stopped = append(stopped, p)
+		}
 		if err := m.docker.Stop(ctx, name, 10); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
 			unlock()
-			return nil, fmt.Errorf("stop %s: %w", name, err)
+			return nil, stopped, fmt.Errorf("stop %s: %w", name, err)
 		}
 	}
-	return unlock, nil
+	return unlock, stopped, nil
+}
+
+// restartPolicies starts the persistent workspaces of the user again after an
+// operation that stopped them was refused. Best effort: failures are logged.
+// The caller must not hold the locks.
+func (m *manager) restartPolicies(ctx context.Context, userID string, policies []string) {
+	for _, p := range policies {
+		if _, err := m.ensure(ctx, userID, "", p, m.policies[p]); err != nil {
+			log.Printf("restart %q/%q after a refused home operation: %q", userID, p, err)
+		}
+	}
 }
 
 // importHome extracts a tar written by exportHome into the user's home,

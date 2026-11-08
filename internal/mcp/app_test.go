@@ -87,6 +87,12 @@ func TestAppResourceRead(t *testing.T) {
 			t.Errorf("panel contains %q", bad)
 		}
 	}
+	// A new share URL is shown once (the server keeps only its hash), as text.
+	for _, want := range []string{"showNewShare", "newshare-url", "readOnly = true"} {
+		if !strings.Contains(c.Text, want) {
+			t.Errorf("panel lacks %q (the new share URL must be shown once)", want)
+		}
+	}
 	csp, _ := json.Marshal(c.Meta["ui"].(map[string]any)["csp"])
 	if strings.Contains(string(csp), "http") {
 		t.Fatalf("panel CSP allows remote origins: %s", csp)

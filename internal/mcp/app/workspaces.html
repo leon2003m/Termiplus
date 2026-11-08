@@ -25,11 +25,17 @@ button:disabled{opacity:.5;cursor:default}
 .empty,.note{color:var(--muted);font-size:13px;padding:4px 0}
 #status{min-height:1.4em;font-size:13px;margin-top:6px}
 #status.err{color:var(--danger)}
+#newshare:empty{display:none}
+#newshare{border:1px solid var(--accent);border-radius:8px;padding:8px 10px;margin-top:8px}
+#newshare .hint{color:var(--muted);font-size:12px;margin:0 0 6px}
+#newshare .line{display:flex;gap:6px;align-items:center}
+#newshare input{flex:1;min-width:0;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--bg);color:var(--fg)}
 </style>
 </head>
 <body>
 <header><strong>Workspaces</strong><button id="refresh" type="button">Refresh</button></header>
 <div id="status" role="status"></div>
+<div id="newshare"></div>
 <h2>Sessions</h2><div id="sessions"></div>
 <h2>Home backups</h2><div id="backups"></div>
 <h2>Screen-share links</h2><div id="shares"></div>
@@ -82,6 +88,34 @@ button:disabled{opacity:.5;cursor:default}
   function el(tag, text, cls) { var n = document.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; }
   function chip(text) { return el("span", text, "chip"); }
   function safeURL(u) { try { var x = new URL(u); return (x.protocol === "https:" || x.protocol === "http:") ? x.href : null; } catch (_) { return null; } }
+  // showNewShare shows a just-created screen-share URL once, as text in a
+  // read-only field (never HTML), with a copy control. The server keeps only
+  // the token hash, so the URL cannot be shown again after it is dismissed.
+  function showNewShare(url) {
+    var box = document.getElementById("newshare"); box.textContent = "";
+    var href = safeURL(url); if (!href) { resize(); return; }
+    box.appendChild(el("p", "New screen-share link. It is shown only now; copy it before dismissing.", "hint"));
+    var line = el("div", null, "line");
+    var inp = el("input"); inp.type = "text"; inp.readOnly = true; inp.value = href; inp.id = "newshare-url";
+    inp.setAttribute("aria-label", "Screen-share link");
+    inp.onfocus = function () { inp.select(); };
+    line.appendChild(inp);
+    var copy = el("button", "Copy"); copy.type = "button";
+    copy.onclick = function () {
+      var ok = function () { copy.textContent = "Copied"; };
+      var fallback = function () {
+        inp.focus(); inp.select();
+        var done = false; try { done = document.execCommand("copy"); } catch (_) {}
+        if (done) ok(); else copy.textContent = "Select and copy";
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(href).then(ok, fallback); else fallback();
+    };
+    line.appendChild(copy);
+    var close = el("button", "Dismiss"); close.type = "button";
+    close.onclick = function () { box.textContent = ""; resize(); };
+    line.appendChild(close);
+    box.appendChild(line); resize();
+  }
   function linkButton(label, url) {
     var href = safeURL(url); if (!href) return null;
     var b = el("button", label); b.type = "button";
@@ -114,11 +148,13 @@ button:disabled{opacity:.5;cursor:default}
         return;
       }
       clearTimeout(timer); b.disabled = true;
+      document.getElementById("newshare").textContent = "";
       // The action tools return the rebuilt panel state with a note, so one
       // round trip updates the panel. Only a reply without state (an older
       // server) falls back to a separate open_workspaces call.
       run().then(function (r) {
         var note = (r && (r.note || r.message)) || "Done.";
+        if (r && typeof r.url === "string") showNewShare(r.url);
         if (isState(r)) { render(r); if (!(r.errors && Object.keys(r.errors).length)) status(note); return; }
         status(note); return refresh(true);
       })

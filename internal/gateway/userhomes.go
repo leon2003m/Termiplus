@@ -111,22 +111,37 @@ func (g *Gateway) wipeHome(ctx context.Context, userID, name string) (*sessionIn
 		return nil, Backup{}, err
 	}
 	pol := g.cfg.Policies[ws]
+	// Check what is known up front, before any workspace is stopped: a refused
+	// wipe must not cost the user their running sessions.
+	if g.backups == nil {
+		return nil, Backup{}, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", errNoBackups)
+	}
+	if _, err := g.mgr.ownedVolume(ctx, userID, home); err != nil {
+		return nil, Backup{}, err
+	}
+	if g.backups.wouldPrune(naming.Volume(userID, home)) {
+		return nil, Backup{}, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", errWouldPrune)
+	}
 	// The mandatory snapshot must be a CONSISTENT recovery point, since the
 	// home is about to be destroyed: a half-written export is worse than none.
 	// lockHome stops every container on the home and holds their locks across
 	// the export, so nothing writes while it is taken. Writes made after the
 	// snapshot are discarded by the wipe anyway, so releasing before removeHome
-	// (which re-locks) is safe and avoids re-entrant locking.
-	unlock, err := g.mgr.lockHome(ctx, userID, home)
+	// (which re-locks) is safe and avoids re-entrant locking. If anything
+	// fails from here on, the workspaces that were running are started again.
+	unlock, stopped, err := g.mgr.lockHomeTracked(ctx, userID, home)
 	if err != nil {
+		g.mgr.restartPolicies(ctx, userID, stopped)
 		return nil, Backup{}, err
 	}
 	snap, serr := g.snapshot(ctx, userID, ws, false)
 	unlock()
 	if serr != nil {
+		g.mgr.restartPolicies(ctx, userID, stopped)
 		return nil, Backup{}, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", serr)
 	}
 	if err := g.mgr.removeHome(ctx, userID, home); err != nil {
+		g.mgr.restartPolicies(ctx, userID, stopped)
 		return nil, snap, err
 	}
 	inst, err := g.mgr.ensure(ctx, userID, "", ws, pol)

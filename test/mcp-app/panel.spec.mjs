@@ -76,6 +76,12 @@ await test("Share screen: one tools/call, share row appears, clear note", async 
   assert.match(await shares.first().innerText(), /desk/);
   assert.match(await statusText(), /^Shared My desktop for 60 min\./);
   assert.equal(await statusIsErr(), false);
+  // The URL cannot be recovered later (only its hash is stored), so the panel
+  // must show it now, as text, with a copy control.
+  const url = await panel.locator("#newshare-url").inputValue();
+  assert.match(url, /^https?:\/\//);
+  assert.equal(await panel.locator("#newshare button", { hasText: "Copy" }).count(), 1);
+  assert.equal(await panel.locator("#newshare *").evaluateAll((n) => n.filter((x) => x.tagName === "SCRIPT" || x.tagName === "A").length), 0);
 });
 
 await test("Back up now: one tools/call, snapshot row appears, clear note", async () => {
@@ -94,6 +100,7 @@ await test("Revoke: one tools/call, share row gone", async () => {
   assert.deepEqual(made, [{ method: "tools/call", name: "share_desktop" }]);
   assert.equal(await panel.locator("#shares .row").count(), 0);
   assert.equal(await statusText(), "Revoked the screen-share link.");
+  assert.equal(await panel.locator("#newshare-url").count(), 0, "stale share URL must be cleared");
 });
 
 await test("Restart: one tools/call, session stays, note shown", async () => {

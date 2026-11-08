@@ -11,6 +11,14 @@ All notable changes to this project are documented here. The format is based on 
   management tools are app-only in `tools/list`; server-side gates are
   unchanged. See [Workspace panel](docs/mcp.md#workspace-panel-mcp-app).
 
+### Fixed
+
+- The workspace panel shows a newly created screen-share link once, with a copy
+  button; the server keeps only its hash, so it could not be recovered later.
+- A refused factory reset (`wipe_home`) no longer leaves workspaces stopped:
+  prerequisites are checked before stopping anything, and workspaces that were
+  running are started again if the snapshot or removal fails.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource

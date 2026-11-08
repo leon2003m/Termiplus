@@ -628,8 +628,36 @@ func TestMCPWipeHomeFailsClosed(t *testing.T) {
 			if ct := c.h.ctr(s.ID); ct == nil || ct.id != firstID {
 				t.Fatal("container replaced although the snapshot failed")
 			}
+			assertRunning(t, c, s.ID)
 		})
 	}
+}
+
+// assertRunning checks that a refused wipe left the workspace running.
+func assertRunning(t *testing.T, c *mcpChain, name string) {
+	t.Helper()
+	c.h.docker.mu.Lock()
+	defer c.h.docker.mu.Unlock()
+	if ct := c.h.docker.ctrs[name]; ct == nil || !ct.running {
+		t.Fatalf("workspace %s left stopped by a refused wipe", name)
+	}
+}
+
+// An export that fails after the workspaces were stopped must start them again.
+func TestMCPWipeHomeExportFailureRestartsWorkspaces(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, true))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+	c.h.failNext("GET /containers/"+naming.Archive("bob", "default")+"/archive", 1)
+	if code := c.code(t, "bob-tok", "wipe_home", map[string]any{"session_id": s.ID, "_confirmed": true}); code != 1 {
+		t.Fatalf("wipe with a failing export must fail: %d", code)
+	}
+	if c.files(vol)["precious.txt"] != "1" {
+		t.Fatal("home changed although the export failed")
+	}
+	assertRunning(t, c, s.ID)
 }
 
 func TestMCPWipeHomeRejectsTemporary(t *testing.T) {
