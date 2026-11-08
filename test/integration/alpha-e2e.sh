@@ -28,6 +28,7 @@ WORK="$(mktemp -d)"
 CADDY_IMAGE="caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"
 EDGE_PORT=18443
 CREATED_OWUI=0
+WATCH_PID=""
 
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo): the firewall is part of the test" >&2; exit 1; }
 
@@ -51,6 +52,7 @@ compose() {
 
 cleanup() {
   log "cleanup"
+  if [ -n "$WATCH_PID" ]; then kill -- "-$WATCH_PID" >/dev/null 2>&1 || true; fi
   docker rm -f tp-a2e-edge tp-a2e-client >/dev/null 2>&1 || true
   compose down -v >/dev/null 2>&1 || true
   mapfile -t ctrs < <(docker ps -aq --filter label=termiplus.managed=true)
@@ -199,6 +201,11 @@ kc update "clients/$OWUI_CID" -r termiplus -s directAccessGrantsEnabled=true
 log "start the full stack"
 compose up -d --no-build --pull missing --wait --wait-timeout 300
 "$WORK/deploy/firewall.sh" >/dev/null
+# As termiplus-portlock.service does live: a new terminal's locked bridge port
+# carries no traffic until the watcher gives it its entry. Own process group
+# because the watcher forks a monitor and a worker.
+setsid "$WORK/deploy/firewall.sh" --watch-ports >/dev/null 2>&1 &
+WATCH_PID=$!
 
 token() { # user -> access token of the owui client, as Open WebUI would hold it
   browser -d grant_type=password -d client_id=owui -d "client_secret=$(cat "$WORK/deploy/secrets/owui_oidc_client_secret")" \
