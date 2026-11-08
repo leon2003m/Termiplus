@@ -36,3 +36,7 @@ Source: `internal/mcp/server.go:callTool`, `internal/mcp/server.go:invoke`,
 `integrations/openwebui/termiplus_workspaces.py`,
 `internal/mcp/server_test.go:TestModelCannotInvokeConsoleToolsEvenAsAdmin`.
 See [tool call](../../processes/mcp-tool-call.md) and [Share](share.md).
+
+Console modal scroll locking and consistent heading/preview/action card layout
+are in `internal/mcp/ui/app.js:ask` and `loadSessions`; failed desktop previews
+collapse until an image loads, styled by `ui/app.css`.

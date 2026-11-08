@@ -51,6 +51,10 @@ function ask(title, content, accept = "Continue", read = () => true) {
   if (activeDialog) return Promise.resolve(null);
   return new Promise((resolve) => {
     const previous = document.activeElement;
+    const scrollY = window.scrollY;
+    const previousTop = document.body.style.top;
+    document.body.style.top = -scrollY + "px";
+    document.documentElement.classList.add("dialog-open");
     const dialog = el("dialog", { "aria-labelledby": "dialog-title" });
     activeDialog = dialog;
     const form = el("form", {});
@@ -74,6 +78,9 @@ function ask(title, content, accept = "Continue", read = () => true) {
     dialog.addEventListener("close", () => {
       activeDialog = null;
       dialog.remove();
+      document.documentElement.classList.remove("dialog-open");
+      document.body.style.top = previousTop;
+      window.scrollTo(0, scrollY);
       if (previous && previous.isConnected) previous.focus();
       resolve(value);
     }, { once: true });
@@ -130,12 +137,9 @@ async function loadWorkspaces() {
       : ws.persistent
       ? "A Linux shell that keeps your home folder between sessions."
       : "A fresh Linux shell with nothing from your home folder. Deleted after " + (ws.idle_seconds ? Math.ceil(ws.idle_seconds / 60) + " minutes" : "the configured idle period") + " without use; useful for trying things or letting an AI run commands without touching your files.";
-    const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");
     const text = [el("span", { class: "name", text: title })];
-    text.push(el("span", { class: "help", text: purpose }));
+    text.push(el("span", { class: "help", text: ws.description || purpose }));
     text.push(el("span", { class: "meta", text: "Open WebUI connection: " + (ws.connection_name || ws.label || ws.name) }));
-    if (ws.description) text.push(el("span", { class: "help", text: ws.description }));
-    text.push(el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }));
     ul.append(el("li", { class: "workspace" }, [el("div", { class: "ws-text" }, text), button]));
   }
   $("workspaces-section").hidden = false;
@@ -149,7 +153,7 @@ async function loadSessions() {
   for (const s of list) {
     const remove = el("button", { class: "danger", type: "button", text: "Remove" });
     remove.addEventListener("click", () => removeSession(s, remove));
-    const items = [el("span", { class: "name", text: s.label || s.session_id }), remove];
+    const items = [remove];
     const desktop = s.desktop === true;
     items.push(el("span", { class: "help", text: "Use the " + s.workspace + " connection in Open WebUI. Desktop, browser, files and app previews are available there." }));
     const reset = el("button", { type: "button", text: "Reset" });
@@ -161,10 +165,14 @@ async function loadSessions() {
       items.splice(items.length - 1, 0, share);
     }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
-    items.push(el("span", { class: "meta", text: meta }));
-    const card = el("li", { "data-session": s.session_id }, items);
-    if (desktop) card.prepend(desktopPreview(s));
-    else card.prepend(terminalPreview(s));
+    const heading = el("div", { class: "session-heading" }, [
+      el("span", { class: "name", text: s.label || s.session_id }),
+      el("span", { class: "meta", text: meta }),
+    ]);
+    const card = el("li", { class: "session-card", "data-session": s.session_id }, [
+      heading, desktop ? desktopPreview(s) : terminalPreview(s),
+      el("div", { class: "session-actions" }, items),
+    ]);
     ul.append(card);
   }
   refreshPreviews();
@@ -192,9 +200,10 @@ function desktopPreview(session) {
   box.append(label);
   if (session.running) {
     const image = el("img", { alt: "Current desktop screen", hidden: "hidden", "data-preview": encodeURIComponent(session.session_id) });
-    image.addEventListener("load", () => { image.hidden = false; label.hidden = true; });
+    image.addEventListener("load", () => { image.hidden = false; label.hidden = true; box.classList.add("has-preview"); });
     image.addEventListener("error", () => {
       image.hidden = true;
+      box.classList.remove("has-preview");
       image.removeAttribute("src");
       label.textContent = "Preview unavailable";
       label.hidden = false;
