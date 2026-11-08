@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+- The console has a green terminal favicon, served from `/ui/`.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource
