@@ -18,8 +18,9 @@ resource-bound fixes.
 - Running workspaces keep their old image. They get the new workspace image
   (office tools, agent manifest, `locale`/`keyboard`/`record` policies) only
   after they are stopped and started again.
-- Set `TERMIPLUS_VERSION` and `TERMINAL_IMAGE` in `deploy/.env` to `1.1.0`
-  (or the release's digests).
+- In `deploy/.env`, set `TERMIPLUS_VERSION=1.1.0` (a tag, not a digest) and
+  `TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0` (a full image
+  reference; the release's digest reference also works here).
 - Optional new settings, all with unchanged defaults: `TERMIPLUS_SECRETS_DIR`,
   `MCP_SHARES`, `MCP_PERSIST_ROLES`, `MCP_ADMIN_ROLES`, `EXPORT_IDLE_TIMEOUT`.
 - If you set `TERMIPLUS_SECRETS_DIR` on an existing deployment, copy
