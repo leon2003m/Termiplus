@@ -100,6 +100,9 @@ func main() {
 	default:
 		log.Printf("WARNING: MCP_SHARES=%q is not recognized; sharing remains ENABLED (set MCP_SHARES=off to disable)", v)
 	}
+	// The factory reset needs ALLOW_HOME_REMOVE=1 on the socket proxy; the same
+	// variable (passed through compose) hides the panel action when it is off.
+	srv.WithHomeRemove(config.Get("ALLOW_HOME_REMOVE", "") == "1")
 	sharing := srv.SharingEnabled()
 	if !sharing {
 		log.Print("screen sharing disabled (MCP_SHARES=off)")

@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- Factory reset (`wipe_home`) with the shipped default (`ALLOW_HOME_REMOVE` off):
+  the gateway now refuses up front, before stopping workspaces and before the
+  mandatory snapshot, with "factory reset is disabled on this deployment
+  (ALLOW_HOME_REMOVE)" (control API 403, shown as is by the MCP tool). Before,
+  each attempt stopped the workspaces, used up a snapshot retention slot and
+  ended in `terminal unavailable`. The setting reaches the gateway and the MCP
+  server through compose (`ALLOW_HOME_REMOVE`); the panel no longer offers
+  "Reset (wipe home)" when it is off (`home_remove` in the panel state). If the
+  gateway and the socket proxy disagree, the user gets the same clear error,
+  the workspaces are started again and the snapshot already taken is kept. The
+  socket proxy's default and rules are unchanged.
+
 ## [1.1.0] - 2026-11-08
 
 Adds the MCP App workspace panel, agent tooling in the workspace images, a

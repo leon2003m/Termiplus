@@ -322,6 +322,12 @@ func (s *Server) homeTools() []tool {
 				name := s.sessionName(ctx, p, id)
 				raw, err := hb.WipeHome(ctx, p, id)
 				if err != nil {
+					// A refusal for a deployment setting (403) carries the
+					// gateway's own explanation; show it as is.
+					var ge *gatewayError
+					if errors.As(err, &ge) && ge.status == http.StatusForbidden {
+						return nil, errors.New(ge.detail)
+					}
 					return nil, err
 				}
 				var out struct {

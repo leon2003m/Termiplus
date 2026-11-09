@@ -61,11 +61,11 @@ is a destructive, app-visible tool that always requires `_confirmed=true`
 (same gate as `destroy_session`). It is distinct from `reset_workspace`, which
 keeps the home. `gateway.wipeHome` (`internal/gateway/userhomes.go`) is
 fail-closed and ordered: (0) known prerequisites are checked before anything
-is stopped (backups configured, home exists, snapshot limit not reached via
+is stopped (`Config.AllowHomeRemove`, the gateway's copy of `ALLOW_HOME_REMOVE`, else `errHomeRemoveOff` -> 403 "factory reset is disabled"; backups configured, home exists, snapshot limit not reached via
 `backupStore.wouldPrune`); (1) mandatory `g.snapshot(..., prune=false)` of the
 home; any error (backups not configured, snapshot limit reached, no home)
 aborts and nothing is removed; (2) `manager.removeHome` (the already-allowed
-home-remove, `ALLOW_HOME_REMOVE=1`; sockproxy is not widened); (3) `ensure`
+home-remove, `ALLOW_HOME_REMOVE=1`; sockproxy is not widened; a proxy 403 despite the gateway flag becomes `errHomeRemoveDenied`, the snapshot is kept; the MCP server's `WithHomeRemove` makes the panel hide the action via `home_remove` in the panel state); (3) `ensure`
 starts a fresh container on a new empty volume. Only persistent workspaces
 qualify (temporary ones: `errNotPersistent`). `lockHomeTracked`
 (`internal/gateway/homes.go`) stops the home's containers and reports which were

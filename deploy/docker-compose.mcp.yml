@@ -106,6 +106,9 @@ services:
       # Screen-share kill-switch: set MCP_SHARES=off in .env to fully disable
       # desktop sharing (no tool, listener, store or console route is wired up).
       MCP_SHARES: ${MCP_SHARES:-}
+      # Factory reset (wipe_home): same opt-in as the sockproxy and the gateway
+      # (docker-compose.yml). Off by default; the panel then hides the action.
+      ALLOW_HOME_REMOVE: ${ALLOW_HOME_REMOVE:-}
       # Your own group/role names for the persist and admin roles
       # (comma-separated; empty keeps termiplus-persist / termiplus-admin).
       # See docs/mcp.md, section 4.

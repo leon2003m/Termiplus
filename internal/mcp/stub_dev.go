@@ -46,6 +46,7 @@ func ConfigureStubServer(srv *Server) error {
 		return err
 	}
 	srv.WithShares(st)
+	srv.WithHomeRemove(true) // the stub implements the factory reset
 	if srv.desktopBase == "" {
 		srv.WithDesktopBase(StubDesktopBase)
 	}

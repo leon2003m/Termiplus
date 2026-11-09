@@ -417,7 +417,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `MAX_MEMORY_MB`, `MAX_CPUS`, `MAX_PIDS` | sockproxy | `8192`, `4`, `2048` |
 | `EXTRA_IMAGES` | sockproxy | empty; further images policies may name with `image`, comma-separated |
 | `CONTAINER_ROOTFS_SIZE` | sockproxy | empty (no limit); cap on each terminal's container layer, e.g. `10G` |
-| `ALLOW_HOME_REMOVE` | sockproxy | empty; `1` lets the gateway delete home volumes |
+| `ALLOW_HOME_REMOVE` | sockproxy, gateway, mcp | empty (off); `1` lets the gateway delete home volumes. Needed for the factory reset (`wipe_home`) and for deleting the homes of departed users. Set it once in `deploy/.env`: compose passes it to all three. With it off, the factory reset is refused up front with a clear error (no workspace stopped, no snapshot taken) and the panel does not offer it |
 | `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, snapshot, archive) |
 | `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); caps both raw tar bytes and cumulative logical member sizes, e.g. `25G`. Oversized members are refused at their header; sparse holes count at full size despite barely charging the home quota |
 | `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further users wait within their deadline. Each user may have only one running or queued export; overlapping requests return 429 |

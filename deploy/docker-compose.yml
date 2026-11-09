@@ -65,6 +65,9 @@ services:
       GATEWAY_API_KEY_FILE: /run/secrets/gateway_api_key
       KEY_SECRET_FILE: /run/secrets/key_secret
       POLICIES_FILE: /etc/termiplus/policies.json
+      # Same opt-in as the sockproxy's: lets wipe_home (factory reset) refuse
+      # with a clear message when homes cannot be deleted. Grants nothing.
+      ALLOW_HOME_REMOVE: ${ALLOW_HOME_REMOVE:-}
       IDLE_TIMEOUT: 30m
       MAX_RUNNING: "50"
       # Exports (downloads, snapshots, archives) stop at EXPORT_MAX_BYTES, by

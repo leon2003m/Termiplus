@@ -164,6 +164,16 @@ and listener are never constructed (a set `STREAM_LISTEN_ADDR` is ignored with a
 warning). A latent bug in share code is then unreachable. For a binary without
 the `/share` handler, build with `go build -tags noshare ./cmd/mcp`; sharing is
 then permanently off.
+
+**Factory reset opt-in.** `wipe_home` (and the panel's "Reset (wipe home)")
+deletes the home volume, which the socket proxy allows only with
+`ALLOW_HOME_REMOVE=1` (off by default). Set it once in `deploy/.env`; compose
+passes it to the sockproxy, the gateway and the MCP server. With it off the
+gateway refuses the call before it stops a workspace or takes the mandatory
+snapshot ("factory reset is disabled on this deployment (ALLOW_HOME_REMOVE)"),
+and the panel does not offer the action. If the proxy and the gateway disagree
+the same error is returned, the workspaces are started again and the snapshot
+taken before the refusal is kept.
 `docker-compose.mcp-users.yml` supplies the directory service account.
 
 `MCP_AUTH=dev` and the stub backend are for local tests only. Production proxy

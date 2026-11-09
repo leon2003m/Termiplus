@@ -33,6 +33,7 @@ type Server struct {
 	desktopBase string    // browser-facing desktop origin, for share links
 	shares      *ShareStore
 	noSharing   bool // DisableSharing: no share tool, store, console route or panel button
+	homeRemove  bool // WithHomeRemove: the deployment allows the factory reset (ALLOW_HOME_REMOVE=1); only the panel button follows it
 	departed    *departed
 	roles       *RoleMap // nil: exact group names (WithRoles)
 }
@@ -66,6 +67,15 @@ func (s *Server) DisableSharing() *Server {
 	s.noSharing = true
 	s.shares = nil
 	s.assembleTools()
+	return s
+}
+
+// WithHomeRemove tells the panel whether the deployment allows the factory
+// reset (ALLOW_HOME_REMOVE=1, the same setting the gateway and the socket
+// proxy read). It only controls whether the panel offers the action; the
+// gateway refuses it on its own when it is off.
+func (s *Server) WithHomeRemove(on bool) *Server {
+	s.homeRemove = on
 	return s
 }
 
