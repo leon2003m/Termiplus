@@ -631,7 +631,7 @@ def policies(c):
         open(path, "w").write(doc % (rt, rt))
         rc, out = L.sh(["docker", "run", "--rm", "--network", "none", "-v", "%s:/p.json:ro" % path.replace(L.OUT, os.environ.get("OWUI_E2E_STATE", "/var/tmp/owui-e2e") + "/artifacts"),
                         "-e", "POLICIES_FILE=/p.json", "-e", "GATEWAY_API_KEY=" + "a" * 40, "-e", "KEY_SECRET=" + "b" * 40,
-                        "-e", "TERMINAL_IMAGE=x", "ghcr.io/leon2003m/termiplus-gateway:it"])
+                        "-e", "TERMINAL_IMAGE=x", "ghcr.io/leon2003m/termiplus-gateway:" + os.environ.get("E2E_TAG", "it")])
         c.ok("invalid %s is refused at startup with a clear message" % name, rc != 0 and expect in out, "rc=%s %s" % (rc, out[-200:]))
 
 

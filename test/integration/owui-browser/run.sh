@@ -84,6 +84,8 @@ do_up() {
     echo "Refusing to run: this host has termiplus containers, home volumes or ot-sandbox." >&2
     exit 1
   fi
+  # Armed only here: a refused start must never tear down what it refused for.
+  if [ "${AUTO_TEARDOWN:-0}" = 1 ]; then trap teardown EXIT; fi
   rm -rf "$ARTIFACTS"; mkdir -p "$STATE" "$ARTIFACTS"
   rm -rf "$WORK"; mkdir -p "$WORK"
 
@@ -285,7 +287,7 @@ do_test() {
     -v "$ROOT:$ROOT:ro" -v "$STATE:$STATE" -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$(command -v docker):/usr/bin/docker:ro" -v "$plugins:$plugins:ro" \
     -e PYTHONPATH="$STATE/pylib" -e E2E_ENVFILE="$STATE/e2e.env" -e E2E_RUN_SH="$HERE/run.sh" \
-    -e OWUI_E2E_STATE="$STATE" -e E2E_OUT="$ARTIFACTS" -e RUNTIME="$RUNTIME" \
+    -e OWUI_E2E_STATE="$STATE" -e E2E_OUT="$ARTIFACTS" -e RUNTIME="$RUNTIME" -e E2E_TAG="$TAG" \
     "$PLAYWRIGHT_IMAGE" python3 -u "$HERE/e2e.py" "$@"
 }
 
@@ -342,7 +344,7 @@ case "${1:-all}" in
   down) teardown ;;
   timing) do_timing ;;
   all)
-    trap teardown EXIT
+    AUTO_TEARDOWN=1
     do_up
     rc=0
     do_test || rc=$?
