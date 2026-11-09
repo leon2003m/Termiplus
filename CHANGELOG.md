@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- `deploy/setup-alpha.sh` and `docs/deploy-alpha.md` now list
+  `OAUTH_CODE_CHALLENGE_METHOD=S256` (the shipped Keycloak client `owui`
+  requires PKCE S256; sign-in otherwise fails with `Missing parameter:
+  code_challenge_method`) and `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60`
+  (Open WebUI's default 10 s can expire while a workspace starts cold) among
+  the Open WebUI settings.
+
 ### Fixed
 
 - Factory reset (`wipe_home`) with the shipped default (`ALLOW_HOME_REMOVE` off):

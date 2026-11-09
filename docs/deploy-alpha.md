@@ -211,6 +211,15 @@ suspected key disclosure and follow [the security policy](../SECURITY.md#workspa
 Set the environment printed by `setup-alpha.sh` (OIDC client `owui`,
 `OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true` so existing accounts keep their id and
 terminal homes, `OAUTH_SESSION_TOKEN_ENCRYPTION_KEY`) and restart Open WebUI.
+Two more settings are needed:
+
+- `OAUTH_CODE_CHALLENGE_METHOD=S256`. The shipped Keycloak client `owui`
+  requires PKCE with S256; without this variable Open WebUI sends no challenge
+  method and sign-in fails with `Missing parameter: code_challenge_method`.
+- `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60` (seconds). Open WebUI's default
+  of 10 s can expire while a workspace starts cold, so the first tool call
+  after a start would fail.
+
 Install `integrations/openwebui/termiplus_workspaces.py` as a tool and set its
 valves `mcp_url`, `plugin_key` and `ui_url` (see its README).
 
