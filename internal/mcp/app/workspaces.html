@@ -38,7 +38,7 @@ button:disabled{opacity:.5;cursor:default}
 <div id="newshare"></div>
 <h2>Sessions</h2><div id="sessions"></div>
 <h2>Home backups</h2><div id="backups"></div>
-<h2>Screen-share links</h2><div id="shares"></div>
+<section id="shares-section"><h2>Screen-share links</h2><div id="shares"></div></section>
 <h2>Workspaces you can use</h2><div id="workspaces"></div>
 <p class="note">Commands, files, Desktop and Browser run in the chat's native terminal connection. Restoring or deleting a backup, and all administration, stay in the termiplus console.</p>
 <script>
@@ -223,6 +223,7 @@ button:disabled{opacity:.5;cursor:default}
       return r;
     }, "No persistent homes in use.");
 
+    document.getElementById("shares-section").hidden = state.sharing === false;
     list("shares", state.shares, function (sh) {
       var r = el("div", null, "row");
       r.appendChild(el("span", sh.workspace ? wsName(sh.workspace) : (sh.session_id || sh.share_id), "name"));
