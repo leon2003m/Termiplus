@@ -155,6 +155,10 @@ func (s *Server) sessionName(ctx context.Context, p Principal, id string) string
 
 func (s *Server) overview(ctx context.Context, p Principal) map[string]any {
 	out := map[string]any{"workspaces": []Workspace{}, "sessions": []Session{}, "backups": map[string]any{}, "shares": []any{}, "sharing": !s.noSharing, "home_remove": s.homeRemove}
+	// The sandboxed panel cannot know the console address; only the server does.
+	if s.uiBase != "" {
+		out["console_url"] = s.uiBase + "/ui/"
+	}
 	// Section errors are generic: backend messages can name internal URLs.
 	errs := map[string]string{}
 	if all, err := s.backend.ListWorkspaces(ctx, p); err != nil {

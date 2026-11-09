@@ -36,7 +36,7 @@ tool (model + app visible, `structuredContent`) and serves the embedded panel
 `internal/mcp/app/workspaces.html` via `resources/list|read` (authenticated).
 `toolMeta` marks the eight management tools `visibility:["app"]` in
 `tools/list` only; `callTool`/`invoke` gates are unchanged, so app-only is UX,
-not authorization. The panel never calls `request_session`. JSON-RPC
+not authorization. The overview carries `console_url` (`uiBase + "/ui/"`, absent without a console base) so the panel can open the console for restores. The panel never calls `request_session`. JSON-RPC
 notifications get HTTP 202 with no body.
 
 The four panel action tools (`destroy_session`, `reset_workspace`,

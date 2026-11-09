@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Changed
 
+- Console: the network policy is edited as a form (DNS entries, internal
+  network access with a protocol select, add and remove rows, inline checks)
+  instead of raw JSON. The request body and the server-side validation are
+  unchanged. The MCP App panel now says in the Home backups section that
+  backups are restored in the console and offers an "Open console" button
+  (`console_url` in the panel state, absent when no console base URL is set).
 - `deploy/setup-alpha.sh` and `docs/deploy-alpha.md` now list
   `OAUTH_CODE_CHALLENGE_METHOD=S256` (the shipped Keycloak client `owui`
   requires PKCE S256; sign-in otherwise fails with `Missing parameter:
