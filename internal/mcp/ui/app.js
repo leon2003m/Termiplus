@@ -51,6 +51,10 @@ function ask(title, content, accept = "Continue", read = () => true) {
   if (activeDialog) return Promise.resolve(null);
   return new Promise((resolve) => {
     const previous = document.activeElement;
+    const scrollY = window.scrollY;
+    const previousTop = document.body.style.top;
+    document.body.style.top = -scrollY + "px";
+    document.documentElement.classList.add("dialog-open");
     const dialog = el("dialog", { "aria-labelledby": "dialog-title" });
     activeDialog = dialog;
     const form = el("form", {});
@@ -74,6 +78,9 @@ function ask(title, content, accept = "Continue", read = () => true) {
     dialog.addEventListener("close", () => {
       activeDialog = null;
       dialog.remove();
+      document.documentElement.classList.remove("dialog-open");
+      document.body.style.top = previousTop;
+      window.scrollTo(0, scrollY);
       if (previous && previous.isConnected) previous.focus();
       resolve(value);
     }, { once: true });
@@ -130,12 +137,9 @@ async function loadWorkspaces() {
       : ws.persistent
       ? "A Linux shell that keeps your home folder between sessions."
       : "A fresh Linux shell with nothing from your home folder. Deleted after " + (ws.idle_seconds ? Math.ceil(ws.idle_seconds / 60) + " minutes" : "the configured idle period") + " without use; useful for trying things or letting an AI run commands without touching your files.";
-    const kind = [ws.desktop ? "desktop" : "terminal", ws.persistent ? "keeps your files" : "temporary"].join(", ");
     const text = [el("span", { class: "name", text: title })];
-    text.push(el("span", { class: "help", text: purpose }));
+    text.push(el("span", { class: "help", text: ws.description || purpose }));
     text.push(el("span", { class: "meta", text: "Open WebUI connection: " + (ws.connection_name || ws.label || ws.name) }));
-    if (ws.description) text.push(el("span", { class: "help", text: ws.description }));
-    text.push(el("span", { class: "meta", text: kind + (ws.label && ws.label !== ws.name ? " · " + ws.name : "") }));
     ul.append(el("li", { class: "workspace" }, [el("div", { class: "ws-text" }, text), button]));
   }
   $("workspaces-section").hidden = false;
@@ -149,7 +153,7 @@ async function loadSessions() {
   for (const s of list) {
     const remove = el("button", { class: "danger", type: "button", text: "Remove" });
     remove.addEventListener("click", () => removeSession(s, remove));
-    const items = [el("span", { class: "name", text: s.label || s.session_id }), remove];
+    const items = [remove];
     const desktop = s.desktop === true;
     items.push(el("span", { class: "help", text: "Use the " + s.workspace + " connection in Open WebUI. Desktop, browser, files and app previews are available there." }));
     const reset = el("button", { type: "button", text: "Reset" });
@@ -161,10 +165,14 @@ async function loadSessions() {
       items.splice(items.length - 1, 0, share);
     }
     const meta = [s.workspace, s.persistent ? "persistent" : "temporary", s.running ? "running" : "stopped"].join(" · ");
-    items.push(el("span", { class: "meta", text: meta }));
-    const card = el("li", { "data-session": s.session_id }, items);
-    if (desktop) card.prepend(desktopPreview(s));
-    else card.prepend(terminalPreview(s));
+    const heading = el("div", { class: "session-heading" }, [
+      el("span", { class: "name", text: s.label || s.session_id }),
+      el("span", { class: "meta", text: meta }),
+    ]);
+    const card = el("li", { class: "session-card", "data-session": s.session_id }, [
+      heading, desktop ? desktopPreview(s) : terminalPreview(s),
+      el("div", { class: "session-actions" }, items),
+    ]);
     ul.append(card);
   }
   refreshPreviews();
@@ -192,9 +200,10 @@ function desktopPreview(session) {
   box.append(label);
   if (session.running) {
     const image = el("img", { alt: "Current desktop screen", hidden: "hidden", "data-preview": encodeURIComponent(session.session_id) });
-    image.addEventListener("load", () => { image.hidden = false; label.hidden = true; });
+    image.addEventListener("load", () => { image.hidden = false; label.hidden = true; box.classList.add("has-preview"); });
     image.addEventListener("error", () => {
       image.hidden = true;
+      box.classList.remove("has-preview");
       image.removeAttribute("src");
       label.textContent = "Preview unavailable";
       label.hidden = false;
@@ -459,12 +468,11 @@ async function loadAdmin() {
   $("entitlements").readOnly = !ent.editable;
   $("save-entitlements").disabled = !ent.editable;
   try {
-    $("netpolicy").value = JSON.stringify(await api("admin/netpolicy"), null, 2);
+    setNetpolicy(await api("admin/netpolicy"));
   } catch (e) {
-    $("netpolicy").value = "";
-    $("netpolicy").placeholder = e.message;
-    $("netpolicy").readOnly = true;
-    $("save-netpolicy").disabled = true;
+    setNetpolicy({});
+    $("np-error").textContent = e.message;
+    netpolicyLocked(true);
   }
   await loadAudit();
   $("admin-section").hidden = false;
@@ -516,9 +524,156 @@ function saver(button, field, path, what) {
   });
 }
 
+// Network policy editor: one row per DNS entry and per internal access rule.
+// The checks mirror internal/netpolicy for convenience only; the server stays
+// the authority and its error is shown as is.
+const NP_PROTOS = ["tcp", "udp"];
+
+function npField(label, control, msg) {
+  return el("label", { class: "np-field" }, [el("span", { text: label }), control, msg]);
+}
+
+function npInput(label, value, extra) {
+  const msg = el("span", { class: "np-msg", role: "alert" });
+  const input = el("input", Object.assign({ type: "text", value: value, spellcheck: "false", autocomplete: "off" }, extra || {}));
+  return { field: npField(label, input, msg), input, msg };
+}
+
+function npRemove(row, what) {
+  const b = el("button", { type: "button", class: "danger", text: "Remove", "aria-label": "Remove " + what });
+  b.addEventListener("click", () => { row.remove(); npSync(); });
+  return b;
+}
+
+function npSync() {
+  $("np-dns-empty").hidden = $("np-dns").children.length > 0;
+  $("np-egress-empty").hidden = $("np-egress").children.length > 0;
+}
+
+function addDNSRow(entry) {
+  const name = npInput("Name", entry.name || "", { placeholder: "files.internal" });
+  const ip = npInput("IP address", entry.ip || "", { placeholder: "10.0.0.5" });
+  const row = el("div", { class: "np-row", "data-kind": "dns" }, [name.field, ip.field]);
+  row.append(npRemove(row, "DNS entry"));
+  row.np = { name, ip };
+  $("np-dns").append(row);
+  npSync();
+  return row;
+}
+
+function addEgressRow(rule) {
+  const cidr = npInput("Network (CIDR)", rule.cidr || "", { placeholder: "10.0.0.0/24 or 10.0.0.5/32" });
+  const port = npInput("Port (0 = all)", String(rule.port == null ? 0 : rule.port), { inputmode: "numeric" });
+  const sel = el("select", {}, NP_PROTOS.map((p) => el("option", { value: p, text: p.toUpperCase() })));
+  sel.value = NP_PROTOS.includes(rule.proto) ? rule.proto : "tcp";
+  const pmsg = el("span", { class: "np-msg", role: "alert" });
+  const row = el("div", { class: "np-row", "data-kind": "egress" }, [cidr.field, port.field, npField("Protocol", sel, pmsg)]);
+  row.append(npRemove(row, "access rule"));
+  row.np = { cidr, port, sel };
+  $("np-egress").append(row);
+  npSync();
+  return row;
+}
+
+function setNetpolicy(p) {
+  $("np-dns").replaceChildren();
+  $("np-egress").replaceChildren();
+  $("np-error").textContent = "";
+  for (const e of (p && p.dns_entries) || []) addDNSRow(e);
+  for (const r of (p && p.egress_allow) || []) addEgressRow(r);
+  npSync();
+  netpolicyLocked(false);
+}
+
+function netpolicyLocked(locked) {
+  for (const n of $("netpolicy").querySelectorAll("input, select, button")) n.disabled = locked;
+  $("save-netpolicy").disabled = locked;
+}
+
+function npMark(f, text) {
+  f.input.setAttribute("aria-invalid", text ? "true" : "false");
+  f.msg.textContent = text;
+  return !text;
+}
+
+function npValidIPv4(s) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  return !!m && m.slice(1).every((x) => Number(x) <= 255);
+}
+
+function npValidIP(s) {
+  return npValidIPv4(s) || (s.includes(":") && /^[0-9a-fA-F:.]+$/.test(s));
+}
+
+function npValidName(s) {
+  if (!s || s.length > 253) return false;
+  return s.split(".").every((l) => l.length > 0 && l.length <= 63 && /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$/.test(l));
+}
+
+// collectNetpolicy validates every row, marks the bad fields and returns the
+// policy to send, or null when something is wrong.
+function collectNetpolicy() {
+  let ok = true;
+  const names = new Set();
+  const dns = [];
+  for (const row of $("np-dns").children) {
+    const name = row.np.name.input.value.trim();
+    const ip = row.np.ip.input.value.trim();
+    let nameErr = "";
+    if (!name) nameErr = "Enter a host name.";
+    else if (!npValidName(name)) nameErr = "Use letters, digits, hyphens and dots only.";
+    else if (names.has(name.toLowerCase())) nameErr = "This name is listed twice.";
+    names.add(name.toLowerCase());
+    const ipErr = !ip ? "Enter an IP address." : npValidIP(ip) ? "" : "Not a valid IP address.";
+    ok = npMark(row.np.name, nameErr) && ok;
+    ok = npMark(row.np.ip, ipErr) && ok;
+    dns.push({ name, ip });
+  }
+  const egress = [];
+  for (const row of $("np-egress").children) {
+    const cidr = row.np.cidr.input.value.trim();
+    const portText = row.np.port.input.value.trim();
+    let cidrErr = "";
+    const m = /^([0-9.]+)\/(\d{1,2})$/.exec(cidr);
+    if (!cidr) cidrErr = "Enter a network such as 10.0.0.0/24, or a host such as 10.0.0.5/32.";
+    else if (!m || !npValidIPv4(m[1]) || Number(m[2]) > 32) cidrErr = "Use IPv4 with a prefix length, for example 10.0.0.0/24.";
+    const port = Number(portText);
+    const portErr = /^\d{1,5}$/.test(portText) && port <= 65535 ? "" : "Enter a port from 0 to 65535 (0 means every port).";
+    ok = npMark(row.np.cidr, cidrErr) && ok;
+    ok = npMark(row.np.port, portErr) && ok;
+    egress.push({ cidr, port, proto: row.np.sel.value });
+  }
+  return ok ? { dns_entries: dns, egress_allow: egress } : null;
+}
+
+function initNetpolicy() {
+  $("np-dns-add").addEventListener("click", () => addDNSRow({}).np.name.input.focus());
+  $("np-egress-add").addEventListener("click", () => addEgressRow({}).np.cidr.input.focus());
+  $("save-netpolicy").addEventListener("click", async () => {
+    $("np-error").textContent = "";
+    const body = collectNetpolicy();
+    if (!body) {
+      $("np-error").textContent = "Fix the marked fields before saving.";
+      return;
+    }
+    if (!await confirmAction("Replace the network policy for everyone?")) return;
+    const button = $("save-netpolicy");
+    button.disabled = true;
+    try {
+      await api("admin/netpolicy", { method: "PUT", body: JSON.stringify(body) });
+      status("Saved the network policy.");
+      await Promise.all([loadAdmin(), loadWorkspaces().catch(() => {})]);
+    } catch (e) {
+      $("np-error").textContent = e.message;
+      status("network policy: " + e.message, true);
+      button.disabled = false;
+    }
+  });
+}
+
 async function main() {
   saver("save-entitlements", "entitlements", "admin/entitlements", "workspace entitlements");
-  saver("save-netpolicy", "netpolicy", "admin/netpolicy", "network policy");
+  initNetpolicy();
   try {
     const me = await api("me");
     $("roles").textContent = me.roles.length ? "groups: " + me.roles.join(", ") : "";

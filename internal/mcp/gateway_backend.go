@@ -212,6 +212,18 @@ func (b *GatewayBackend) send(req *http.Request, out any) error {
 
 // decodeGateway turns a gateway answer into out, or an error carrying the
 // gateway's message.
+// gatewayError is a failed control-API call. Error() keeps the
+// "gateway METHOD: status detail" form; detail is the gateway's own message.
+type gatewayError struct {
+	method string
+	status int
+	detail string
+}
+
+func (e *gatewayError) Error() string {
+	return fmt.Sprintf("gateway %s: %d %s", e.method, e.status, e.detail)
+}
+
 func decodeGateway(req *http.Request, resp *http.Response, out any) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 300 {
@@ -222,7 +234,7 @@ func decodeGateway(req *http.Request, resp *http.Response, out any) error {
 		if json.Unmarshal(data, &e) == nil && e.Detail != "" {
 			msg = e.Detail
 		}
-		return fmt.Errorf("gateway %s: %d %s", req.Method, resp.StatusCode, msg)
+		return &gatewayError{method: req.Method, status: resp.StatusCode, detail: msg}
 	}
 	if out != nil && len(data) > 0 {
 		return json.Unmarshal(data, out)

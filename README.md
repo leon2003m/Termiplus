@@ -79,16 +79,16 @@ internal/netpolicy/         admin network policy: validation, persistence, confi
 
 ## Release images
 
-The current stable release is **1.0.0** on `main`, targeting Open WebUI 0.13.0
-and Open Terminal 0.16.0. See [the changelog](CHANGELOG.md#100---2026-11-05)
+The current stable release is **1.1.0** on `main`, targeting Open WebUI 0.13.0
+and Open Terminal 0.16.0. See [the changelog](CHANGELOG.md#110---2026-11-08)
 and [deployment guide](docs/deploy-alpha.md) for installation and upgrade notes.
 The project security warning above continues to apply.
 
 For an installation using the published images, set these in `deploy/.env`:
 
 ```dotenv
-TERMIPLUS_VERSION=1.0.0
-TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.0.0
+TERMIPLUS_VERSION=1.1.0
+TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0
 ```
 
 Pin images to the digest references attached to the release for reproducible
@@ -119,6 +119,9 @@ docker build --build-arg BASE=ot-terminal:0.16.0 -t ot-desktop:0.16.0 image/desk
 # 3. Secrets, each 64 hex chars. gateway and sockproxy run as uid/gid 65534 and
 #    read them through Compose's file secrets, which keep the host file mode:
 #    readable for you and group 65534 only, independent of your umask.
+#    For a real deployment keep them outside the checkout: create the files in
+#    e.g. /opt/docker/termiplus/secrets and set TERMIPLUS_SECRETS_DIR to it in
+#    deploy/.env (docs/deploy-alpha.md).
 mkdir -p deploy/secrets
 for s in proxy_token gateway_api_key key_secret; do
   openssl rand -hex 32 | sudo install -m 0640 -o "$USER" -g 65534 /dev/stdin deploy/secrets/$s
@@ -230,6 +233,9 @@ There are no separate terminal-only choices in the shipped configuration.
 | `home` | Persistent only. Policies with the same `home` share the user's volume |
 | `idle_timeout` | Overrides `IDLE_TIMEOUT` for this policy, minimum `1m` |
 | `max_per_user` | Ephemeral only. Concurrent sandboxes per user, default 3 |
+| `locale` | Optional. `LANG` in the workspace, e.g. `de_DE.UTF-8` (default `C.UTF-8`) |
+| `keyboard` | Desktop only. XKB layout of the desktop, e.g. `de` |
+| `record` | Desktop only. `true` records the desktop at 2 fps into `~/recordings`, kept for 2 days, so the user can review what a model did |
 | `image` | Optional. Runs this policy on another image than `TERMINAL_IMAGE`, e.g. a Python or Node image. The socket proxy must list it in `EXTRA_IMAGES` |
 | `egress` | `internet` (default) or `offline`: no internet, no LAN, no DNS. Needs the offline overlay, see *Offline workspaces* |
 
@@ -411,7 +417,7 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `MAX_MEMORY_MB`, `MAX_CPUS`, `MAX_PIDS` | sockproxy | `8192`, `4`, `2048` |
 | `EXTRA_IMAGES` | sockproxy | empty; further images policies may name with `image`, comma-separated |
 | `CONTAINER_ROOTFS_SIZE` | sockproxy | empty (no limit); cap on each terminal's container layer, e.g. `10G` |
-| `ALLOW_HOME_REMOVE` | sockproxy | empty; `1` lets the gateway delete home volumes |
+| `ALLOW_HOME_REMOVE` | sockproxy, gateway, mcp | empty (off); `1` lets the gateway delete home volumes. Needed for the factory reset (`wipe_home`) and for deleting the homes of departed users. Set it once in `deploy/.env`: compose passes it to all three. With it off, the factory reset is refused up front with a clear error (no workspace stopped, no snapshot taken) and the panel does not offer it |
 | `EXPORT_TIMEOUT` | gateway | `2h`; upper bound for one home export (download, snapshot, archive) |
 | `EXPORT_MAX_BYTES` | gateway | derived from `HOME_VOLUME_SIZE` (quota + 1/8 + 64M), else `0` (no cap); caps both raw tar bytes and cumulative logical member sizes, e.g. `25G`. Oversized members are refused at their header; sparse holes count at full size despite barely charging the home quota |
 | `EXPORT_CONCURRENCY` | gateway | `4`; home exports running at once across all users, further users wait within their deadline. Each user may have only one running or queued export; overlapping requests return 429 |

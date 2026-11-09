@@ -73,7 +73,7 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		return
 	}
 	// Identity comes from the sign-in proxy only (it overwrites client copies).
-	p, err := ProxyHeaderAuthenticator{}.Authenticate(r)
+	p, err := u.srv.identity().Authenticate(r)
 	if err != nil {
 		uiError(w, http.StatusUnauthorized, "not signed in")
 		return
@@ -95,6 +95,15 @@ func (u *UI) api(w http.ResponseWriter, r *http.Request, rest string) {
 		return
 	}
 	p = Principal{UserID: owui, Roles: p.Roles}
+
+	// With sharing off, every share-purpose console route is gone: the share
+	// links and the recipient picker (desktops/<id>/people), whose only use is
+	// choosing who to share with. The owner's own desktop preview stays.
+	if u.srv.noSharing && (rest == "shares" || strings.HasPrefix(rest, "shares/") ||
+		(strings.HasPrefix(rest, "desktops/") && strings.HasSuffix(rest, "/people"))) {
+		uiError(w, http.StatusNotFound, "not found")
+		return
+	}
 
 	switch {
 	case rest == "workspaces" && r.Method == http.MethodGet:
@@ -284,9 +293,11 @@ func nonNil(s []string) []string {
 }
 
 func uiJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		status, b = http.StatusInternalServerError, []byte(`{"error":"internal error"}`)
+	}
+	writeBody(w, status, b)
 }
 
 func uiError(w http.ResponseWriter, status int, msg string) {

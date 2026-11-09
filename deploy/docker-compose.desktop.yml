@@ -128,6 +128,6 @@ networks:
     internal: true
 
 secrets:
-  desk_oidc_client_secret: { file: ./secrets/desk_oidc_client_secret }
-  desk_oidc_cookie_secret: { file: ./secrets/desk_oidc_cookie_secret }
-  dstream_oidc_cookie_secret: { file: ./secrets/dstream_oidc_cookie_secret }
+  desk_oidc_client_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/desk_oidc_client_secret" }
+  desk_oidc_cookie_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/desk_oidc_cookie_secret" }
+  dstream_oidc_cookie_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/dstream_oidc_cookie_secret" }

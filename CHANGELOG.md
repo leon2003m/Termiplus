@@ -4,6 +4,123 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-09
+
+Adds the MCP App workspace panel, agent tooling in the workspace images, a
+factory reset for homes and secrets outside the checkout, plus firewall and
+resource-bound fixes.
+
+### Upgrade notes
+
+- Update the host checkout and reapply the firewall (`deploy/firewall.sh`)
+  together with the new gateway image; the Security entries below change host
+  rules, which container images alone do not install.
+- Running workspaces keep their old image. They get the new workspace image
+  (office tools, agent manifest, `locale`/`keyboard`/`record` policies) only
+  after they are stopped and started again.
+- In `deploy/.env`, set `TERMIPLUS_VERSION=1.1.0` (a tag, not a digest) and
+  `TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0` (a full image
+  reference; the release's digest reference also works here).
+- Optional new settings, all with unchanged defaults: `TERMIPLUS_SECRETS_DIR`,
+  `MCP_SHARES`, `MCP_PERSIST_ROLES`, `MCP_ADMIN_ROLES`, `EXPORT_IDLE_TIMEOUT`.
+- If you set `TERMIPLUS_SECRETS_DIR` on an existing deployment, copy
+  `deploy/secrets/` there first; otherwise `setup-alpha.sh` generates new,
+  mismatching secrets. Values with comments, spaces or variables in
+  `deploy/.env` are refused by the scripts. See
+  [deployment](docs/deploy-alpha.md).
+
+### Security
+
+- Firewall: a symlinked or non-regular `egress.rules` is ignored, and malformed
+  lines are logged by number, not content. A missing `ip6tables-restore` no
+  longer aborts the IPv4 policy; all IPv6 frames on the bridges are dropped with ebtables instead. The
+  policy fingerprint now covers host-local DNS upstream addresses.
+
+### Added
+
+- Deploy: `TERMIPLUS_SECRETS_DIR` moves all secrets out of the source checkout (e.g. `/opt/docker/termiplus/secrets`). Every compose file, `setup-alpha.sh` and `add-mcp-admin-client.sh` use it; `setup-alpha.sh` writes it to `deploy/.env`. Without it, `deploy/secrets/` stays the default. The scripts refuse an ambiguous value.
+
+- MCP: `wipe_home` tool and gateway control API call: a factory reset of the
+  caller's persistent home, with confirmation. `MCP_SHARES=off` (or building
+  with `-tags noshare`) removes desktop screen sharing entirely: no
+  `share_desktop` tool, share store, console routes or stream listener, and the
+  panel hides Share. See [docs/mcp.md](docs/mcp.md).
+
+- MCP App workspace panel: the read-only `open_workspaces` tool opens an inline
+  panel (sessions, home backups, screen links) in MCP Apps hosts. The
+  management tools are app-only in `tools/list`; server-side gates are
+  unchanged. See [Workspace panel](docs/mcp.md#workspace-panel-mcp-app).
+
+- MCP: `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES` name your own groups or roles (e.g. `ki-nutzer`, `ki-admin`) for the persist and admin roles. When set, forwarded group names are normalised (`/name`, `role:name` and `name` are the same) for roles and workspace entitlements, in MCP tools, the management UI and the share page. Unset, names match exactly as before.
+
+- Images: tools for models working in a workspace (`docs/agents.md`). Each start writes a manifest to `~/AGENTS.md` (mode, root, desktop, rules, tools), which Open WebUI reads into every turn, links bundled skills into `~/.agents/skills` and `tp-status` shows it plus live facts. The terminal image adds pandoc, LibreOffice (nogui), poppler, openpyxl, python-docx, Pillow, tesseract (English, German), recoll and all locales.
+- Policies: `locale` sets `LANG`; for desktops, `keyboard` sets the XKB layout and `record` records the desktop into `~/recordings` (2 fps, kept 2 days). The gateway validates them and the image checks them again.
+
+### Changed
+
+- Console: the network policy is edited as a form (DNS entries, internal
+  network access with a protocol select, add and remove rows, inline checks)
+  instead of raw JSON. The request body and the server-side validation are
+  unchanged. The MCP App panel now says in the Home backups section that
+  backups are restored in the console and offers an "Open console" button
+  (`console_url` in the panel state, absent when no console base URL is set).
+- `deploy/setup-alpha.sh` and `docs/deploy-alpha.md` now list
+  `OAUTH_CODE_CHALLENGE_METHOD=S256` (the shipped Keycloak client `owui`
+  requires PKCE S256; sign-in otherwise fails with `Missing parameter:
+  code_challenge_method`) and `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60`
+  (Open WebUI's default 10 s can expire while a workspace starts cold) among
+  the Open WebUI settings.
+- MCP: with several `MCP_ADMIN_ROLES` groups, `manage_user` counts enabled
+  admins across all top-level admin groups before refusing to empty one;
+  at least one other enabled top-level admin must still remain.
+- Workspace panel actions return the refreshed state in one round-trip.
+- Dependency updates use Updatecli instead of Dependabot (maintainer tooling,
+  no runtime effect).
+### Fixed
+
+- Factory reset (`wipe_home`) with the shipped default (`ALLOW_HOME_REMOVE` off):
+  the gateway now refuses up front, before stopping workspaces and before the
+  mandatory snapshot, with "factory reset is disabled on this deployment
+  (ALLOW_HOME_REMOVE)" (control API 403, shown as is by the MCP tool). Before,
+  each attempt stopped the workspaces, used up a snapshot retention slot and
+  ended in `terminal unavailable`. The setting reaches the gateway and the MCP
+  server through compose (`ALLOW_HOME_REMOVE`); the panel no longer offers
+  "Reset (wipe home)" when it is off (`home_remove` in the panel state). If the
+  gateway and the socket proxy disagree, the user gets the same clear error,
+  the workspaces are started again and the snapshot already taken is kept. The
+  socket proxy's default and rules are unchanged.
+- MCP responses (and the console API's) are sent with a `Content-Length`
+  instead of chunked. Behind oauth2-proxy roughly 0.3 to 2 percent of large
+  (about 16 KB) `resources/read` answers arrived truncated.
+- Integration test (`test/integration/run.sh`): the sandbox bridge runs with
+  `enable_icc:false`, so `firewall.sh` must re-pin the gateway and lock each new
+  terminal's bridge port. The one-shot apply ran before any workspace existed,
+  leaving later-created terminals unreachable (every request to them returned
+  502 `terminal unavailable`) regardless of runtime. The run now re-applies the
+  firewall in the background for the duration of the checks, mirroring the
+  production `termiplus-firewall-watch` timer, and stops it on cleanup.
+
+- Home exports now have an idle deadline (`EXPORT_IDLE_TIMEOUT`, default 1m)
+  alongside the absolute `EXPORT_TIMEOUT`: a client that stops reading releases
+  the archive-helper lock and export slot after the idle bound instead of
+  holding them for the full 2h timeout.
+- Proxied terminal WebSockets now count against the per-container
+  `maxProxiedConns` cap (like the preview/screen paths); the connection past
+  the cap is closed with 1013, so one user cannot pin the shared gateway with
+  open sockets.
+
+- The workspace panel shows a newly created screen-share link once, with a copy
+  button; the server keeps only its hash, so it could not be recovered later.
+- A refused factory reset (`wipe_home`) no longer leaves workspaces stopped:
+  prerequisites are checked before stopping anything, and workspaces that were
+  running are started again if the snapshot or removal fails.
+
+- Console dialogs lock background scrolling; missing previews collapse and workspace/session cards use a consistent layout.
+
+- Make Kate follow the configured desktop palette on fresh homes.
+
+- The console has a green terminal favicon, served from `/ui/`.
+
 ## [1.0.0] - 2026-11-05
 
 Republished with the firewall isolation, home-export and screenshot resource

@@ -1,3 +1,5 @@
+//go:build !noshare
+
 package mcp
 
 import (
@@ -55,7 +57,7 @@ func (d *DesktopHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		forwardError(w, 404, "Not found.")
 		return
 	}
-	p, err := (ProxyHeaderAuthenticator{}).Authenticate(r)
+	p, err := d.srv.identity().Authenticate(r)
 	if err != nil {
 		forwardError(w, 401, "Not signed in.")
 		return

@@ -47,6 +47,7 @@ compose() {
 
 cleanup() {
   log "cleanup"
+  if [ -n "$WATCH_PID" ]; then kill -- "-$WATCH_PID" >/dev/null 2>&1 || true; fi
   docker rm -f tp-val-client >/dev/null 2>&1 || true
   if [ -n "$INT_PID" ]; then kill "$INT_PID" >/dev/null 2>&1 || true; fi
   ip netns del "$INT_NS" >/dev/null 2>&1 || true
@@ -66,6 +67,7 @@ cleanup() {
 }
 FOREIGN_VOL=""
 INT_PID=""
+WATCH_PID=""
 trap cleanup EXIT
 
 if [ "$(docker ps -aq --filter label=termiplus.managed=true | wc -l)" -gt 0 ] ||
@@ -128,6 +130,12 @@ fi
 log "start stack (base + netpolicy overlay)"
 compose --env-file "$WORK/deploy/.env" up -d --no-build --pull never --wait --wait-timeout 180
 "$WORK/deploy/firewall.sh" >/dev/null
+# As termiplus-portlock.service does live: a new terminal's locked bridge port
+# carries no traffic until the watcher gives it its entry, so without it every
+# first start would run into the gateway's readiness timeout. Own process group
+# because the watcher forks a monitor and a worker.
+setsid "$WORK/deploy/firewall.sh" --watch-ports >/dev/null 2>&1 &
+WATCH_PID=$!
 
 log "internal service at $INT_IP (5432, 5433)"
 ip netns add "$INT_NS"

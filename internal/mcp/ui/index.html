@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>termiplus workspaces</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="app.css">
 <script src="app.js" defer></script>
 </head>
@@ -37,8 +38,24 @@
     <textarea id="entitlements" spellcheck="false" rows="10" aria-label="Workspace entitlements (JSON)"></textarea>
     <button id="save-entitlements" class="primary" type="button">Save entitlements</button>
     <h3>Network policy</h3>
-    <p class="hint">Custom DNS entries and internal egress allowances for all terminals.</p>
-    <textarea id="netpolicy" spellcheck="false" rows="10" aria-label="Network policy (JSON)"></textarea>
+    <p class="hint">What terminals may resolve and reach on your internal network. Public internet access is always allowed.</p>
+    <div id="netpolicy" class="np">
+      <fieldset class="np-group">
+        <legend>DNS entries</legend>
+        <p class="hint">Names that terminals resolve to a fixed internal address, for example a file server.</p>
+        <div id="np-dns" class="np-rows"></div>
+        <p id="np-dns-empty" class="np-empty">No custom names yet.</p>
+        <button id="np-dns-add" type="button">Add DNS entry</button>
+      </fieldset>
+      <fieldset class="np-group">
+        <legend>Internal network access</legend>
+        <p class="hint">Internal addresses terminals may connect to. Everything internal that is not listed here stays blocked. Port 0 means every port.</p>
+        <div id="np-egress" class="np-rows"></div>
+        <p id="np-egress-empty" class="np-empty">No internal access allowed. Terminals can only reach the public internet.</p>
+        <button id="np-egress-add" type="button">Add access rule</button>
+      </fieldset>
+      <p id="np-error" class="np-error" role="alert"></p>
+    </div>
     <button id="save-netpolicy" class="primary" type="button">Save network policy</button>
     <h3>Audit log</h3>
     <p class="hint">The newest changes made through chat or this console: sessions, entitlements, network policy and group membership.</p>

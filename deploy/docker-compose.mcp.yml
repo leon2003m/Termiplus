@@ -103,6 +103,17 @@ services:
       MCP_IDENTITY_FILE: /data/identities.json
       MCP_AUDIT_FILE: /data/audit.log
       MCP_SHARES_FILE: /data/shares.json
+      # Screen-share kill-switch: set MCP_SHARES=off in .env to fully disable
+      # desktop sharing (no tool, listener, store or console route is wired up).
+      MCP_SHARES: ${MCP_SHARES:-}
+      # Factory reset (wipe_home): same opt-in as the sockproxy and the gateway
+      # (docker-compose.yml). Off by default; the panel then hides the action.
+      ALLOW_HOME_REMOVE: ${ALLOW_HOME_REMOVE:-}
+      # Your own group/role names for the persist and admin roles
+      # (comma-separated; empty keeps termiplus-persist / termiplus-admin).
+      # See docs/mcp.md, section 4.
+      MCP_PERSIST_ROLES: ${MCP_PERSIST_ROLES:-}
+      MCP_ADMIN_ROLES: ${MCP_ADMIN_ROLES:-}
     volumes:
       - ./mcp-data:/data
     secrets: [control_api_key, mcp_owui_plugin_key]
@@ -130,7 +141,7 @@ networks:
     internal: true
 
 secrets:
-  control_api_key: { file: ./secrets/control_api_key }
-  mcp_oidc_client_secret: { file: ./secrets/mcp_oidc_client_secret }
-  mcp_oidc_cookie_secret: { file: ./secrets/mcp_oidc_cookie_secret }
-  mcp_owui_plugin_key: { file: ./secrets/mcp_owui_plugin_key }
+  control_api_key: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/control_api_key" }
+  mcp_oidc_client_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_oidc_client_secret" }
+  mcp_oidc_cookie_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_oidc_cookie_secret" }
+  mcp_owui_plugin_key: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/mcp_owui_plugin_key" }

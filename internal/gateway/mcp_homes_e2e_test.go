@@ -32,6 +32,7 @@ func withBackups(t *testing.T, keep int, allowRemove bool) func(*harnessOpts) {
 			c.ControlKey = testControlKey
 			c.BackupDir = dir
 			c.SnapshotKeep = keep
+			c.AllowHomeRemove = allowRemove
 		}
 		o.rules = func(r *sockproxy.Rules) { r.AllowHomeRemove = allowRemove }
 	}
@@ -244,6 +245,9 @@ func TestMCPShareDesktop(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := mcp.NewServer(auth, backend, "test").WithUIBase("https://console.example").WithDesktopBase("https://desk.example").WithShares(shares).WithDirectory(dir, "")
+	if !srv.SharingEnabled() {
+		t.Skip("sharing is compiled out (-tags noshare)")
+	}
 	c := &mcpChain{h: h, srv: srv}
 	var s mcp.Session
 	c.ok(t, "alice-tok", "request_session", map[string]any{"workspace": "desk", "persistent": true, "_confirmed": true}, &s)
@@ -534,4 +538,237 @@ func TestDepartedUsers(t *testing.T) {
 	if !found {
 		t.Fatal("no archive file")
 	}
+}
+
+func TestMCPWipeHome(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, true))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+	firstID := c.h.ctr(s.ID).id
+
+	if code := c.code(t, "bob-tok", "wipe_home", map[string]any{"session_id": s.ID}); code != -32010 {
+		t.Fatalf("wipe without confirmation: %d", code)
+	}
+	if code := c.code(t, "alice-tok", "wipe_home", map[string]any{"session_id": s.ID, "_confirmed": true}); code != 1 {
+		t.Fatalf("alice wiping bob's home: %d", code)
+	}
+	if c.files(vol)["precious.txt"] != "1" || c.h.ctr(s.ID).id != firstID {
+		t.Fatal("refused wipe changed state")
+	}
+
+	var after map[string]any
+	c.ok(t, "bob-tok", "wipe_home", map[string]any{"session_id": s.ID, "_confirmed": true}, &after)
+	snap, _ := after["snapshot"].(map[string]any)
+	snapID, _ := snap["id"].(string)
+	if snapID == "" {
+		t.Fatalf("no snapshot id in answer: %v", after)
+	}
+	ct := c.h.ctr(s.ID)
+	if ct == nil || ct.id == firstID || !ct.running {
+		t.Fatalf("wipe should give a fresh running container: %+v", ct)
+	}
+	if len(c.files(vol)) != 0 {
+		t.Fatalf("home not empty after wipe: %v", c.files(vol))
+	}
+	// The snapshot taken first still holds the old home.
+	var list struct {
+		Snapshots []struct {
+			ID string `json:"id"`
+		} `json:"snapshots"`
+	}
+	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "list", "workspace": "default"}, &list)
+	if len(list.Snapshots) != 1 || list.Snapshots[0].ID != snapID {
+		t.Fatalf("snapshots after wipe: %+v (want %s)", list.Snapshots, snapID)
+	}
+	c.h.docker.mu.Lock()
+	_, haveVol := c.h.docker.volumes[vol]
+	c.h.docker.mu.Unlock()
+	if !haveVol {
+		t.Fatal("fresh home volume was not recreated")
+	}
+}
+
+func wipeErrText(t *testing.T, c *mcpChain, id string) string {
+	t.Helper()
+	out := c.call(t, "bob-tok", "wipe_home", map[string]any{"session_id": id, "_confirmed": true})
+	if out.Error != nil || !out.Result.IsError {
+		t.Fatalf("wipe must fail with a tool error: %+v", out)
+	}
+	return out.Result.Content[0].Text
+}
+
+func snapshotCount(t *testing.T, c *mcpChain) int {
+	t.Helper()
+	var list struct {
+		Snapshots []json.RawMessage `json:"snapshots"`
+	}
+	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "list", "workspace": "default"}, &list)
+	return len(list.Snapshots)
+}
+
+// Without ALLOW_HOME_REMOVE the factory reset is refused before anything is
+// stopped or snapshotted, with a message that names the setting.
+func TestMCPWipeHomeDisabledRefusesUpFront(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, false))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+	firstID := c.h.ctr(s.ID).id
+	stops := c.h.docker.stops
+
+	msg := wipeErrText(t, c, s.ID)
+	if !strings.Contains(msg, "factory reset is disabled") || !strings.Contains(msg, "ALLOW_HOME_REMOVE") || strings.Contains(msg, "terminal unavailable") {
+		t.Fatalf("unclear refusal: %q", msg)
+	}
+	if n := snapshotCount(t, c); n != 0 {
+		t.Fatalf("a refused wipe took %d snapshot(s)", n)
+	}
+	if c.h.docker.stops != stops || c.h.ctr(s.ID).id != firstID {
+		t.Fatal("a refused wipe stopped or replaced the workspace")
+	}
+	assertRunning(t, c, s.ID)
+	if c.files(vol)["precious.txt"] != "1" {
+		t.Fatal("home changed")
+	}
+	// Repeated attempts must not use up retention slots either.
+	_ = wipeErrText(t, c, s.ID)
+	if n := snapshotCount(t, c); n != 0 {
+		t.Fatalf("snapshots after a second refusal: %d", n)
+	}
+}
+
+// The gateway believes the reset is allowed but the proxy refuses the volume
+// removal: the user gets the same clear error, the workspace is running again
+// and the snapshot already taken is kept and named.
+func TestMCPWipeHomeProxyMismatch(t *testing.T) {
+	opt := withBackups(t, 3, false)
+	base := opt
+	opt = func(o *harnessOpts) {
+		base(o)
+		prev := o.gateway
+		o.gateway = func(c *Config) { prev(c); c.AllowHomeRemove = true }
+	}
+	c := newHomesChain(t, opt)
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+
+	msg := wipeErrText(t, c, s.ID)
+	if !strings.Contains(msg, "factory reset is disabled") || !strings.Contains(msg, "ALLOW_HOME_REMOVE") || !strings.Contains(msg, "snapshot") || strings.Contains(msg, "terminal unavailable") {
+		t.Fatalf("unclear refusal: %q", msg)
+	}
+	if n := snapshotCount(t, c); n != 1 {
+		t.Fatalf("the snapshot taken before the refusal should be kept: %d", n)
+	}
+	c.h.docker.mu.Lock()
+	_, haveVol := c.h.docker.volumes[vol]
+	c.h.docker.mu.Unlock()
+	if !haveVol || c.files(vol)["precious.txt"] != "1" {
+		t.Fatal("home lost although the proxy refused the removal")
+	}
+	assertRunning(t, c, s.ID)
+}
+
+// The wipe must never run without its snapshot: with backups unconfigured, or
+// a snapshot that cannot be taken, nothing is removed.
+func TestMCPWipeHomeFailsClosed(t *testing.T) {
+	cases := map[string]func(*harnessOpts){
+		"no backups": func(o *harnessOpts) {
+			o.gateway = func(c *Config) { c.ControlKey = testControlKey; c.AllowHomeRemove = true }
+			o.rules = func(r *sockproxy.Rules) { r.AllowHomeRemove = true }
+		},
+		"snapshot limit reached": nil,
+	}
+	for name, opt := range cases {
+		t.Run(name, func(t *testing.T) {
+			if opt == nil {
+				opt = withBackups(t, 1, true)
+			}
+			c := newHomesChain(t, opt)
+			var s mcp.Session
+			c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+			vol := naming.Volume("bob", "default")
+			c.setFiles(vol, map[string]string{"precious.txt": "1"})
+			if name == "snapshot limit reached" {
+				c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "create", "workspace": "default"}, nil)
+			}
+			firstID := c.h.ctr(s.ID).id
+			if code := c.code(t, "bob-tok", "wipe_home", map[string]any{"session_id": s.ID, "_confirmed": true}); code != 1 {
+				t.Fatalf("wipe without a snapshot must fail: %d", code)
+			}
+			if c.files(vol)["precious.txt"] != "1" {
+				t.Fatal("home changed although the snapshot failed")
+			}
+			c.h.docker.mu.Lock()
+			_, haveVol := c.h.docker.volumes[vol]
+			c.h.docker.mu.Unlock()
+			if !haveVol {
+				t.Fatal("home volume deleted although the snapshot failed")
+			}
+			if ct := c.h.ctr(s.ID); ct == nil || ct.id != firstID {
+				t.Fatal("container replaced although the snapshot failed")
+			}
+			assertRunning(t, c, s.ID)
+		})
+	}
+}
+
+// assertRunning checks that a refused wipe left the workspace running.
+func assertRunning(t *testing.T, c *mcpChain, name string) {
+	t.Helper()
+	c.h.docker.mu.Lock()
+	defer c.h.docker.mu.Unlock()
+	if ct := c.h.docker.ctrs[name]; ct == nil || !ct.running {
+		t.Fatalf("workspace %s left stopped by a refused wipe", name)
+	}
+}
+
+// An export that fails after the workspaces were stopped must start them again.
+func TestMCPWipeHomeExportFailureRestartsWorkspaces(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, true))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+	c.h.failNext("GET /containers/"+naming.Archive("bob", "default")+"/archive", 1)
+	if code := c.code(t, "bob-tok", "wipe_home", map[string]any{"session_id": s.ID, "_confirmed": true}); code != 1 {
+		t.Fatalf("wipe with a failing export must fail: %d", code)
+	}
+	if c.files(vol)["precious.txt"] != "1" {
+		t.Fatal("home changed although the export failed")
+	}
+	assertRunning(t, c, s.ID)
+}
+
+func TestMCPWipeHomeRejectsTemporary(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, true))
+	var e mcp.Session
+	c.ok(t, "alice-tok", "request_session", map[string]any{"workspace": "scratch"}, &e)
+	if code := c.code(t, "alice-tok", "wipe_home", map[string]any{"session_id": e.ID, "_confirmed": true}); code != 1 {
+		t.Fatalf("wipe of a temporary workspace: %d", code)
+	}
+	if c.h.ctr(e.ID) == nil {
+		t.Fatal("temporary sandbox removed by a refused wipe")
+	}
+}
+
+// The refusal that triggers recovery is often a cancelled request, so the
+// restart must not reuse that context.
+func TestRestartPoliciesSurvivesCancelledRequest(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, true))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	unlock, stopped, err := c.h.g.mgr.lockHomeTracked(context.Background(), "bob", "default")
+	if err != nil || len(stopped) == 0 {
+		t.Fatalf("lock: stopped=%v err=%v", stopped, err)
+	}
+	unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.h.g.mgr.restartPolicies(ctx, "bob", stopped)
+	assertRunning(t, c, s.ID)
 }

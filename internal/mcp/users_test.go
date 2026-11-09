@@ -233,7 +233,7 @@ func TestManageUserRefusals(t *testing.T) {
 		{map[string]any{"action": "add_to_group", "username": "nobody", "group": "termiplus-users"}, "no user"},
 		{map[string]any{"action": "add_to_group", "username": "a/../b", "group": "termiplus-users"}, "invalid username"},
 		// carol is the only enabled admin; erin (disabled) does not count
-		{map[string]any{"action": "remove_from_group", "username": "carol", "group": "termiplus-admin"}, "last enabled member"},
+		{map[string]any{"action": "remove_from_group", "username": "carol", "group": "termiplus-admin"}, "last enabled admin"},
 	}
 	kc.member["g-admin"]["u-erin"] = true
 	for _, c := range cases {
@@ -290,5 +290,35 @@ func TestNewKeycloakDirectoryValidates(t *testing.T) {
 	}
 	if _, err := NewKeycloakDirectory("http://keycloak:8080", "termiplus", "c", ""); err == nil {
 		t.Error("empty secret accepted")
+	}
+}
+
+// With several admin groups, the guard counts admins across all of them:
+// emptying one admin group is fine while an enabled admin remains in another,
+// but not when the other admin is disabled or only in a subgroup.
+func TestManageUserLastAdminAcrossGroups(t *testing.T) {
+	s, kc := newUserAdminServer(t)
+	roles, err := NewRoleMap(nil, []string{"termiplus-admin", "termiplus-ops", "org/termiplus-ops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithRoles(roles)
+	kc.groups = append(kc.groups,
+		DirGroup{ID: "g-ops", Name: "termiplus-ops", Path: "/termiplus-ops"},
+		DirGroup{ID: "g-sub", Name: "termiplus-ops", Path: "/org/termiplus-ops"})
+	kc.member["g-ops"] = map[string]bool{"u-erin": true} // disabled
+	kc.member["g-sub"] = map[string]bool{"u-dave": true} // subgroup: not counted
+	remove := func() (string, bool) {
+		return toolText(t, consoleToolCall(t, s, "admin-tok", "manage_user", map[string]any{"action": "remove_from_group", "username": "carol", "group": "termiplus-admin", "_confirmed": true}))
+	}
+	if text, isErr := remove(); !isErr || !strings.Contains(text, "last enabled admin") {
+		t.Fatalf("only a disabled or subgroup admin left: want refusal, got %q", text)
+	}
+	kc.member["g-ops"]["u-dave"] = true
+	if text, isErr := remove(); isErr {
+		t.Fatalf("dave is an enabled admin via termiplus-ops: want removal, got %q", text)
+	}
+	if kc.member["g-admin"]["u-carol"] {
+		t.Fatal("carol should be out of termiplus-admin")
 	}
 }

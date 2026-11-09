@@ -21,6 +21,9 @@ concurrency:
 # The registry host comes from the repository variable REGISTRY, so no real
 # hostname is committed (AGENTS.md, Secrets).
 env:
+  # Clone depth for the checkout step: 0 = full history, N = shallow. The
+  # lint and test jobs need no history, so a shallow clone is enough here.
+  CLONE_DEPTH: "1"
   # Keep in step with .github/workflows/ci.yml (GO_VERSION, LINT_GO_VERSION).
   STATICCHECK_VERSION: "2026.2.1"
 
@@ -36,10 +39,13 @@ jobs:
         env:
           TOKEN: ${{ github.token }}
         run: |
+          depth=""
+          if [ "$CLONE_DEPTH" != "0" ]; then depth="--depth=$CLONE_DEPTH"; fi
           git config --global --add safe.directory "$PWD"
           git init -q .
+          # shellcheck disable=SC2086  # $depth is empty or one flag
           git -c http.extraHeader="Authorization: token $TOKEN" \
-            fetch -q --depth=1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+            fetch -q $depth "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
       - name: Install tools
         run: |
@@ -60,10 +66,13 @@ jobs:
         env:
           TOKEN: ${{ github.token }}
         run: |
+          depth=""
+          if [ "$CLONE_DEPTH" != "0" ]; then depth="--depth=$CLONE_DEPTH"; fi
           git config --global --add safe.directory "$PWD"
           git init -q .
+          # shellcheck disable=SC2086  # $depth is empty or one flag
           git -c http.extraHeader="Authorization: token $TOKEN" \
-            fetch -q --depth=1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+            fetch -q $depth "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
       - name: Install python3
         run: |

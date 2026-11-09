@@ -22,6 +22,12 @@ type HomeBackend interface {
 	// ResetSession recreates one of the user's sessions from a fresh
 	// container (a persistent one keeps its home).
 	ResetSession(ctx context.Context, p Principal, id string) (json.RawMessage, error)
+	// WipeHome is the factory reset of the persistent workspace behind
+	// session id: a mandatory snapshot of the home first (the wipe is
+	// refused when it fails), then the home is deleted and a fresh container
+	// starts on an empty one. The answer carries the new session and the
+	// snapshot taken.
+	WipeHome(ctx context.Context, p Principal, id string) (json.RawMessage, error)
 	// Snapshots runs action (list, create, restore, delete) on the snapshots
 	// of the home of a persistent workspace. Only a create with prune may
 	// delete the oldest snapshot to stay within the limit.
@@ -75,6 +81,14 @@ func (b *GatewayBackend) ResetSession(ctx context.Context, p Principal, id strin
 		return nil, err
 	}
 	return b.raw(ctx, false, http.MethodPost, "sessions/"+seg+"/reset", p.UserID)
+}
+
+func (b *GatewayBackend) WipeHome(ctx context.Context, p Principal, id string) (json.RawMessage, error) {
+	seg, err := pathSeg(id)
+	if err != nil {
+		return nil, err
+	}
+	return b.raw(ctx, true, http.MethodPost, "sessions/"+seg+"/wipe-home", p.UserID)
 }
 
 func (b *GatewayBackend) Snapshots(ctx context.Context, p Principal, workspace, action, id string, prune bool) (json.RawMessage, error) {
@@ -278,6 +292,7 @@ func (s *Server) homeTools() []tool {
 				if err := s.entitledSession(ctx, p, id); err != nil {
 					return nil, err
 				}
+				name := s.sessionName(ctx, p, id)
 				raw, err := hb.ResetSession(ctx, p, id)
 				if err != nil {
 					return nil, err
@@ -286,7 +301,46 @@ func (s *Server) homeTools() []tool {
 				if err := json.Unmarshal(raw, &out); err != nil {
 					return nil, errors.New("unexpected answer from the gateway")
 				}
-				return out, nil
+				return s.panelResult(ctx, p, "Restarted "+name+".", out)
+			},
+		},
+		{
+			name:        "wipe_home",
+			description: "Factory reset: permanently erase everything in /home/user of one of your persistent workspaces and start it again on an empty home. A snapshot of the home is taken first and the wipe is refused if that fails. Destructive: requires explicit human confirmation.",
+			inputSchema: `{"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":true}`,
+			destructive: true,
+			gate:        func(Principal, map[string]any) (bool, error) { return true, nil },
+			handle: func(ctx context.Context, p Principal, args map[string]any) (any, error) {
+				hb, err := s.homeBackend()
+				if err != nil {
+					return nil, err
+				}
+				id := argString(args, "session_id")
+				if err := s.entitledSession(ctx, p, id); err != nil {
+					return nil, err
+				}
+				name := s.sessionName(ctx, p, id)
+				raw, err := hb.WipeHome(ctx, p, id)
+				if err != nil {
+					// A refusal for a deployment setting (403) carries the
+					// gateway's own explanation; show it as is.
+					var ge *gatewayError
+					if errors.As(err, &ge) && ge.status == http.StatusForbidden {
+						return nil, errors.New(ge.detail)
+					}
+					return nil, err
+				}
+				var out struct {
+					Snapshot struct {
+						ID string `json:"id"`
+					} `json:"snapshot"`
+				}
+				extra := map[string]any{}
+				if err := json.Unmarshal(raw, &out); err != nil || out.Snapshot.ID == "" {
+					return nil, errors.New("unexpected answer from the gateway")
+				}
+				_ = json.Unmarshal(raw, &extra)
+				return s.panelResult(ctx, p, "Factory reset "+name+": the home is empty. Snapshot "+out.Snapshot.ID+" was saved first.", extra)
 			},
 		},
 		{
@@ -296,7 +350,13 @@ func (s *Server) homeTools() []tool {
 			destructive: true,
 			gate:        s.snapshotsGate,
 			confirmIf:   s.snapshotWouldPrune,
-			handle:      s.manageSnapshots,
+			handle: func(ctx context.Context, p Principal, args map[string]any) (any, error) {
+				out, err := s.manageSnapshots(ctx, p, args)
+				if err != nil || argString(args, "action") != "create" {
+					return out, err
+				}
+				return s.panelResult(ctx, p, "Backup created for "+argString(args, "workspace")+".", out)
+			},
 		},
 	}
 }

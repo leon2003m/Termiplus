@@ -1,0 +1,4 @@
+# Custom runner labels of the maintainer's Forgejo runner (.forgejo/workflows/).
+self-hosted-runner:
+  labels:
+    - docker

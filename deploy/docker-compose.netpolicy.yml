@@ -60,4 +60,4 @@ services:
     secrets: [admin_api_key]
 
 secrets:
-  admin_api_key: { file: ./secrets/admin_api_key }
+  admin_api_key: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/admin_api_key" }

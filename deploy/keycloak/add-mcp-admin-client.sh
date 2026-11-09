@@ -6,13 +6,34 @@
 #
 #   deploy/keycloak/add-mcp-admin-client.sh [keycloak container]
 #
-# Uses the bootstrap admin from deploy/secrets/keycloak.env and creates
-# deploy/secrets/mcp_kc_admin_client_secret if it is missing.
+# Uses the bootstrap admin from keycloak.env in the secrets directory
+# (TERMIPLUS_SECRETS_DIR from the environment or deploy/.env, default
+# deploy/secrets) and creates mcp_kc_admin_client_secret there if missing.
 set -euo pipefail
 
 DEPLOY="$(cd "$(dirname "$0")/.." && pwd)"
 CTR="${1:-termiplus-keycloak-1}"
-SECRET_FILE="$DEPLOY/secrets/mcp_kc_admin_client_secret"
+# Secrets directory: TERMIPLUS_SECRETS_DIR from the environment, else from
+# deploy/.env (as compose reads it), else deploy/secrets.
+SECRETS="${TERMIPLUS_SECRETS_DIR:-}"
+if [ -z "$SECRETS" ] && [ -f "$DEPLOY/.env" ]; then
+  SECRETS="$(sed -n 's/^TERMIPLUS_SECRETS_DIR=//p' "$DEPLOY/.env" | tail -n1)"
+  SECRETS="${SECRETS#\"}"; SECRETS="${SECRETS%\"}"
+  SECRETS="${SECRETS#\'}"; SECRETS="${SECRETS%\'}"
+  # Compose strips inline comments and expands variables; this parser does
+  # not, so refuse anything but a plain path rather than guess.
+  case "$SECRETS" in
+    *[[:space:]#\$]*)
+      echo "$(basename "$0"): TERMIPLUS_SECRETS_DIR in deploy/.env must be a plain absolute path (no comments, spaces or variables)" >&2
+      exit 1 ;;
+  esac
+fi
+SECRETS="${SECRETS:-$DEPLOY/secrets}"
+case "$SECRETS" in
+  /*) ;;
+  *) echo "$(basename "$0"): TERMIPLUS_SECRETS_DIR must be an absolute path" >&2; exit 1 ;;
+esac
+SECRET_FILE="$SECRETS/mcp_kc_admin_client_secret"
 CLIENT=termiplus-mcp-admin
 
 if [ ! -s "$SECRET_FILE" ]; then
@@ -20,10 +41,10 @@ if [ ! -s "$SECRET_FILE" ]; then
   echo "created  secrets/mcp_kc_admin_client_secret"
 fi
 chmod 0644 "$SECRET_FILE" # read by the MCP server (uid 65534)
-chmod 0700 "$(dirname "$SECRET_FILE")" # keeps other host users out of deploy/secrets
+chmod 0700 "$(dirname "$SECRET_FILE")" # keeps other host users out of the secrets directory
 
-admin_user="$(sed -n 's/^KC_BOOTSTRAP_ADMIN_USERNAME=//p' "$DEPLOY/secrets/keycloak.env")"
-admin_pw="$(sed -n 's/^KC_BOOTSTRAP_ADMIN_PASSWORD=//p' "$DEPLOY/secrets/keycloak.env")"
+admin_user="$(sed -n 's/^KC_BOOTSTRAP_ADMIN_USERNAME=//p' "$SECRETS/keycloak.env")"
+admin_pw="$(sed -n 's/^KC_BOOTSTRAP_ADMIN_PASSWORD=//p' "$SECRETS/keycloak.env")"
 kc() { docker exec -i "$CTR" /opt/keycloak/bin/kcadm.sh "$@"; }
 # kcadm reads the password from KC_CLI_PASSWORD, so it is never on a command line.
 KC_CLI_PASSWORD="$admin_pw" docker exec -i -e KC_CLI_PASSWORD "$CTR" /opt/keycloak/bin/kcadm.sh \

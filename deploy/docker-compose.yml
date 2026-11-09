@@ -65,6 +65,9 @@ services:
       GATEWAY_API_KEY_FILE: /run/secrets/gateway_api_key
       KEY_SECRET_FILE: /run/secrets/key_secret
       POLICIES_FILE: /etc/termiplus/policies.json
+      # Same opt-in as the sockproxy's: lets wipe_home (factory reset) refuse
+      # with a clear message when homes cannot be deleted. Grants nothing.
+      ALLOW_HOME_REMOVE: ${ALLOW_HOME_REMOVE:-}
       IDLE_TIMEOUT: 30m
       MAX_RUNNING: "50"
       # Exports (downloads, snapshots, archives) stop at EXPORT_MAX_BYTES, by
@@ -105,6 +108,6 @@ networks:
     name: ${OWUI_NETWORK:-owui}
 
 secrets:
-  proxy_token: { file: ./secrets/proxy_token }
-  gateway_api_key: { file: ./secrets/gateway_api_key }
-  key_secret: { file: ./secrets/key_secret }
+  proxy_token: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/proxy_token" }
+  gateway_api_key: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/gateway_api_key" }
+  key_secret: { file: "${TERMIPLUS_SECRETS_DIR:-./secrets}/key_secret" }

@@ -23,6 +23,12 @@ import (
 var (
 	errNoBackups     = errors.New("backups are not configured on this gateway (no BACKUP_DIR)")
 	errNotPersistent = errors.New("temporary workspaces have no home")
+	// errHomeRemoveOff: the factory reset needs the socket proxy to allow
+	// deleting a home volume, which is off unless ALLOW_HOME_REMOVE=1.
+	errHomeRemoveOff = errors.New("factory reset is disabled on this deployment (ALLOW_HOME_REMOVE is not set to 1); nothing was changed")
+	// errHomeRemoveDenied: the gateway believed the removal was allowed but the
+	// proxy refused it (the two ALLOW_HOME_REMOVE settings disagree).
+	errHomeRemoveDenied = errors.New("factory reset is disabled on this deployment (ALLOW_HOME_REMOVE): the socket proxy refused to delete the home; the home was not wiped and your workspaces were started again")
 )
 
 // homeNames returns the homes used by persistent policies, sorted.
@@ -85,6 +91,84 @@ func (g *Gateway) reset(ctx context.Context, userID, name string) (*sessionInfo,
 	}
 	s := g.mgr.withActivity(sessionInfo{ID: inst.name, Workspace: ws, Persistent: true, Running: true, TerminalPath: "/p/" + ws + "/"}, pol)
 	return &s, nil
+}
+
+// wipeHome is the factory reset: it takes a mandatory snapshot of the home of
+// the persistent workspace behind container name, then deletes the home volume
+// and starts a fresh container on a new, empty home. It fails closed: when the
+// snapshot cannot be taken (including backups not configured) nothing is
+// removed. Returns the new session and the snapshot taken.
+func (g *Gateway) wipeHome(ctx context.Context, userID, name string) (*sessionInfo, Backup, error) {
+	if !naming.IsManagedContainer(name) {
+		return nil, Backup{}, errNoSession
+	}
+	ct, err := g.mgr.docker.Inspect(ctx, name)
+	switch {
+	case errors.Is(err, dockerapi.ErrNotFound):
+		return nil, Backup{}, errNoSession
+	case err != nil:
+		return nil, Backup{}, err
+	case ct.Config.Labels[naming.LabelUser] != userID:
+		return nil, Backup{}, errNoSession
+	}
+	ws := ct.Config.Labels[naming.LabelPolicy]
+	home, err := g.workspaceHome(ws)
+	if err != nil {
+		return nil, Backup{}, err
+	}
+	pol := g.cfg.Policies[ws]
+	// Without ALLOW_HOME_REMOVE the proxy would refuse the volume removal only
+	// after the workspaces were stopped and a snapshot (using up one of the
+	// retention slots) was taken: refuse before any of that.
+	if !g.cfg.AllowHomeRemove {
+		return nil, Backup{}, errHomeRemoveOff
+	}
+	// Check what is known up front, before any workspace is stopped: a refused
+	// wipe must not cost the user their running sessions.
+	if g.backups == nil {
+		return nil, Backup{}, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", errNoBackups)
+	}
+	if _, err := g.mgr.ownedVolume(ctx, userID, home); err != nil {
+		return nil, Backup{}, err
+	}
+	if g.backups.wouldPrune(naming.Volume(userID, home)) {
+		return nil, Backup{}, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", errWouldPrune)
+	}
+	// The mandatory snapshot must be a CONSISTENT recovery point, since the
+	// home is about to be destroyed: a half-written export is worse than none.
+	// lockHome stops every container on the home and holds their locks across
+	// the export, so nothing writes while it is taken. Writes made after the
+	// snapshot are discarded by the wipe anyway, so releasing before removeHome
+	// (which re-locks) is safe and avoids re-entrant locking. If anything
+	// fails from here on, the workspaces that were running are started again.
+	unlock, stopped, err := g.mgr.lockHomeTracked(ctx, userID, home)
+	if err != nil {
+		g.mgr.restartPolicies(ctx, userID, stopped)
+		return nil, Backup{}, err
+	}
+	snap, serr := g.snapshot(ctx, userID, ws, false)
+	unlock()
+	if serr != nil {
+		g.mgr.restartPolicies(ctx, userID, stopped)
+		return nil, Backup{}, fmt.Errorf("home not wiped, the mandatory snapshot failed: %w", serr)
+	}
+	if err := g.mgr.removeHome(ctx, userID, home); err != nil {
+		g.mgr.restartPolicies(ctx, userID, stopped)
+		if errors.Is(err, dockerapi.ErrForbidden) {
+			// The proxy's setting differs from the gateway's. The snapshot
+			// taken above stays (it counts against the retention limit) and
+			// is returned so the caller can name it.
+			log.Printf("wipe home %q/%q: the socket proxy denied the volume removal (ALLOW_HOME_REMOVE differs between gateway and proxy); snapshot %q was kept: %q", userID, home, snap.ID, err)
+			return nil, snap, errHomeRemoveDenied
+		}
+		return nil, snap, err
+	}
+	inst, err := g.mgr.ensure(ctx, userID, "", ws, pol)
+	if err != nil {
+		return nil, snap, err
+	}
+	s := g.mgr.withActivity(sessionInfo{ID: inst.name, Workspace: ws, Persistent: true, Running: true, TerminalPath: "/p/" + ws + "/"}, pol)
+	return &s, snap, nil
 }
 
 func (g *Gateway) snapshot(ctx context.Context, userID, ws string, prune bool) (Backup, error) {

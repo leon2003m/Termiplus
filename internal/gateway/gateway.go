@@ -64,6 +64,11 @@ type Config struct {
 	BackupDir string
 	// SnapshotKeep is how many snapshots per home are kept (default 5).
 	SnapshotKeep int
+	// AllowHomeRemove mirrors the socket proxy's ALLOW_HOME_REMOVE=1. It does
+	// not grant anything (the proxy decides); it lets the factory reset
+	// (wipe_home) refuse up front with a clear error instead of stopping
+	// workspaces and taking a snapshot before the proxy denies the removal.
+	AllowHomeRemove bool
 
 	// ExportTimeout bounds one home export (download, backup). Default 2h.
 	ExportTimeout time.Duration
@@ -76,6 +81,10 @@ type Config struct {
 	// (default 4); further ones wait, within their deadline. One active or
 	// queued export per user is allowed; overlapping requests return 429.
 	ExportConcurrency int
+	// ExportIdleTimeout aborts a home export when no bytes reach the client
+	// for this long, so a stalled reader releases the helper lock and slot
+	// well before ExportTimeout. Default 1m; <=0 disables the idle bound.
+	ExportIdleTimeout time.Duration
 
 	// AddrFor maps a container name to host:port. Defaults to Docker DNS on
 	// the sandbox network. Tests override it.
@@ -179,6 +188,15 @@ func New(cfg Config) (*Gateway, error) {
 		if p.MaxPerUser < 0 {
 			return nil, fmt.Errorf("policy %s: max_per_user must be positive", name)
 		}
+		if p.Locale != "" && !localeRe.MatchString(p.Locale) {
+			return nil, fmt.Errorf("policy %s: locale must look like de_DE.UTF-8", name)
+		}
+		if p.Keyboard != "" && !keyboardRe.MatchString(p.Keyboard) {
+			return nil, fmt.Errorf("policy %s: keyboard must be a layout like de", name)
+		}
+		if (p.Keyboard != "" || p.Record) && !p.Desktop {
+			return nil, fmt.Errorf("policy %s: keyboard and record need desktop", name)
+		}
 		cfg.Policies[name] = p
 	}
 	if cfg.ExportTimeout <= 0 {
@@ -189,6 +207,9 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	if cfg.ExportConcurrency <= 0 {
 		cfg.ExportConcurrency = 4
+	}
+	if cfg.ExportIdleTimeout == 0 {
+		cfg.ExportIdleTimeout = time.Minute
 	}
 	if cfg.AddrFor == nil {
 		cfg.AddrFor = func(name string, port int) string { return net.JoinHostPort(name, strconv.Itoa(port)) }
@@ -208,6 +229,7 @@ func New(cfg Config) (*Gateway, error) {
 		offlineNetwork: cfg.OfflineNetwork,
 		exportLimits: exportLimits{
 			timeout:  cfg.ExportTimeout,
+			idle:     cfg.ExportIdleTimeout,
 			maxBytes: cfg.ExportMaxBytes,
 			slots:    make(chan struct{}, cfg.ExportConcurrency),
 		},

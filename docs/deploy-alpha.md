@@ -1,6 +1,6 @@
 # Deploying Termiplus
 
-Release **1.0.0** includes the MCP control plane, native desktop workspaces and
+Release **1.1.0** includes the MCP control plane, native desktop workspaces and
 management console on top of the hardened terminal stack. These components
 are enabled through Compose overlays. This guide and `setup-alpha.sh` retain
 their historical filenames for compatibility; they also apply to the stable
@@ -14,7 +14,15 @@ release. Follow the security guidance in the repository README.
 
 ## 1. Prepare (once)
 
+Keep the secrets outside the source checkout, in the deployment's own
+directory, for example `/opt/docker/termiplus/secrets`. Every compose file
+reads them from `TERMIPLUS_SECRETS_DIR` (absolute path, stored in
+`deploy/.env` by the script); without it they land in `deploy/secrets/`, which
+only suits tests and quick trials.
+
 ```sh
+sudo install -d -o "$USER" -m 0700 /opt/docker/termiplus/secrets
+TERMIPLUS_SECRETS_DIR=/opt/docker/termiplus/secrets \
 WEBUI_URL=https://chat.example.com \
 KEYCLOAK_PUBLIC_URL=https://sso.example.com \
 DESKTOP_PUBLIC_URL=https://desk.example.com \
@@ -23,7 +31,19 @@ deploy/setup-alpha.sh
 sudo chown -R 65534:65534 deploy/mcp-data deploy/backups
 ```
 
-`setup-alpha.sh` creates every missing secret under `deploy/secrets/` (it
+**Existing deployment with secrets in `deploy/secrets/`:** copy them over
+*before* switching, otherwise the script generates new ones (new API keys,
+new Keycloak client and database passwords) that no longer match the running
+stack and its stored data:
+
+```sh
+sudo install -d -o "$USER" -m 0700 /opt/docker/termiplus/secrets
+cp -a deploy/secrets/. /opt/docker/termiplus/secrets/
+```
+
+Keep the old directory until the stack has come up cleanly on the new path.
+
+`setup-alpha.sh` creates every missing secret in that directory (it
 never overwrites one), renders the Keycloak realm (clients `owui`,
 `termiplus-mcp`, `termiplus-desktop`; groups `termiplus-users`,
 `termiplus-persist`, `termiplus-admin`), writes `deploy/.env` and prints the
@@ -53,8 +73,8 @@ For the published amd64 desktop, set the following in `deploy/.env` after
 running setup:
 
 ```dotenv
-TERMIPLUS_VERSION=1.0.0
-TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.0.0
+TERMIPLUS_VERSION=1.1.0
+TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0
 ```
 
 Prefer digest references from the release assets when pinning deployed images.
@@ -191,6 +211,15 @@ suspected key disclosure and follow [the security policy](../SECURITY.md#workspa
 Set the environment printed by `setup-alpha.sh` (OIDC client `owui`,
 `OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true` so existing accounts keep their id and
 terminal homes, `OAUTH_SESSION_TOKEN_ENCRYPTION_KEY`) and restart Open WebUI.
+Two more settings are needed:
+
+- `OAUTH_CODE_CHALLENGE_METHOD=S256`. The shipped Keycloak client `owui`
+  requires PKCE with S256; without this variable Open WebUI sends no challenge
+  method and sign-in fails with `Missing parameter: code_challenge_method`.
+- `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60` (seconds). Open WebUI's default
+  of 10 s can expire while a workspace starts cold, so the first tool call
+  after a start would fail.
+
 Install `integrations/openwebui/termiplus_workspaces.py` as a tool and set its
 valves `mcp_url`, `plugin_key` and `ui_url` (see its README).
 

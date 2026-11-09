@@ -157,12 +157,21 @@ func (m *manager) exportHome(ctx context.Context, userID, home string, w io.Writ
 			return err
 		}
 		defer rc.Close()
+		// A client that reads slowly or stops reading would otherwise hold the
+		// helper lock, an export slot and the per-user flag until the absolute
+		// ExportTimeout (2h). Bound the stall with an idle deadline: each write
+		// must make progress within lim.idle (security audit run 4).
+		dst := w
 		if dw, ok := w.(deadlineWriter); ok {
-			if d, ok := ctx.Deadline(); ok {
-				_ = dw.SetWriteDeadline(d)
+			absD, hasAbs := ctx.Deadline()
+			if hasAbs {
+				_ = dw.SetWriteDeadline(absD)
+			}
+			if lim.idle > 0 {
+				dst = &idleDeadlineWriter{w: w, dw: dw, idle: lim.idle, max: absD, hasMax: hasAbs}
 			}
 		}
-		return copyHomeArchive(w, rc, lim.maxBytes)
+		return copyHomeArchive(dst, rc, lim.maxBytes)
 	})
 }
 
@@ -229,6 +238,7 @@ func (w *archiveLimitWriter) Write(p []byte) (int, error) {
 // ExportConcurrency).
 type exportLimits struct {
 	timeout  time.Duration
+	idle     time.Duration
 	maxBytes int64
 	slots    chan struct{}
 	mu       sync.Mutex
@@ -243,6 +253,27 @@ type deadlineWriter interface {
 	SetWriteDeadline(time.Time) error
 }
 
+// idleDeadlineWriter moves the destination's write deadline to now+idle
+// before every write (never past the absolute deadline), so a client that
+// stalls loses the helper lock and export slot after idle rather than only
+// at the overall ExportTimeout. A blocked write fails with os.ErrDeadline.
+type idleDeadlineWriter struct {
+	w      io.Writer
+	dw     deadlineWriter
+	idle   time.Duration
+	max    time.Time
+	hasMax bool
+}
+
+func (iw *idleDeadlineWriter) Write(p []byte) (int, error) {
+	d := time.Now().Add(iw.idle)
+	if iw.hasMax && d.After(iw.max) {
+		d = iw.max
+	}
+	_ = iw.dw.SetWriteDeadline(d)
+	return iw.w.Write(p)
+}
+
 // errExportTooLarge: the home's tar is larger than the export cap, usually
 // because of sparse files, which the home quota barely charges.
 var errExportTooLarge = errors.New("the home is larger than the export limit")
@@ -253,8 +284,18 @@ var errExportBusy = errors.New("a home export for this user is already in progre
 // none of them is started while the home is rewritten, and stops the running
 // ones. The returned function releases the locks.
 func (m *manager) lockHome(ctx context.Context, userID, home string) (func(), error) {
+	unlock, _, err := m.lockHomeTracked(ctx, userID, home)
+	return unlock, err
+}
+
+// lockHomeTracked is lockHome that also reports the policies whose container
+// it stopped because it was running, so a caller that then refuses its
+// operation can start them again (restartPolicies). On error the locks are
+// already released, and the policies stopped so far are still returned.
+func (m *manager) lockHomeTracked(ctx context.Context, userID, home string) (func(), []string, error) {
 	pols := m.policiesForHome(home)
 	var held []func()
+	var stopped []string
 	unlock := func() {
 		for i := len(held) - 1; i >= 0; i-- {
 			held[i]()
@@ -268,12 +309,33 @@ func (m *manager) lockHome(ctx context.Context, userID, home string) (func(), er
 		m.mu.Lock()
 		delete(m.instances, name)
 		m.mu.Unlock()
+		if ct, err := m.docker.Inspect(ctx, name); err == nil && ct.State.Running {
+			stopped = append(stopped, p)
+		}
 		if err := m.docker.Stop(ctx, name, 10); err != nil && !errors.Is(err, dockerapi.ErrNotFound) {
 			unlock()
-			return nil, fmt.Errorf("stop %s: %w", name, err)
+			return nil, stopped, fmt.Errorf("stop %s: %w", name, err)
 		}
 	}
-	return unlock, nil
+	return unlock, stopped, nil
+}
+
+// restartPolicies starts the persistent workspaces of the user again after an
+// operation that stopped them was refused. Best effort: failures are logged.
+// The caller must not hold the locks.
+func (m *manager) restartPolicies(ctx context.Context, userID string, policies []string) {
+	if len(policies) == 0 {
+		return
+	}
+	// Recovery must outlive a cancelled request: the refusal is often caused
+	// by exactly that cancellation.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	for _, p := range policies {
+		if _, err := m.ensure(ctx, userID, "", p, m.policies[p]); err != nil {
+			log.Printf("restart %q/%q after a refused home operation: %q", userID, p, err)
+		}
+	}
 }
 
 // importHome extracts a tar written by exportHome into the user's home,

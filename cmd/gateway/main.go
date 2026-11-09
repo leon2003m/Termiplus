@@ -77,8 +77,11 @@ func main() {
 		OfflineNetwork: config.Get("OFFLINE_NETWORK", ""),
 		BackupDir:      config.Get("BACKUP_DIR", ""),
 		SnapshotKeep:   config.SmallInt("SNAPSHOT_KEEP", 5, 0, 10000),
+		// Same variable as the socket proxy reads; here it only selects the clear error for wipe_home.
+		AllowHomeRemove: config.Get("ALLOW_HOME_REMOVE", "") == "1",
 		// Upper bound for one home export (download or backup).
 		ExportTimeout:     config.Duration("EXPORT_TIMEOUT", 2*time.Hour),
+		ExportIdleTimeout: config.Duration("EXPORT_IDLE_TIMEOUT", time.Minute),
 		ExportMaxBytes:    exportMaxBytes(),
 		ExportConcurrency: config.SmallInt("EXPORT_CONCURRENCY", 4, 0, 1024),
 	})

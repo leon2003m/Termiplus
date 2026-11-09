@@ -1,9 +1,9 @@
 # Per-user terminal image. Plain Debian plus the Open Terminal server.
 # Runs under gVisor (runsc) or Sysbox, so sudo inside is root only inside
 # the sandbox, not on the host.
-# The base is pinned to a release tag; Dependabot proposes updates. Pin to a
-# digest (debian:trixie-slim@sha256:...) for fully reproducible builds.
-ARG BASE=debian:trixie-slim
+# The base is pinned to a tag and digest; Updatecli refreshes the digest
+# (updatecli.d/docker-images.yaml).
+ARG BASE=debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 FROM ${BASE}
 
 ARG OPEN_TERMINAL_VERSION=0.16.0
@@ -27,6 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip python3-dev \
         nodejs npm \
         sqlite3 ripgrep fd-find rsync bc pipx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Office work for models (docs/agents.md): documents, spreadsheets, OCR and
+# search, so the common tasks need neither root nor apt.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pandoc poppler-utils libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
+        python3-openpyxl python3-docx python3-pil \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu \
+        recollcmd locales-all \
     && rm -rf /var/lib/apt/lists/*
 
 # Open Terminal (MIT) in its own venv, outside the user's PATH so the model's
@@ -54,6 +63,15 @@ COPY start /usr/local/libexec/termiplus/start
 COPY start-docker /usr/local/bin/start-docker
 COPY apt-docker.conf /etc/apt/apt.conf.d/90termiplus-docker
 RUN chmod 0755 /usr/local/libexec/termiplus/bash /usr/local/libexec/termiplus/start /usr/local/bin/start-docker
+
+# Agent setup: the workspace manifest (~/AGENTS.md, which Open WebUI reads into
+# every chat), skills for Open Terminal's /skills and tp-status.
+COPY agent/agent-setup /usr/local/libexec/termiplus/agent-setup
+COPY agent/bin/ /usr/local/bin/
+COPY agent/skills/ /usr/share/termiplus/skills/
+RUN chmod 0755 /usr/local/libexec/termiplus/agent-setup /usr/local/bin/tp-status \
+    && mkdir -p /etc/termiplus \
+    && chmod -R a+rX /usr/share/termiplus
 
 USER 1000:1000
 WORKDIR /home/user

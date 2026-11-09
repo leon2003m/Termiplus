@@ -28,6 +28,7 @@ failed() { echo "FAIL: $*"; FAILED+=("$*"); }
 
 cleanup() {
   log "cleanup"
+  if [ -n "${WATCH_PID:-}" ]; then kill "$WATCH_PID" >/dev/null 2>&1 || true; fi
   docker rm -f tp-it-client >/dev/null 2>&1 || true
   docker compose -p "$PROJECT" -f "$WORK/deploy/docker-compose.yml" -f "$WORK/deploy/it.override.yml" down -v >/dev/null 2>&1 || true
   mapfile -t ctrs < <(docker ps -aq --filter label=termiplus.managed=true)
@@ -122,9 +123,19 @@ for svc in gateway sockproxy; do
   fi
 done
 
+WATCH_PID=""
 if [ "${SKIP_FIREWALL:-0}" != 1 ]; then
   log "apply firewall"
   sudo "$ROOT/deploy/firewall.sh"
+  # The sandbox bridge runs enable_icc:false; firewall.sh re-permits gateway->
+  # terminal only by pinning the gateway MAC and locking each terminal's bridge
+  # port. The terminals below are created later, by checks.py, on new bridge
+  # ports this one-shot apply never saw, so without a re-apply they stay locked
+  # with no traffic and every request to them returns 502. In production the
+  # termiplus-firewall-watch timer re-pins within ~20s of any change; mirror it
+  # here with a background re-apply for the duration of the checks.
+  ( while :; do sleep 8; sudo "$ROOT/deploy/firewall.sh" >/dev/null 2>&1 || true; done ) &
+  WATCH_PID=$!
 fi
 
 log "start test client (plays the Open WebUI backend)"

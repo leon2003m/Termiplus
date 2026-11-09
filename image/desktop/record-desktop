@@ -1,0 +1,35 @@
+#!/bin/sh
+# Records the desktop display to ~/recordings (policy "record"): 2 fps, one
+# .mkv per hour, files older than two days deleted. Started by the desktop
+# session script (startxfce4 wrapper) and a child of that session, so it ends
+# with the display; it also stops when the display socket disappears or ffmpeg
+# keeps failing. It never matters to the workspace: failures only end recording.
+set -u
+dir="$HOME/recordings"
+display="${DISPLAY:-}"
+case "$display" in
+  :[0-9]*) ;;
+  *) exit 0 ;;
+esac
+sock="/tmp/.X11-unix/X${display#:}"
+# Only ever write inside the home: refuse a recordings path that is a link.
+if [ -L "$dir" ]; then
+  echo "record-desktop: $dir is a symlink, not recording" >&2
+  exit 0
+fi
+mkdir -p "$dir" || exit 0
+fails=0
+while [ -e "$sock" ] && [ "$fails" -lt 5 ]; do
+  # -P: never follow links while pruning.
+  find -P "$dir" -maxdepth 1 -type f -name 'rec-*.mkv' -mtime +2 -delete 2>/dev/null
+  start=$(date +%s)
+  ffmpeg -nostdin -loglevel error -f x11grab -framerate 2 -i "$display" \
+    -c:v libx264 -preset ultrafast -crf 30 -pix_fmt yuv420p -t 3600 \
+    "$dir/rec-$(date +%Y%m%d-%H%M%S).mkv" || true
+  if [ $(($(date +%s) - start)) -lt 30 ]; then
+    fails=$((fails + 1))
+    sleep 5
+  else
+    fails=0
+  fi
+done

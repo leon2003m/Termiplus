@@ -20,11 +20,12 @@ proxy. Neither model arguments nor share tokens choose another user's container.
 | `reset_workspace` | Recreate a persistent container while keeping `/home/user`, or remove a temporary sandbox; confirmation required |
 | `manage_snapshots` | **List/create only.** At capacity creation fails; it cannot delete/prune/restore an older backup |
 | `share_desktop` | List, create or revoke the caller's expiring view-only screen links; creation needs confirmation |
+| `open_workspaces` | Read-only overview that opens the workspace panel in MCP Apps hosts (see below) |
 
 The Open WebUI plugin also offers `open_console`, which returns a human console
 link. It does not run an administrative operation.
 The [complete supported tool inventory](tool-support.md) distinguishes these
-seven MCP tools plus one plugin-only link from the 23 native Open Terminal tools.
+seven plugin MCP tools, the `open_workspaces` panel entry and one plugin-only link from the 23 native Open Terminal tools.
 
 **Network policy, entitlements, users, groups, audit queries and departed-user
 management are not model tools.** The MCP transport rejects direct calls even
@@ -37,6 +38,35 @@ The plugin's confirmation modal protects against accidental destructive calls
 in normal chat use. It is not cryptographic proof of human consent for a client
 holding an MCP credential; server-side allowlists independently enforce the
 administration and snapshot restrictions above.
+
+## Workspace panel (MCP App)
+
+Hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
+(`io.modelcontextprotocol/ui`, Open WebUI 0.13+) get one model-visible entry
+tool, `open_workspaces`. It is read-only and returns the caller's entitled
+workspaces, sessions, home backups (list) and active screen links, rendered as
+an inline panel from the `ui://termiplus/workspaces` resource. The panel is a
+single embedded HTML file with no remote scripts, styles, frames or network
+access (empty CSP domain lists); it renders data as text only and opens backup
+downloads only as `http(s)` links through the host.
+
+The panel's buttons call the existing tools (`reset_workspace`,
+`destroy_session`, `manage_snapshots` create, `share_desktop`) through the host.
+Those tools are listed with `_meta.ui.visibility: ["app"]`, so an MCP Apps host
+hides them from the model. The panel never calls `request_session`; opening it
+starts nothing. Destructive buttons need a second click in the panel, and the
+host asks the user before every app tool call.
+
+Visibility is a host convention, not authorization. The server enforces the same
+allowlist, RBAC, entitlement and `_confirmed` rules for every caller, so the
+Open WebUI plugin keeps working unchanged and a forged call gains nothing.
+Snapshot restore/delete, pruning and administration stay in the human console.
+
+A native Open WebUI MCP connection (Streamable HTTP) goes through the same
+`oauth2-proxy` as the plugin: authentication **OAuth** (the user's SSO token)
+and Headers `{"X-Termiplus-Owui-Key": "<shared key>", "X-Termiplus-Owui-User":
+"{{USER_ID}}"}`, so `ProxyHeaderAuthenticator` links the same Open WebUI id.
+Verify the panel in your Open WebUI version before retiring the plugin.
 
 ## Working together in the native Desktop
 
@@ -124,6 +154,26 @@ and `STREAM_PUBLIC_URL`. The last two names are retained for configuration
 compatibility but now serve **only `/share/`**. The console and share origin
 must differ. The optional `docker-compose.mcp-netpolicy.yml` grants the human
 console its network-policy backend; it does not expose a model tool.
+
+**Screen-sharing kill-switch.** `MCP_SHARES=off` (case-insensitive; default and
+any other value: enabled) removes all desktop screen sharing from the MCP
+process. `share_desktop` is not registered (tools/list omits it, a call is an
+unknown tool), no `ShareStore` is opened, the `/ui/api/shares` console routes
+return 404, the panel hides "Share screen", and the `STREAM_LISTEN_ADDR` handler
+and listener are never constructed (a set `STREAM_LISTEN_ADDR` is ignored with a
+warning). A latent bug in share code is then unreachable. For a binary without
+the `/share` handler, build with `go build -tags noshare ./cmd/mcp`; sharing is
+then permanently off.
+
+**Factory reset opt-in.** `wipe_home` (and the panel's "Reset (wipe home)")
+deletes the home volume, which the socket proxy allows only with
+`ALLOW_HOME_REMOVE=1` (off by default). Set it once in `deploy/.env`; compose
+passes it to the sockproxy, the gateway and the MCP server. With it off the
+gateway refuses the call before it stops a workspace or takes the mandatory
+snapshot ("factory reset is disabled on this deployment (ALLOW_HOME_REMOVE)"),
+and the panel does not offer the action. If the proxy and the gateway disagree
+the same error is returned, the workspaces are started again and the snapshot
+taken before the refusal is kept.
 `docker-compose.mcp-users.yml` supplies the directory service account.
 
 `MCP_AUTH=dev` and the stub backend are for local tests only. Production proxy
@@ -131,6 +181,27 @@ mode requires the plugin key, durable identity bindings and an entitlement file.
 Keep MCP listeners private to their oauth2-proxies. Never expose trusted identity
 headers directly to browsers. The append-only audit log records changes through
 the dispatcher; direct gateway admin calls appear in the gateway log instead.
+
+**Your own group or role names.** `MCP_PERSIST_ROLES` and `MCP_ADMIN_ROLES`
+(comma-separated) name the groups that grant the `termiplus-persist` and
+`termiplus-admin` roles, e.g. `MCP_PERSIST_ROLES=ki-nutzer` and
+`MCP_ADMIN_ROLES=ki-admin`. A user has the role when any of their groups is
+listed; `termiplus-persist` / `termiplus-admin` then only count if you list
+them too. An unset variable keeps the default name for that role. When either
+variable is set, every forwarded group name is normalised first, for these
+roles and for workspace entitlements: one leading `role:` (oauth2-proxy's
+`keycloak-oidc` provider adds it to realm roles) and then one leading `/`
+(Keycloak's "Full group path") are stripped, so `ki-nutzer`, `/ki-nutzer` and
+`role:ki-nutzer` are the same. Subgroups are not flattened: `/org/ki-nutzer`
+stays `org/ki-nutzer` and matches only if listed as such. With neither variable
+set, names are matched exactly as forwarded. The startup log prints the mapping
+in use (`roles: ...`). `manage_user` and `manage_group` still only manage
+top-level `termiplus-*` groups; members of your own groups are managed in your
+directory.
+`manage_user` refuses to remove someone from an admin group when no other
+enabled user would remain in any top-level admin group, so an obsolete admin
+group can be emptied while admins remain elsewhere. Admins only in a subgroup
+do not count there.
 
 ## Migration from the alpha checkpoint
 
