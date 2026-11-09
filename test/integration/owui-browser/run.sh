@@ -40,8 +40,8 @@ EDGE=tp-owui-edge
 OWUI=tp-owui
 STUB=tp-owui-stub
 OWUI_TOOL_TIMEOUT="${OWUI_TOOL_TIMEOUT:-60}"
-# The shipped realm requires PKCE S256 but the documented Open WebUI settings do
-# not set OAUTH_CODE_CHALLENGE_METHOD (finding); the harness sets it unless OWUI_PKCE is empty.
+# The shipped realm requires PKCE S256 (documented in deploy/setup-alpha.sh); set
+# OWUI_PKCE= (empty) to leave OAUTH_CODE_CHALLENGE_METHOD out and see sign-in fail.
 OWUI_PKCE="${OWUI_PKCE-1}"
 WORK="$STATE/work"
 
@@ -314,10 +314,11 @@ do_op() {
       fi
       compose restart >/dev/null
       start_owui ;;
-    home-remove) # on|off: the sockproxy's opt-in ALLOW_HOME_REMOVE (wipe_home, departed users)
+    home-remove) # on|off: the opt-in ALLOW_HOME_REMOVE for sockproxy, gateway and mcp (wipe_home, departed users)
       if grep -q '^ALLOW_HOME_REMOVE=' "$WORK/deploy/.env"; then sed -i "s/^ALLOW_HOME_REMOVE=.*/ALLOW_HOME_REMOVE=$([ "$1" = on ] && echo 1)/" "$WORK/deploy/.env"
       else echo "ALLOW_HOME_REMOVE=$([ "$1" = on ] && echo 1)" >>"$WORK/deploy/.env"; fi
-      compose up -d --no-build --force-recreate --wait --wait-timeout 120 sockproxy >/dev/null ;;
+      # The gateway and the MCP server read the same variable (clear refusal, panel).
+      compose up -d --no-build --force-recreate --wait --wait-timeout 180 sockproxy gateway mcp >/dev/null ;;
     policies) # file: replace policies.json and restart the gateway
       cp "$1" "$WORK/deploy/policies.json"; compose restart gateway >/dev/null ;;
     *) echo "unknown op $op" >&2; exit 2 ;;

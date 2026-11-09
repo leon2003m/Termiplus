@@ -322,47 +322,88 @@ def panel_frame(page):
     return f
 
 
-@check("03_wipe_home", "wipe_home from the panel: abort keeps data, confirm wipes with a pre-snapshot")
-def wipe_home(c):
+def count_snaps(alice):
+    code, sn = L.mcp("alice", alice, "manage_snapshots", {"action": "list", "workspace": "default"})
+    return len(sn.get("snapshots", [])) if isinstance(sn, dict) else -1
+
+
+def default_workspace(alice):
+    """(session_id, container name, 'id started-at') of alice's running persistent default workspace."""
+    code, res = L.mcp("alice", alice, "list_sessions")
+    sid = next((x.get("session_id") for x in as_list(res, "sessions") if x.get("workspace") == "default" and x.get("persistent")), None)
+    pc = [x for x in L.containers_of(alice) if x["policy"] == "default"]
+    ident = L.sh("docker inspect -f '{{.Id}} {{.State.StartedAt}} {{.State.Running}}' %s" % pc[0]["name"])[1].strip() if pc else ""
+    return sid, ident
+
+
+def panel_wipe_button(page):
+    return panel_frame(page).get_by_role("button", name=re.compile(r"reset \(wipe home\)", re.I))
+
+
+@check("03a_wipe_home_default", "wipe_home with the shipped default (ALLOW_HOME_REMOVE off): not offered, refused up front, nothing changes")
+def wipe_home_default(c):
     alice = uid("alice")
     out = L.run_in(alice, "default", "mkdir -p ~/e2e && echo precious > ~/e2e/keep.txt && cat ~/e2e/keep.txt")
     c.ok("test data written into alice's persistent home", "precious" in out, out[:200])
-    code, snaps0 = L.mcp("alice", alice, "manage_snapshots", {"action": "list", "workspace": "default"})
-    n0 = len((snaps0 or {}).get("snapshots", [])) if isinstance(snaps0, dict) else -1
+    n0 = count_snaps(alice)
+    sid, ident0 = default_workspace(alice)
+    c.ok("alice has a running persistent default workspace", bool(sid) and ident0.endswith("true"), "%s %s" % (sid, ident0))
     page, txt, _ = chat("alice", "@@call open_workspaces {}")
     f = panel_frame(page)
-    btn = f.get_by_role("button", name=re.compile(r"reset \(wipe home\)", re.I))
-    btn.wait_for(timeout=20000)
-    L.shot(page, "03_panel_with_session")
-    # (a) arm, never confirm: the arm times out after 5 s
-    btn.click()
-    page.wait_for_timeout(500)
-    c.ok("first click arms the button instead of acting", "Confirm" in btn.inner_text(), btn.inner_text())
-    page.wait_for_timeout(6500)
-    c.ok("an unconfirmed arm disarms itself", "Reset (wipe home)" in btn.inner_text(), btn.inner_text())
+    f.get_by_role("button", name=re.compile(r"^restart$", re.I)).first.wait_for(timeout=20000)
+    L.shot(page, "03a_panel_default")
+    c.ok("the panel does not offer 'Reset (wipe home)'", panel_wipe_button(page).count() == 0, f.locator("body").inner_text()[:300])
+    page.close()
+    for attempt in (1, 2):
+        code, res = L.mcp("alice", alice, "wipe_home", {"session_id": sid, "_confirmed": True})
+        c.ok("a direct wipe_home call #%d gets the clear error" % attempt,
+             code == "tool-error" and "factory reset is disabled" in str(res) and "ALLOW_HOME_REMOVE" in str(res) and "unavailable" not in str(res),
+             "%s %s" % (code, str(res)[:300]))
+    c.ok("no snapshot was added by the refused attempts", count_snaps(alice) == n0, "%s -> %s" % (n0, count_snaps(alice)))
+    sid1, ident1 = default_workspace(alice)
+    c.ok("no container was stopped or replaced (same id, same start time, still running)", ident1 == ident0, "%s -> %s" % (ident0, ident1))
     out = L.run_in(alice, "default", "cat ~/e2e/keep.txt")
-    c.ok("abort #1 (armed, not confirmed): data intact", "precious" in out, out[:200])
-    # (b) arm, confirm in the panel, cancel in the host's dialog
-    btn.click(); btn.click()
-    page.wait_for_timeout(1500)
-    L.shot(page, "03_host_dialog")
-    dialog_txt = page.locator("body").inner_text()
-    cancelled = False
-    for name in ("Cancel", "Deny", "Decline", "No", "Reject"):
-        loc = page.get_by_role("button", name=re.compile("^%s$" % name, re.I))
-        if loc.count():
-            loc.first.click(); cancelled = True; c.note("host dialog answered with %s" % name); break
-    c.ok("the host asks before running the app tool call (dialog with a cancel button)", cancelled, dialog_txt[-300:])
-    page.wait_for_timeout(2000)
-    out = L.run_in(alice, "default", "cat ~/e2e/keep.txt")
-    c.ok("abort #2 (host dialog cancelled): data intact", "precious" in out, out[:200])
-    code, snaps1 = L.mcp("alice", alice, "manage_snapshots", {"action": "list", "workspace": "default"})
-    n1 = len((snaps1 or {}).get("snapshots", [])) if isinstance(snaps1, dict) else -1
-    c.ok("no snapshot was taken by the aborts", n1 == n0, "%s -> %s" % (n0, n1))
-    # (c) confirm everywhere, with the shipped defaults (ALLOW_HOME_REMOVE off), then opted in.
-    def confirm_wipe(page, label):
+    c.ok("the home is intact", "precious" in out, out[:200])
+
+
+@check("03b_wipe_home_optin", "wipe_home with ALLOW_HOME_REMOVE=1: panel offers it, abort keeps data, confirm wipes with a pre-snapshot")
+def wipe_home_optin(c):
+    alice = uid("alice")
+    L.op("home-remove", "on")
+    try:
+        L.run_in(alice, "default", "mkdir -p ~/e2e && echo precious > ~/e2e/keep.txt && cat ~/e2e/keep.txt")
+        n0 = count_snaps(alice)
+        page, txt, _ = chat("alice", "@@call open_workspaces {}")
         f = panel_frame(page)
-        btn = f.get_by_role("button", name=re.compile(r"reset \(wipe home\)", re.I))
+        btn = panel_wipe_button(page)
+        btn.wait_for(timeout=20000)
+        c.ok("with the opt-in the panel offers 'Reset (wipe home)'", btn.count() == 1)
+        L.shot(page, "03b_panel_with_session")
+        # (a) arm, never confirm: the arm times out after 5 s
+        btn.click()
+        page.wait_for_timeout(500)
+        c.ok("first click arms the button instead of acting", "Confirm" in btn.inner_text(), btn.inner_text())
+        page.wait_for_timeout(6500)
+        c.ok("an unconfirmed arm disarms itself", "Reset (wipe home)" in btn.inner_text(), btn.inner_text())
+        out = L.run_in(alice, "default", "cat ~/e2e/keep.txt")
+        c.ok("abort #1 (armed, not confirmed): data intact", "precious" in out, out[:200])
+        # (b) arm, confirm in the panel, cancel in the host's dialog
+        btn.click(); btn.click()
+        page.wait_for_timeout(1500)
+        L.shot(page, "03b_host_dialog")
+        dialog_txt = page.locator("body").inner_text()
+        cancelled = False
+        for name in ("Cancel", "Deny", "Decline", "No", "Reject"):
+            loc = page.get_by_role("button", name=re.compile("^%s$" % name, re.I))
+            if loc.count():
+                loc.first.click(); cancelled = True; c.note("host dialog answered with %s" % name); break
+        c.ok("the host asks before running the app tool call (dialog with a cancel button)", cancelled, dialog_txt[-300:])
+        page.wait_for_timeout(2000)
+        out = L.run_in(alice, "default", "cat ~/e2e/keep.txt")
+        c.ok("abort #2 (host dialog cancelled): data intact", "precious" in out, out[:200])
+        n1 = count_snaps(alice)
+        c.ok("no snapshot was taken by the aborts", n1 == n0, "%s -> %s" % (n0, n1))
+        # (c) confirm everywhere
         btn.click(); btn.click()
         page.wait_for_timeout(1500)
         for name in ("Confirm", "Allow", "Run", "Yes", "OK", "Continue", "Approve"):
@@ -370,32 +411,12 @@ def wipe_home(c):
             if loc.count():
                 loc.first.click(); break
         page.wait_for_timeout(15000)
-        L.shot(page, "03_after_wipe_" + label)
-        return f.locator("#status").inner_text()
-
-    def home_state():
-        return L.run_in(alice, "default", "ls ~/e2e/keep.txt 2>&1; echo rc=$?")
-
-    code, sn = L.mcp("alice", alice, "manage_snapshots", {"action": "list", "workspace": "default"})
-    nA = len(sn.get("snapshots", [])) if isinstance(sn, dict) else -1
-    status_txt = confirm_wipe(page, "shipped")
-    out = home_state()
-    c.ok("confirmed wipe with the shipped defaults: the home is wiped", "No such file" in out,
-         "panel said %r; gateway: %s; home: %s" % (status_txt, [l for l in L.gw_log("3m").splitlines() if "volumes" in l][-1:], out[:100]))
-    code, sn = L.mcp("alice", alice, "manage_snapshots", {"action": "list", "workspace": "default"})
-    nB = len(sn.get("snapshots", [])) if isinstance(sn, dict) else -1
-    c.note("snapshots after the shipped-defaults attempt: %s -> %s; the panel's own message was: %r" % (nA, nB, status_txt))
-    page.close()
-    L.op("home-remove", "on")
-    try:
-        page, txt, _ = chat("alice", "@@call open_workspaces {}")
-        L.run_in(alice, "default", "mkdir -p ~/e2e && echo precious > ~/e2e/keep.txt")
-        status_txt = confirm_wipe(page, "optin")
-        out = home_state()
+        L.shot(page, "03b_after_wipe")
+        status_txt = f.locator("#status").inner_text()
+        out = L.run_in(alice, "default", "ls ~/e2e/keep.txt 2>&1; echo rc=$?")
         c.ok("with ALLOW_HOME_REMOVE=1 the confirmed wipe removes the data", "No such file" in out, "panel said %r; home: %s" % (status_txt, out[:100]))
-        code, sn = L.mcp("alice", alice, "manage_snapshots", {"action": "list", "workspace": "default"})
-        nC = len(sn.get("snapshots", [])) if isinstance(sn, dict) else -1
-        c.ok("a pre-wipe snapshot was taken first", nC == nB + 1, "%s -> %s" % (nB, nC))
+        n2 = count_snaps(alice)
+        c.ok("a pre-wipe snapshot was taken first", n2 == n1 + 1, "%s -> %s" % (n1, n2))
         page.close()
     finally:
         L.op("home-remove", "off")
@@ -749,7 +770,7 @@ def mcp_transport(c):
     import http.client as hc
     tok = L.kc_token("alice")
     ids = uid("alice")
-    bad, n, kinds = 0, 300, {}
+    bad, n, kinds = 0, 3000, {}
     for i in range(n):
         try:
             con = hc.HTTPConnection("mcp-auth", 4180, timeout=30)
@@ -759,11 +780,11 @@ def mcp_transport(c):
             body = r.read()
             json.loads(body)
             if i == 0:
-                c.note("resources/read: HTTP %s, %s bytes, Transfer-Encoding=%s" % (r.status, len(body), r.getheader("Transfer-Encoding")))
+                c.note("resources/read: HTTP %s, %s bytes, Content-Length=%s, Transfer-Encoding=%s" % (r.status, len(body), r.getheader("Content-Length"), r.getheader("Transfer-Encoding")))
         except Exception as e:
             bad += 1
             kinds[type(e).__name__] = kinds.get(type(e).__name__, 0) + 1
-    c.ok("%d sequential resources/read calls (16 KB, chunked) through mcp-auth all arrive complete" % n, bad == 0,
+    c.ok("%d sequential resources/read calls (16 KB) through mcp-auth all arrive complete" % n, bad == 0,
          "%d of %d truncated %s; the proxy logs 'ReverseProxy read error during body copy: use of closed network connection'" % (bad, n, kinds))
 
 
