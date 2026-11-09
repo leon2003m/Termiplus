@@ -4,39 +4,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
-### Changed
-
-- Console: the network policy is edited as a form (DNS entries, internal
-  network access with a protocol select, add and remove rows, inline checks)
-  instead of raw JSON. The request body and the server-side validation are
-  unchanged. The MCP App panel now says in the Home backups section that
-  backups are restored in the console and offers an "Open console" button
-  (`console_url` in the panel state, absent when no console base URL is set).
-- `deploy/setup-alpha.sh` and `docs/deploy-alpha.md` now list
-  `OAUTH_CODE_CHALLENGE_METHOD=S256` (the shipped Keycloak client `owui`
-  requires PKCE S256; sign-in otherwise fails with `Missing parameter:
-  code_challenge_method`) and `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60`
-  (Open WebUI's default 10 s can expire while a workspace starts cold) among
-  the Open WebUI settings.
-
-### Fixed
-
-- Factory reset (`wipe_home`) with the shipped default (`ALLOW_HOME_REMOVE` off):
-  the gateway now refuses up front, before stopping workspaces and before the
-  mandatory snapshot, with "factory reset is disabled on this deployment
-  (ALLOW_HOME_REMOVE)" (control API 403, shown as is by the MCP tool). Before,
-  each attempt stopped the workspaces, used up a snapshot retention slot and
-  ended in `terminal unavailable`. The setting reaches the gateway and the MCP
-  server through compose (`ALLOW_HOME_REMOVE`); the panel no longer offers
-  "Reset (wipe home)" when it is off (`home_remove` in the panel state). If the
-  gateway and the socket proxy disagree, the user gets the same clear error,
-  the workspaces are started again and the snapshot already taken is kept. The
-  socket proxy's default and rules are unchanged.
-- MCP responses (and the console API's) are sent with a `Content-Length`
-  instead of chunked. Behind oauth2-proxy roughly 0.3 to 2 percent of large
-  (about 16 KB) `resources/read` answers arrived truncated.
-
-## [1.1.0] - 2026-11-08
+## [1.1.0] - 2026-11-09
 
 Adds the MCP App workspace panel, agent tooling in the workspace images, a
 factory reset for homes and secrets outside the checkout, plus firewall and
@@ -90,15 +58,40 @@ resource-bound fixes.
 
 ### Changed
 
+- Console: the network policy is edited as a form (DNS entries, internal
+  network access with a protocol select, add and remove rows, inline checks)
+  instead of raw JSON. The request body and the server-side validation are
+  unchanged. The MCP App panel now says in the Home backups section that
+  backups are restored in the console and offers an "Open console" button
+  (`console_url` in the panel state, absent when no console base URL is set).
+- `deploy/setup-alpha.sh` and `docs/deploy-alpha.md` now list
+  `OAUTH_CODE_CHALLENGE_METHOD=S256` (the shipped Keycloak client `owui`
+  requires PKCE S256; sign-in otherwise fails with `Missing parameter:
+  code_challenge_method`) and `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60`
+  (Open WebUI's default 10 s can expire while a workspace starts cold) among
+  the Open WebUI settings.
 - MCP: with several `MCP_ADMIN_ROLES` groups, `manage_user` counts enabled
   admins across all top-level admin groups before refusing to empty one;
   at least one other enabled top-level admin must still remain.
 - Workspace panel actions return the refreshed state in one round-trip.
 - Dependency updates use Updatecli instead of Dependabot (maintainer tooling,
   no runtime effect).
-
 ### Fixed
 
+- Factory reset (`wipe_home`) with the shipped default (`ALLOW_HOME_REMOVE` off):
+  the gateway now refuses up front, before stopping workspaces and before the
+  mandatory snapshot, with "factory reset is disabled on this deployment
+  (ALLOW_HOME_REMOVE)" (control API 403, shown as is by the MCP tool). Before,
+  each attempt stopped the workspaces, used up a snapshot retention slot and
+  ended in `terminal unavailable`. The setting reaches the gateway and the MCP
+  server through compose (`ALLOW_HOME_REMOVE`); the panel no longer offers
+  "Reset (wipe home)" when it is off (`home_remove` in the panel state). If the
+  gateway and the socket proxy disagree, the user gets the same clear error,
+  the workspaces are started again and the snapshot already taken is kept. The
+  socket proxy's default and rules are unchanged.
+- MCP responses (and the console API's) are sent with a `Content-Length`
+  instead of chunked. Behind oauth2-proxy roughly 0.3 to 2 percent of large
+  (about 16 KB) `resources/read` answers arrived truncated.
 - Integration test (`test/integration/run.sh`): the sandbox bridge runs with
   `enable_icc:false`, so `firewall.sh` must re-pin the gateway and lock each new
   terminal's bridge port. The one-shot apply ran before any workspace existed,
