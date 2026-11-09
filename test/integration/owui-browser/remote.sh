@@ -15,7 +15,7 @@ DIR="${VM_DIR:-owui-e2e}"
 $VM_SSH "rm -rf $DIR/repo && mkdir -p $DIR/repo"
 tar -C "$ROOT" --exclude=.git --exclude=.claude --exclude=node_modules -czf - . | $VM_SSH "tar -xzf - -C $DIR/repo"
 rc=0
-$VM_SSH "cd $DIR/repo && sudo RUNTIME=${RUNTIME:-sysbox-runc} OWUI_E2E_STATE=/var/tmp/owui-e2e bash test/integration/owui-browser/run.sh ${*:-all}" || rc=$?
+$VM_SSH "cd $DIR/repo && sudo RUNTIME=${RUNTIME:-sysbox-runc} BUILD=${BUILD:-0} OWUI_E2E_STATE=/var/tmp/owui-e2e bash test/integration/owui-browser/run.sh ${*:-all}" || rc=$?
 mkdir -p "$LOCAL_OUT"
 $VM_SSH "sudo tar -C /var/tmp/owui-e2e/artifacts -czf - ." | tar -xzf - -C "$LOCAL_OUT" || true
 exit "$rc"
