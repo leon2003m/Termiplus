@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -500,8 +501,23 @@ func (s *Server) findTool(name string) *tool {
 }
 
 func (s *Server) write(w http.ResponseWriter, resp *rpcResponse) {
+	b, err := json.Marshal(resp)
+	if err != nil {
+		b = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"marshal response"}}`)
+	}
+	writeBody(w, http.StatusOK, b)
+}
+
+// writeBody sends a complete JSON body with a Content-Length. Streaming a
+// large body leaves it chunked, and a reverse proxy in front (oauth2-proxy)
+// was seen to truncate such responses now and then; a known length lets the
+// client detect a short body and keeps the proxy from re-framing it.
+func writeBody(w http.ResponseWriter, status int, b []byte) {
+	b = append(b, '\n')
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	w.WriteHeader(status)
+	_, _ = w.Write(b)
 }
 
 func bearer(r *http.Request) string {

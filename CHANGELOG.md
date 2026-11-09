@@ -17,6 +17,9 @@ All notable changes to this project are documented here. The format is based on 
   gateway and the socket proxy disagree, the user gets the same clear error,
   the workspaces are started again and the snapshot already taken is kept. The
   socket proxy's default and rules are unchanged.
+- MCP responses (and the console API's) are sent with a `Content-Length`
+  instead of chunked. Behind oauth2-proxy roughly 0.3 to 2 percent of large
+  (about 16 KB) `resources/read` answers arrived truncated.
 
 ## [1.1.0] - 2026-11-08
 
