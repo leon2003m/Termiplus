@@ -61,3 +61,18 @@ dialog .error { color: var(--danger); }
 li.session-card { display: grid; gap: 10px; }
 .session-heading { display: grid; gap: 4px; }
 .session-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.np-group { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 12px; margin: 8px 0; min-width: 0; }
+.np-group legend { font-weight: 600; padding: 0 6px; }
+.np-rows { display: grid; gap: 10px; }
+.np-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.np-field { display: grid; gap: 2px; min-width: 0; font-size: 13px; color: var(--muted); }
+.np-field input, .np-field select { width: 100%; font: inherit; color: var(--fg); padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.np-field input[aria-invalid="true"], .np-field select[aria-invalid="true"] { border-color: var(--danger); }
+.np-msg { color: var(--danger); font-size: 12px; min-height: 0; }
+.np-msg:empty { display: none; }
+.np-row > button { justify-self: start; align-self: end; }
+.np-empty { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+.np-empty[hidden] { display: none; }
+.np-error { color: var(--danger); font-size: 13px; margin: 4px 0; }
+.np-error:empty { display: none; }
