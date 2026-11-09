@@ -38,9 +38,10 @@ button:disabled{opacity:.5;cursor:default}
 <div id="newshare"></div>
 <h2>Sessions</h2><div id="sessions"></div>
 <h2>Home backups</h2><div id="backups"></div>
+<div id="restore-hint" class="note"></div>
 <section id="shares-section"><h2>Screen-share links</h2><div id="shares"></div></section>
 <h2>Workspaces you can use</h2><div id="workspaces"></div>
-<p class="note">Commands, files, Desktop and Browser run in the chat's native terminal connection. Restoring or deleting a backup, and all administration, stay in the termiplus console.</p>
+<p class="note">Commands, files, Desktop and Browser run in the chat's native terminal connection. All administration stays in the termiplus console.</p>
 <script>
 "use strict";
 // MCP Apps guest. Talks only to the embedding host (window.parent) over
@@ -222,6 +223,11 @@ button:disabled{opacity:.5;cursor:default}
       }
       return r;
     }, "No persistent homes in use.");
+
+    // Restoring is deliberately not a chat tool: point to the console.
+    var hint = document.getElementById("restore-hint"); hint.textContent = "";
+    hint.appendChild(document.createTextNode("To restore or delete a backup, open the termiplus console. "));
+    var con = linkButton("Open console", state.console_url); if (con) hint.appendChild(con);
 
     document.getElementById("shares-section").hidden = state.sharing === false;
     list("shares", state.shares, function (sh) {
