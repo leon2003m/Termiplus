@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- `deploy/setup-alpha.sh` and `docs/deploy-alpha.md` now list
+  `OAUTH_CODE_CHALLENGE_METHOD=S256` (the shipped Keycloak client `owui`
+  requires PKCE S256; sign-in otherwise fails with `Missing parameter:
+  code_challenge_method`) and `AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60`
+  (Open WebUI's default 10 s can expire while a workspace starts cold) among
+  the Open WebUI settings.
+
+### Fixed
+
+- Factory reset (`wipe_home`) with the shipped default (`ALLOW_HOME_REMOVE` off):
+  the gateway now refuses up front, before stopping workspaces and before the
+  mandatory snapshot, with "factory reset is disabled on this deployment
+  (ALLOW_HOME_REMOVE)" (control API 403, shown as is by the MCP tool). Before,
+  each attempt stopped the workspaces, used up a snapshot retention slot and
+  ended in `terminal unavailable`. The setting reaches the gateway and the MCP
+  server through compose (`ALLOW_HOME_REMOVE`); the panel no longer offers
+  "Reset (wipe home)" when it is off (`home_remove` in the panel state). If the
+  gateway and the socket proxy disagree, the user gets the same clear error,
+  the workspaces are started again and the snapshot already taken is kept. The
+  socket proxy's default and rules are unchanged.
+- MCP responses (and the console API's) are sent with a `Content-Length`
+  instead of chunked. Behind oauth2-proxy roughly 0.3 to 2 percent of large
+  (about 16 KB) `resources/read` answers arrived truncated.
+
 ## [1.1.0] - 2026-11-08
 
 Adds the MCP App workspace panel, agent tooling in the workspace images, a

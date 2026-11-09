@@ -121,6 +121,7 @@ type fakeDocker struct {
 	ctrs    map[string]*fakeCtr          // by name
 	volumes map[string]map[string]string // name -> labels
 	creates int
+	stops   int // container stop requests received
 	addrs   map[string]string
 	seen    []string                     // raw create bodies received from the proxy
 	image   string                       // ID testImage currently points to; "" = no such image
@@ -324,6 +325,7 @@ func (d *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case len(parts) == 2 && parts[1] == "stop":
+			d.stops++
 			if c.running {
 				c.srv.Close()
 				c.running = false

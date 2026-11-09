@@ -195,6 +195,12 @@ Next steps
      ENABLE_OAUTH_SIGNUP=true
      OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
      OAUTH_SESSION_TOKEN_ENCRYPTION_KEY=<$SECRETS/owui_oauth_session_key>
+     OAUTH_CODE_CHALLENGE_METHOD=S256
+     AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA=60
+   OAUTH_CODE_CHALLENGE_METHOD=S256 is required: the owui client demands PKCE
+   S256, and without it sign-in fails with "Missing parameter:
+   code_challenge_method". The timeout is in seconds: Open WebUI's default of
+   10 can expire while a workspace starts cold.
 5. Open WebUI tool (integrations/openwebui/termiplus_workspaces.py), valves:
      mcp_url    = http://mcp-auth:4180/
      plugin_key = <$SECRETS/mcp_owui_plugin_key>

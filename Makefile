@@ -38,11 +38,11 @@ cover: ## Tests with coverage report
 	go tool cover -func=coverage.out | tail -1
 
 lint: fmt-check vet staticcheck ## Go linters
-	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh test/mcp-app/run.sh image/start image/start-docker image/agent/agent-setup image/agent/bin/tp-status image/desktop/record-desktop image/desktop/files/usr/local/bin/startxfce4
+	shellcheck deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh deploy/dns-forwarder/entrypoint.sh test/integration/*.sh test/integration/oidc/*.sh test/integration/owui-browser/*.sh test/mcp-app/run.sh image/start image/start-docker image/agent/agent-setup image/agent/bin/tp-status image/desktop/record-desktop image/desktop/files/usr/local/bin/startxfce4
 	hadolint Dockerfile image/Dockerfile deploy/dns-forwarder/Dockerfile image/desktop/Dockerfile
 	actionlint .github/workflows/*.yml .forgejo/workflows/*.yml
 	@# Scripts that hosts and tests run directly must stay executable in git.
-	@for f in deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh test/integration/*.sh test/integration/oidc/*.sh .github/scripts/*.sh; do \
+	@for f in deploy/firewall.sh deploy/setup-alpha.sh deploy/keycloak/add-mcp-admin-client.sh test/integration/*.sh test/integration/oidc/*.sh test/integration/owui-browser/*.sh .github/scripts/*.sh; do \
 	  git ls-files -s "$$f" | grep -q '^100755' || { echo "$$f is not executable in git (git update-index --chmod=+x $$f)"; exit 1; }; \
 	done
 	@# map/AGENTS.md and map/routing.md are generated from map/CLAUDE.md (make map).

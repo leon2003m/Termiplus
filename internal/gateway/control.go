@@ -184,6 +184,10 @@ func (g *Gateway) serveControl(w http.ResponseWriter, r *http.Request) bool {
 			httpError(w, http.StatusNotFound, "no such session")
 		case errors.Is(err, errNotPersistent), errors.Is(err, errUnknownWorkspace):
 			httpError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, errHomeRemoveOff):
+			httpError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, errHomeRemoveDenied):
+			httpError(w, http.StatusForbidden, fmt.Sprintf("%s (snapshot %s was taken first and is kept)", err.Error(), snap.ID))
 		case errors.Is(err, errNoBackups), errors.Is(err, errNoHome):
 			httpError(w, http.StatusConflict, "home not wiped: "+err.Error())
 		case err != nil:

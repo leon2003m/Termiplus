@@ -16,6 +16,25 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ErrForbidden is what a 403 from the socket proxy matches (errors.Is): the
+// proxy's allowlist refused the call. The error text is unchanged.
+var ErrForbidden = errors.New("forbidden by the socket proxy")
+
+// statusError is a Docker API (or proxy) answer with status >= 300.
+type statusError struct {
+	method, path string
+	status       int
+	body         string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("docker %s %s: %d %s", e.method, e.path, e.status, e.body)
+}
+
+func (e *statusError) Is(target error) bool {
+	return target == ErrForbidden && e.status == http.StatusForbidden
+}
+
 type Client struct {
 	Base  string // e.g. http://sockproxy:2375
 	Token string
@@ -90,7 +109,7 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, in, 
 	case resp.StatusCode == http.StatusNotModified: // already started / stopped
 		return nil
 	case resp.StatusCode >= 300:
-		return fmt.Errorf("docker %s %s: %d %s", method, path, resp.StatusCode, bytes.TrimSpace(data))
+		return &statusError{method: method, path: path, status: resp.StatusCode, body: string(bytes.TrimSpace(data))}
 	}
 	if out != nil && len(data) > 0 {
 		return json.Unmarshal(data, out)

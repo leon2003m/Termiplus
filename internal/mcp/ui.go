@@ -293,9 +293,11 @@ func nonNil(s []string) []string {
 }
 
 func uiJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		status, b = http.StatusInternalServerError, []byte(`{"error":"internal error"}`)
+	}
+	writeBody(w, status, b)
 }
 
 func uiError(w http.ResponseWriter, status int, msg string) {

@@ -191,7 +191,7 @@ button:disabled{opacity:.5;cursor:default}
       if (s.persistent) r.appendChild(action("Restart", function () { return call("reset_workspace", { session_id: s.session_id, _confirmed: true }); }, true));
       // Factory reset wipes /home; only a persistent workspace has one. A
       // snapshot is always taken first (the server refuses the wipe otherwise).
-      if (s.persistent) r.appendChild(dangerAction("Reset (wipe home)", function () { return call("wipe_home", { session_id: s.session_id, _confirmed: true }); }));
+      if (s.persistent && state.home_remove !== false) r.appendChild(dangerAction("Reset (wipe home)", function () { return call("wipe_home", { session_id: s.session_id, _confirmed: true }); }));
       if (s.desktop && state.sharing !== false) r.appendChild(action("Share screen (1 h)", function () {
         return call("share_desktop", { action: "create", session_id: s.session_id, minutes: 60, _confirmed: true });
       }, true));

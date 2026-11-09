@@ -32,6 +32,7 @@ func withBackups(t *testing.T, keep int, allowRemove bool) func(*harnessOpts) {
 			c.ControlKey = testControlKey
 			c.BackupDir = dir
 			c.SnapshotKeep = keep
+			c.AllowHomeRemove = allowRemove
 		}
 		o.rules = func(r *sockproxy.Rules) { r.AllowHomeRemove = allowRemove }
 	}
@@ -589,12 +590,95 @@ func TestMCPWipeHome(t *testing.T) {
 	}
 }
 
+func wipeErrText(t *testing.T, c *mcpChain, id string) string {
+	t.Helper()
+	out := c.call(t, "bob-tok", "wipe_home", map[string]any{"session_id": id, "_confirmed": true})
+	if out.Error != nil || !out.Result.IsError {
+		t.Fatalf("wipe must fail with a tool error: %+v", out)
+	}
+	return out.Result.Content[0].Text
+}
+
+func snapshotCount(t *testing.T, c *mcpChain) int {
+	t.Helper()
+	var list struct {
+		Snapshots []json.RawMessage `json:"snapshots"`
+	}
+	c.ok(t, "bob-tok", "manage_snapshots", map[string]any{"action": "list", "workspace": "default"}, &list)
+	return len(list.Snapshots)
+}
+
+// Without ALLOW_HOME_REMOVE the factory reset is refused before anything is
+// stopped or snapshotted, with a message that names the setting.
+func TestMCPWipeHomeDisabledRefusesUpFront(t *testing.T) {
+	c := newHomesChain(t, withBackups(t, 3, false))
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+	firstID := c.h.ctr(s.ID).id
+	stops := c.h.docker.stops
+
+	msg := wipeErrText(t, c, s.ID)
+	if !strings.Contains(msg, "factory reset is disabled") || !strings.Contains(msg, "ALLOW_HOME_REMOVE") || strings.Contains(msg, "terminal unavailable") {
+		t.Fatalf("unclear refusal: %q", msg)
+	}
+	if n := snapshotCount(t, c); n != 0 {
+		t.Fatalf("a refused wipe took %d snapshot(s)", n)
+	}
+	if c.h.docker.stops != stops || c.h.ctr(s.ID).id != firstID {
+		t.Fatal("a refused wipe stopped or replaced the workspace")
+	}
+	assertRunning(t, c, s.ID)
+	if c.files(vol)["precious.txt"] != "1" {
+		t.Fatal("home changed")
+	}
+	// Repeated attempts must not use up retention slots either.
+	_ = wipeErrText(t, c, s.ID)
+	if n := snapshotCount(t, c); n != 0 {
+		t.Fatalf("snapshots after a second refusal: %d", n)
+	}
+}
+
+// The gateway believes the reset is allowed but the proxy refuses the volume
+// removal: the user gets the same clear error, the workspace is running again
+// and the snapshot already taken is kept and named.
+func TestMCPWipeHomeProxyMismatch(t *testing.T) {
+	opt := withBackups(t, 3, false)
+	base := opt
+	opt = func(o *harnessOpts) {
+		base(o)
+		prev := o.gateway
+		o.gateway = func(c *Config) { prev(c); c.AllowHomeRemove = true }
+	}
+	c := newHomesChain(t, opt)
+	var s mcp.Session
+	c.ok(t, "bob-tok", "request_session", map[string]any{"workspace": "default", "persistent": true, "_confirmed": true}, &s)
+	vol := naming.Volume("bob", "default")
+	c.setFiles(vol, map[string]string{"precious.txt": "1"})
+
+	msg := wipeErrText(t, c, s.ID)
+	if !strings.Contains(msg, "factory reset is disabled") || !strings.Contains(msg, "ALLOW_HOME_REMOVE") || !strings.Contains(msg, "snapshot") || strings.Contains(msg, "terminal unavailable") {
+		t.Fatalf("unclear refusal: %q", msg)
+	}
+	if n := snapshotCount(t, c); n != 1 {
+		t.Fatalf("the snapshot taken before the refusal should be kept: %d", n)
+	}
+	c.h.docker.mu.Lock()
+	_, haveVol := c.h.docker.volumes[vol]
+	c.h.docker.mu.Unlock()
+	if !haveVol || c.files(vol)["precious.txt"] != "1" {
+		t.Fatal("home lost although the proxy refused the removal")
+	}
+	assertRunning(t, c, s.ID)
+}
+
 // The wipe must never run without its snapshot: with backups unconfigured, or
 // a snapshot that cannot be taken, nothing is removed.
 func TestMCPWipeHomeFailsClosed(t *testing.T) {
 	cases := map[string]func(*harnessOpts){
 		"no backups": func(o *harnessOpts) {
-			o.gateway = func(c *Config) { c.ControlKey = testControlKey }
+			o.gateway = func(c *Config) { c.ControlKey = testControlKey; c.AllowHomeRemove = true }
 			o.rules = func(r *sockproxy.Rules) { r.AllowHomeRemove = true }
 		},
 		"snapshot limit reached": nil,

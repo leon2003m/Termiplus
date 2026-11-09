@@ -64,6 +64,11 @@ type Config struct {
 	BackupDir string
 	// SnapshotKeep is how many snapshots per home are kept (default 5).
 	SnapshotKeep int
+	// AllowHomeRemove mirrors the socket proxy's ALLOW_HOME_REMOVE=1. It does
+	// not grant anything (the proxy decides); it lets the factory reset
+	// (wipe_home) refuse up front with a clear error instead of stopping
+	// workspaces and taking a snapshot before the proxy denies the removal.
+	AllowHomeRemove bool
 
 	// ExportTimeout bounds one home export (download, backup). Default 2h.
 	ExportTimeout time.Duration
