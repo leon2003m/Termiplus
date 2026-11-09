@@ -44,6 +44,26 @@ func TestResponsesCarryContentLength(t *testing.T) {
 	}
 }
 
+type orderWriter struct {
+	http.ResponseWriter
+	events []string
+}
+
+func (o *orderWriter) Flush() { o.events = append(o.events, "flush") }
+func (o *orderWriter) Write(b []byte) (int, error) {
+	o.events = append(o.events, "write")
+	return len(b), nil
+}
+
+// The headers leave before the body, in their own TCP write (see writeBody).
+func TestWriteBodyFlushesHeadersFirst(t *testing.T) {
+	o := &orderWriter{ResponseWriter: httptest.NewRecorder()}
+	writeBody(o, http.StatusOK, []byte(`{}`))
+	if len(o.events) != 2 || o.events[0] != "flush" || o.events[1] != "write" {
+		t.Fatalf("events = %v, want [flush write]", o.events)
+	}
+}
+
 // The console API (also behind an oauth2-proxy) is written the same way.
 func TestUIJSONCarriesContentLength(t *testing.T) {
 	w := httptest.NewRecorder()
