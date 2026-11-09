@@ -639,7 +639,7 @@ def policies(c):
 def firewall(c):
     alice = uid("alice")
     page, txt, img = chat("alice", run_cmd_script(
-        "echo PUBLIC=$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://example.com); "
+        "echo PUBLIC=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' https://example.com 2>&1); "
         "echo OWUI=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://open-webui:8080/health); "
         "echo STUB=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://stub:9000/); "
         "echo GATEWAYIP=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://172.30.0.2:8080/health); "
@@ -648,11 +648,11 @@ def firewall(c):
         terminal="Desktop", tools=False, shot="12_firewall")
     out = term_out(txt)
     m = dict(re.findall(r"(\w+)=(\d+)", out))
-    c.ok("allow: a public destination is reachable from the workspace", m.get("PUBLIC", "000") not in ("000",), out[:300])
+    c.ok("allow: a public destination is reachable from the workspace", m.get("PUBLIC", "000") not in ("000",), out[-400:])
     for name in ("OWUI", "STUB", "KEYCLOAK"):
-        c.ok("deny: %s on the Open WebUI network is unreachable (000)" % name, m.get(name) == "000", out[:300])
-    c.ok("deny: the sandbox bridge's host address is unreachable", m.get("HOSTBR") == "000", out[:300])
-    c.ok("deny: the gateway's sandbox address does not serve the workspace", m.get("GATEWAYIP") in ("000", "401", "403"), out[:300])
+        c.ok("deny: %s on the Open WebUI network is unreachable (000)" % name, m.get(name) == "000", out[-400:])
+    c.ok("deny: the sandbox bridge's host address is unreachable", m.get("HOSTBR") == "000", out[-400:])
+    c.ok("deny: the gateway's sandbox address does not serve the workspace", m.get("GATEWAYIP") in ("000", "401", "403"), out[-400:])
     page.close()
 
 
