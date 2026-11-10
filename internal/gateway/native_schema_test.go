@@ -1,10 +1,15 @@
 package gateway
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDesktopDescriptionsPreserveNativeContract(t *testing.T) {
@@ -29,7 +34,7 @@ func TestDesktopDescriptionsPreserveNativeContract(t *testing.T) {
 }
 
 func TestDesktopDescriptionsPassThroughOtherBodies(t *testing.T) {
-	for _, original := range []string{`{"detail":"not a schema"}`, `not JSON`, strings.Repeat("x", (2<<20)+10)} {
+	for _, original := range []string{`{"detail":"not a schema"}`, `not JSON`, strings.Repeat("x", schemaLimit+10)} {
 		r := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(original))}
 		if err := describeDesktopActions(r); err != nil {
 			t.Fatal(err)
@@ -39,5 +44,89 @@ func TestDesktopDescriptionsPassThroughOtherBodies(t *testing.T) {
 		if string(body) != original {
 			t.Fatal("unrelated or oversized response changed")
 		}
+	}
+}
+
+func schemaResponse(ctx context.Context, body string) *http.Response {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://x/openapi.json", nil)
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Request: req, Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func TestSchemaLimitBoundary(t *testing.T) {
+	decoded := 0
+	schemaDecodeHook = func() { decoded++ }
+	defer func() { schemaDecodeHook = nil }()
+	pad := func(n int) string { // valid JSON of exactly n bytes
+		prefix, suffix := `{"a":"`, `"}`
+		return prefix + strings.Repeat("x", n-len(prefix)-len(suffix)) + suffix
+	}
+	over := pad(schemaLimit + 1)
+	r := schemaResponse(context.Background(), over)
+	if err := describeDesktopActions(r); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(r.Body)
+	if string(got) != over || decoded != 0 {
+		t.Fatalf("oversized body altered or decoded (%d)", decoded)
+	}
+	r = schemaResponse(context.Background(), pad(schemaLimit))
+	if err := describeDesktopActions(r); err != nil {
+		t.Fatal(err)
+	}
+	if decoded != 1 {
+		t.Fatalf("body at the limit not decoded (%d)", decoded)
+	}
+}
+
+func TestSchemaDecodeIsSerialized(t *testing.T) {
+	var running, peak, total atomic.Int32
+	schemaDecodeHook = func() {
+		n := running.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		total.Add(1)
+		time.Sleep(2 * time.Millisecond)
+		running.Add(-1)
+	}
+	defer func() { schemaDecodeHook = nil }()
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := describeDesktopActions(schemaResponse(context.Background(), `{"a":1}`)); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if total.Load() != 40 || peak.Load() != 1 {
+		t.Fatalf("decodes=%d peak concurrency=%d", total.Load(), peak.Load())
+	}
+}
+
+func TestSchemaWaiterHonoursCancellation(t *testing.T) {
+	schemaSlot <- struct{}{}
+	defer func() { <-schemaSlot }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- describeDesktopActions(schemaResponse(ctx, `{"a":1}`)) }()
+	select {
+	case err := <-done:
+		t.Fatalf("returned while slot was held: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not return after cancel")
 	}
 }

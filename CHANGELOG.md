@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Security
+
+- A workspace can no longer exhaust the shared gateway's memory by serving an oversized or pathological `/openapi.json`: the schema is annotated only up to 512 KiB, one at a time, and larger responses pass through unchanged.
+
 ## [1.1.0] - 2026-11-09
 
 Adds the MCP App workspace panel, agent tooling in the workspace images, a

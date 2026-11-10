@@ -2,12 +2,26 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 )
+
+// schemaLimit bounds the schema body that is decoded. Open Terminal 0.16.0
+// (image/Dockerfile OPEN_TERMINAL_VERSION) serves a schema of about 24 KiB
+// (40 KiB pretty-printed), measured from the terminal image on 2026-11-10;
+// the desktop operations add a few KiB. 512 KiB keeps a margin of over 10x.
+// Larger bodies pass through unmodified.
+const schemaLimit = 512 << 10
+
+// schemaSlot admits one decode/re-encode at a time across the gateway.
+var schemaSlot = make(chan struct{}, 1)
+
+// schemaDecodeHook, when set by tests, runs while the slot is held.
+var schemaDecodeHook func()
 
 // describeDesktopActions fills upstream's missing conditional field descriptions.
 // The endpoint, payload and validation stay native; models otherwise confuse
@@ -19,17 +33,34 @@ func describeDesktopActions(response *http.Response) error {
 	if response.StatusCode != http.StatusOK || (response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != "identity") {
 		return nil
 	}
-	const limit = 2 << 20
-	body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, schemaLimit+1))
 	if err != nil {
 		return fmt.Errorf("read native schema: %w", err)
 	}
-	if len(body) > limit {
+	if len(body) > schemaLimit {
 		response.Body = &schemaBody{Reader: io.MultiReader(bytes.NewReader(body), response.Body), Closer: response.Body}
 		return nil
 	}
 	_ = response.Body.Close()
 	response.Body = io.NopCloser(bytes.NewReader(body))
+	// The body is attacker-controlled (a user's container can replace the Open
+	// Terminal server), and decoding costs tens of times its size in heap. Allow
+	// one decode at a time; a waiter gives up with its request, which the proxy
+	// ErrorHandler turns into 502 (passing it through unannotated would hand
+	// models a schema without the coordinate guidance, silently).
+	ctx := context.Background()
+	if response.Request != nil {
+		ctx = response.Request.Context()
+	}
+	select {
+	case schemaSlot <- struct{}{}:
+	case <-ctx.Done():
+		return fmt.Errorf("native schema annotation: %w", ctx.Err())
+	}
+	defer func() { <-schemaSlot }()
+	if schemaDecodeHook != nil {
+		schemaDecodeHook()
+	}
 	var document map[string]any
 	if json.Unmarshal(body, &document) != nil {
 		return nil
