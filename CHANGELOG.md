@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Security
+
+- **Behaviour change:** the DNS forwarder now runs dnsmasq with `--bogus-priv` and `--stop-dns-rebind`, so terminals can no longer enumerate internal host names or sweep private ranges with PTR queries. Internal names no longer resolve from the upstream resolver unless set as admin `dns_entries` (always served) or opted in with the new `DNS_REBIND_OK_DOMAINS` variable (comma-separated domains, empty by default).
+
 ## [1.1.0] - 2026-11-09
 
 Adds the MCP App workspace panel, agent tooling in the workspace images, a

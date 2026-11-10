@@ -32,6 +32,7 @@ test-firewall: ## Unprivileged source identity and transactional firewall regres
 	python3 -I -B test/firewall/test_source_pins.py
 	python3 -I -B test/firewall/test_units.py
 	python3 -I -B test/firewall/test_policy.py
+	python3 -I -B test/firewall/test_dns_forwarder.py
 
 cover: ## Tests with coverage report
 	go test -race -count=1 -coverprofile=coverage.out ./...

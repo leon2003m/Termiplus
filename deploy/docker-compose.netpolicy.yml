@@ -32,6 +32,7 @@ services:
     user: "65534:65534"
     environment:
       DNS_UPSTREAM: ${DNS_UPSTREAM:?set DNS_UPSTREAM to your internal resolver (never a public one)}
+      DNS_REBIND_OK_DOMAINS: ${DNS_REBIND_OK_DOMAINS:-}
     volumes:
       - ./netpolicy:/data/netpolicy:ro # reads the gateway-rendered hostsdir
     networks:
