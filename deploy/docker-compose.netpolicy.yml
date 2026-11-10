@@ -33,6 +33,7 @@ services:
     environment:
       DNS_UPSTREAM: ${DNS_UPSTREAM:?set DNS_UPSTREAM to your internal resolver (never a public one)}
       DNS_REBIND_OK_DOMAINS: ${DNS_REBIND_OK_DOMAINS:-}
+      DNS_LOCAL_ZONES: ${DNS_LOCAL_ZONES:-}
     volumes:
       - ./netpolicy:/data/netpolicy:ro # reads the gateway-rendered hostsdir
     networks:
