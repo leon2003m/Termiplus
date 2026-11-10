@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-10
+
+Security release. Fixes two low-severity issues found in an internal audit:
+terminals could enumerate internal DNS names through the DNS forwarder, and a
+hostile workspace could tie up the shared gateway's memory with an oversized
+`/openapi.json`. No new features. All users of the network-policy overlay
+(DNS forwarder) or the shared gateway should update.
+
+### Upgrade notes
+
+- In `deploy/.env`, set `TERMIPLUS_VERSION=1.1.1` and
+  `TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.1`, then pull and
+  recreate the stack and reapply the firewall (`deploy/firewall.sh`).
+- **Behaviour change:** with the network-policy overlay, terminals no longer
+  resolve private addresses from the upstream resolver. If terminals must
+  reach internal hosts by name, add them as admin `dns_entries` or list their
+  domains in `DNS_REBIND_OK_DOMAINS`. To make internal zones unresolvable
+  (no enumeration), list them in the new `DNS_LOCAL_ZONES`.
+
 ### Security
 
 - **Behaviour change:** the DNS forwarder now runs dnsmasq with `--bogus-priv` and `--stop-dns-rebind`, so terminals can no longer resolve private addresses or private PTRs. Internal names no longer resolve from the upstream resolver unless set as admin `dns_entries` (always served) or opted in with the new `DNS_REBIND_OK_DOMAINS` variable (comma-separated domains, empty by default).
