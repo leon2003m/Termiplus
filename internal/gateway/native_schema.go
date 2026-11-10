@@ -148,7 +148,9 @@ type closeFunc func() error
 func (f closeFunc) Close() error { return f() }
 
 // schemaPrefix replays a buffered prefix, then the rest of the body, and
-// releases the slot as soon as the prefix is drained.
+// releases the slot as soon as the prefix is drained. The drained prefix is
+// dropped before the release, so a stalled rest of the body does not keep its
+// buffer alive while the instance buffers its next schema.
 type schemaPrefix struct {
 	prefix  *bytes.Reader
 	rest    io.Reader
@@ -156,9 +158,10 @@ type schemaPrefix struct {
 }
 
 func (p *schemaPrefix) Read(b []byte) (int, error) {
-	if p.prefix.Len() > 0 {
+	if p.prefix != nil {
 		n, _ := p.prefix.Read(b)
 		if p.prefix.Len() == 0 {
+			p.prefix = nil
 			p.release()
 		}
 		return n, nil

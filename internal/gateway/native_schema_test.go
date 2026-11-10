@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -229,5 +230,19 @@ func TestSchemaStalledInstanceDoesNotBlockOthers(t *testing.T) {
 	defer instanceSlotsMu.Unlock()
 	if len(instanceSlots) != 0 {
 		t.Fatal("instance slot entries leaked")
+	}
+}
+
+// A drained prefix is dropped before the instance slot is released, so a
+// stalled oversize body does not pin its 512 KiB buffer (review P1).
+func TestSchemaPrefixDroppedOnRelease(t *testing.T) {
+	released := false
+	p := &schemaPrefix{prefix: bytes.NewReader([]byte("abc")), rest: strings.NewReader("rest"), release: func() { released = true }}
+	buf := make([]byte, 8)
+	if n, _ := p.Read(buf); n != 3 || !released || p.prefix != nil {
+		t.Fatalf("n=%d released=%v prefix kept=%v", n, released, p.prefix != nil)
+	}
+	if n, _ := p.Read(buf); string(buf[:n]) != "rest" {
+		t.Fatalf("rest = %q", buf[:n])
 	}
 }
