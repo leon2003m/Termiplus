@@ -59,3 +59,15 @@ Native HTTP and Desktop/PTY/events/process sockets preserve user and chat. Optio
 Desktop action coordinate requirements (`native_schema.go`). This adds model
 descriptions only, preserving endpoints, schemas' constraints, auth and request
 validation. Non-schema, compressed and oversized bodies pass through unchanged.
+
+Bound (2026-11-10): the body comes from a user-controllable container, so only
+bodies up to `schemaLimit` (512 KiB) are decoded. Each upstream address
+(`response.Request.URL.Host`) has its own refcounted slot, taken before the body
+is read: one buffer per instance, waiters hold none, and a trickling instance
+stalls only its own `/openapi.json`. An oversized body keeps only that instance
+slot until its buffered prefix is replayed or the body is closed. The
+gateway-wide `schemaSlot` admits one decode at a time and covers only the
+CPU-bound decode of a fully buffered body, never network I/O. A waiter whose
+request context ends returns an error, which the proxy ErrorHandler turns into
+502. Worst measured live heap per decode at the limit is about 30 MiB.
+Source: `internal/gateway/native_schema.go:describeDesktopActions`.

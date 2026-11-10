@@ -24,11 +24,11 @@ Terminals must resolve names without reaching internal resolvers directly, and D
 
 ## Shape
 
-- `DNS_UPSTREAM` (comma-separated, required), `HOSTSDIR` (default `/data/netpolicy/hosts`, read-only mount), `DNS_CACHE_SIZE`.
-- dnsmasq flags: `--no-resolv --no-hosts`, so only the listed upstreams and the hosts dir are used.
+- `DNS_UPSTREAM` (comma-separated, required), `HOSTSDIR` (default `/data/netpolicy/hosts`, read-only mount), `DNS_CACHE_SIZE`, `DNS_REBIND_OK_DOMAINS` (optional, becomes one `--rebind-domain-ok=/d1/d2/`), `DNS_LOCAL_ZONES` (optional, becomes one `--local=/z1/z2/`). Both go through one shared validator in the script: edge whitespace trimmed, interior whitespace and non-DNS characters rejected with a message.
+- dnsmasq flags: `--no-resolv --no-hosts`, so only the listed upstreams and the hosts dir are used. `--bogus-priv --stop-dns-rebind` block private PTRs and private answers (see the 2026-11-10 note).
 - Gateway: `ALLOWED_DNS` → `ForwarderDNS`. It is pinned into each container's `Dns` and `OPEN_TERMINAL_RESOLVER`, and it is part of the config hash.
 
-Citations: `deploy/dns-forwarder/entrypoint.sh:1-33`, `deploy/docker-compose.netpolicy.yml:21-59`, `cmd/gateway/main.go:75`, `internal/gateway/lifecycle.go:207` (configHash), `internal/sockproxy/validate.go:166-174`
+Citations: `deploy/dns-forwarder/entrypoint.sh:1-90`, `deploy/docker-compose.netpolicy.yml:21-59`, `cmd/gateway/main.go:75`, `internal/gateway/lifecycle.go:207` (configHash), `internal/sockproxy/validate.go:166-174`
 
 ## Connected to
 
@@ -57,3 +57,7 @@ Citations: `deploy/dns-forwarder/entrypoint.sh:1-33`, `deploy/docker-compose.net
 ## Native integration update (2026-11-04)
 
 Native Browser runs inside the same policy container and remains subject to existing DNS/egress rules. No browser-specific firewall allowance is added. Source: internal/gateway/lifecycle.go.
+
+## Private-answer filtering (2026-11-10)
+
+The forwarder runs `--bogus-priv` (private PTR queries not in the hosts dir get NXDOMAIN) and `--stop-dns-rebind` (private upstream answers dropped). Hosts-dir records are local data and still resolve. `DNS_REBIND_OK_DOMAINS` opts domains out. `DNS_LOCAL_ZONES` zones are never forwarded (local data only, else NXDOMAIN), so they cannot be enumerated; other internal zones can still be told apart (blocked answer vs NXDOMAIN, SRV). Test: `test/firewall/test_dns_forwarder.py` (stub dnsmasq). Source: deploy/dns-forwarder/entrypoint.sh.

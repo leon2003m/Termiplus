@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-10
+
+Security release. Fixes two low-severity issues found in an internal audit:
+terminals could enumerate internal DNS names through the DNS forwarder, and a
+hostile workspace could tie up the shared gateway's memory with an oversized
+`/openapi.json`. No new features. All users of the network-policy overlay
+(DNS forwarder) or the shared gateway should update.
+
+### Upgrade notes
+
+- In `deploy/.env`, set `TERMIPLUS_VERSION=1.1.1` and
+  `TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.1`, then pull and
+  recreate the stack and reapply the firewall (`deploy/firewall.sh`).
+- **Behaviour change:** with the network-policy overlay, terminals no longer
+  resolve private addresses from the upstream resolver. If terminals must
+  reach internal hosts by name, add them as admin `dns_entries` or list their
+  domains in `DNS_REBIND_OK_DOMAINS`. To make internal zones unresolvable
+  (no enumeration), list them in the new `DNS_LOCAL_ZONES`.
+
+### Security
+
+- **Behaviour change:** the DNS forwarder now runs dnsmasq with `--bogus-priv` and `--stop-dns-rebind`, so terminals can no longer resolve private addresses or private PTRs. Internal names no longer resolve from the upstream resolver unless set as admin `dns_entries` (always served) or opted in with the new `DNS_REBIND_OK_DOMAINS` variable (comma-separated domains, empty by default).
+- The DNS forwarder has a new optional `DNS_LOCAL_ZONES` variable (comma-separated zones, empty by default). Names in these zones are never forwarded upstream: only admin `dns_entries` answer and everything else is `NXDOMAIN`, so internal names (including SRV records) in them cannot be enumerated. Names in other internal zones may still be distinguishable, which an earlier entry wrongly described as prevented. Whitespace inside a `DNS_REBIND_OK_DOMAINS` entry is now rejected instead of silently deleted (`b c.example` no longer becomes `bc.example`).
+- A workspace can no longer exhaust the shared gateway's memory by serving an oversized or pathological `/openapi.json`: the schema is annotated only up to 512 KiB, one decode at a time, with at most one buffered body per terminal (a slow or hostile terminal can only delay its own schema, never another's), and larger responses pass through unchanged.
+
 ## [1.1.0] - 2026-11-09
 
 Adds the MCP App workspace panel, agent tooling in the workspace images, a

@@ -79,16 +79,16 @@ internal/netpolicy/         admin network policy: validation, persistence, confi
 
 ## Release images
 
-The current stable release is **1.1.0** on `main`, targeting Open WebUI 0.13.0
-and Open Terminal 0.16.0. See [the changelog](CHANGELOG.md#110---2026-11-08)
+The current stable release is **1.1.1** on `main`, a security release targeting Open WebUI 0.13.0
+and Open Terminal 0.16.0. See [the changelog](CHANGELOG.md#111---2026-11-10)
 and [deployment guide](docs/deploy-alpha.md) for installation and upgrade notes.
 The project security warning above continues to apply.
 
 For an installation using the published images, set these in `deploy/.env`:
 
 ```dotenv
-TERMIPLUS_VERSION=1.1.0
-TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.0
+TERMIPLUS_VERSION=1.1.1
+TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.1
 ```
 
 Pin images to the digest references attached to the release for reproducible
@@ -348,7 +348,7 @@ The egress model is unchanged for the internet and tightened for everything else
 
 How it fits together:
 
-- An internal **DNS forwarder** (`dnsmasq`) forwards to *your* resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the custom records. The gateway renders the records into the forwarder's watched `hostsdir`, which reloads automatically. Terminals are pinned to this forwarder via `HostConfig.Dns`; the socket proxy accepts no other resolver address. This is also what gives terminals a working resolver under gVisor.
+- An internal **DNS forwarder** (`dnsmasq`) forwards to *your* resolver (`DNS_UPSTREAM`, never a hardcoded public one) and serves the custom records. The gateway renders the records into the forwarder's watched `hostsdir`, which reloads automatically. Terminals are pinned to this forwarder via `HostConfig.Dns`; the socket proxy accepts no other resolver address. This is also what gives terminals a working resolver under gVisor. The forwarder runs with `--bogus-priv` and `--stop-dns-rebind`: reverse lookups of private ranges are answered `NXDOMAIN` and upstream answers in private ranges are dropped, so terminals cannot resolve private addresses or private PTRs. Internal names therefore do not resolve in terminals unless you set them as DNS entries (which are local data and always resolve), or opt a domain in with `DNS_REBIND_OK_DOMAINS` (only sensible if netpolicy also allows egress to those hosts). Names inside zones listed in `DNS_LOCAL_ZONES` are never forwarded upstream (everything not set as a DNS entry is `NXDOMAIN`), so they cannot be enumerated; names in other internal zones may still be distinguishable (for example a blocked answer versus `NXDOMAIN`, or SRV records), so list your internal zones there.
 - The gateway renders the egress allowances into `deploy/netpolicy/egress.rules`; `firewall.sh` turns each validated line into a `RETURN` rule placed **after** the fixed deny-list drops, so no entry can reach a never-allowed range. `termiplus-firewall.path` starts the repeatable `termiplus-firewall-reload.service` when the file changes; the boot service may already be active.
 
 Enable it (adds the overlay to either base compose):
@@ -438,6 +438,8 @@ The gateway counts what it runs and does, without user ids or names: running and
 | `ADMIN_API_KEY` / `_FILE` | gateway | empty (admin API off); min. 32 chars, must differ from `GATEWAY_API_KEY` |
 | `NETPOLICY_FILE`, `NETPOLICY_DNSMASQ_FILE`, `NETPOLICY_EGRESS_FILE` | gateway | under `/data/netpolicy/` |
 | `DNS_UPSTREAM` | dns-forwarder | required with the overlay; your resolver(s), comma-separated, never public |
+| `DNS_REBIND_OK_DOMAINS` | dns-forwarder | empty; comma-separated domains (lowercase DNS names) whose upstream answers may be private addresses; malformed entries are ignored |
+| `DNS_LOCAL_ZONES` | dns-forwarder | empty; comma-separated zones (lowercase DNS names) that are never forwarded upstream: only DNS entries answer, everything else in the zone is `NXDOMAIN`; malformed entries are ignored |
 | `FORWARDER_IP` | overlay | `172.30.0.3`; static service address outside the dynamic `172.30.0.128/25` pool |
 
 ## Testing
