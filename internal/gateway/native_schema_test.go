@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -110,8 +111,11 @@ func TestSchemaDecodeIsSerialized(t *testing.T) {
 }
 
 func TestSchemaWaiterHonoursCancellation(t *testing.T) {
-	schemaSlot <- struct{}{}
-	defer func() { <-schemaSlot }()
+	hold, err := acquireInstanceSlot(context.Background(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- describeDesktopActions(schemaResponse(ctx, `{"a":1}`)) }()
@@ -128,5 +132,117 @@ func TestSchemaWaiterHonoursCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("waiter did not return after cancel")
+	}
+}
+
+type recordingBody struct {
+	io.Reader
+	reads *atomic.Int32
+}
+
+func (b recordingBody) Read(p []byte) (int, error) { b.reads.Add(1); return b.Reader.Read(p) }
+func (b recordingBody) Close() error               { return nil }
+
+func TestSchemaWaiterReadsNoBodyWhileSlotHeld(t *testing.T) {
+	hold, err := acquireInstanceSlot(context.Background(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold()
+	var reads atomic.Int32
+	r := schemaResponse(context.Background(), "")
+	r.Body = recordingBody{Reader: strings.NewReader(`{"a":1}`), reads: &reads}
+	done := make(chan error, 1)
+	go func() { done <- describeDesktopActions(r) }()
+	time.Sleep(30 * time.Millisecond)
+	if reads.Load() != 0 {
+		t.Fatal("waiting request read its body before getting the slot")
+	}
+	hold()
+	if err := <-done; err != nil || reads.Load() == 0 {
+		t.Fatalf("err=%v reads=%d", err, reads.Load())
+	}
+}
+
+func TestSchemaOversizeHoldsSlotUntilPrefixDrained(t *testing.T) {
+	over := strings.Repeat("x", schemaLimit+10)
+	r := schemaResponse(context.Background(), over)
+	if err := describeDesktopActions(r); err != nil {
+		t.Fatal(err)
+	}
+	if len(schemaSlot) != 0 {
+		t.Fatal("global slot must not be held by the prefix replay")
+	}
+	instanceSlotsMu.Lock()
+	held := len(instanceSlots)
+	instanceSlotsMu.Unlock()
+	if held != 1 {
+		t.Fatal("instance slot not held while the buffered prefix is pending")
+	}
+	got, _ := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if string(got) != over {
+		t.Fatalf("altered=%v", string(got) != over)
+	}
+	r = schemaResponse(context.Background(), over)
+	if err := describeDesktopActions(r); err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Body.Close()
+	_ = r.Body.Close()
+	instanceSlotsMu.Lock()
+	defer instanceSlotsMu.Unlock()
+	if len(schemaSlot) != 0 || len(instanceSlots) != 0 {
+		t.Fatal("slot leaked after close")
+	}
+}
+
+type blockingBody struct{ unblock chan struct{} }
+
+func (b blockingBody) Read(p []byte) (int, error) { <-b.unblock; return 0, io.EOF }
+func (b blockingBody) Close() error               { return nil }
+
+func TestSchemaStalledInstanceDoesNotBlockOthers(t *testing.T) {
+	block := blockingBody{unblock: make(chan struct{})}
+	a := schemaResponse(context.Background(), "")
+	a.Request.URL.Host = "instance-a:8000"
+	a.Body = block
+	doneA := make(chan error, 1)
+	go func() { doneA <- describeDesktopActions(a) }()
+	time.Sleep(20 * time.Millisecond)
+	b := schemaResponse(context.Background(), `{"a":1}`)
+	b.Request.URL.Host = "instance-b:8000"
+	doneB := make(chan error, 1)
+	go func() { doneB <- describeDesktopActions(b) }()
+	select {
+	case err := <-doneB:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("instance B blocked by stalled instance A")
+	}
+	close(block.unblock)
+	if err := <-doneA; err != nil {
+		t.Fatal(err)
+	}
+	instanceSlotsMu.Lock()
+	defer instanceSlotsMu.Unlock()
+	if len(instanceSlots) != 0 {
+		t.Fatal("instance slot entries leaked")
+	}
+}
+
+// A drained prefix is dropped before the instance slot is released, so a
+// stalled oversize body does not pin its 512 KiB buffer (review P1).
+func TestSchemaPrefixDroppedOnRelease(t *testing.T) {
+	released := false
+	p := &schemaPrefix{prefix: bytes.NewReader([]byte("abc")), rest: strings.NewReader("rest"), release: func() { released = true }}
+	buf := make([]byte, 8)
+	if n, _ := p.Read(buf); n != 3 || !released || p.prefix != nil {
+		t.Fatalf("n=%d released=%v prefix kept=%v", n, released, p.prefix != nil)
+	}
+	if n, _ := p.Read(buf); string(buf[:n]) != "rest" {
+		t.Fatalf("rest = %q", buf[:n])
 	}
 }
