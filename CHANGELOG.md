@@ -6,7 +6,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Security
 
-- **Behaviour change:** the DNS forwarder now runs dnsmasq with `--bogus-priv` and `--stop-dns-rebind`, so terminals can no longer enumerate internal host names or sweep private ranges with PTR queries. Internal names no longer resolve from the upstream resolver unless set as admin `dns_entries` (always served) or opted in with the new `DNS_REBIND_OK_DOMAINS` variable (comma-separated domains, empty by default).
+- **Behaviour change:** the DNS forwarder now runs dnsmasq with `--bogus-priv` and `--stop-dns-rebind`, so terminals can no longer resolve private addresses or private PTRs. Internal names no longer resolve from the upstream resolver unless set as admin `dns_entries` (always served) or opted in with the new `DNS_REBIND_OK_DOMAINS` variable (comma-separated domains, empty by default).
+- The DNS forwarder has a new optional `DNS_LOCAL_ZONES` variable (comma-separated zones, empty by default). Names in these zones are never forwarded upstream: only admin `dns_entries` answer and everything else is `NXDOMAIN`, so internal names (including SRV records) in them cannot be enumerated. Names in other internal zones may still be distinguishable, which an earlier entry wrongly described as prevented. Whitespace inside a `DNS_REBIND_OK_DOMAINS` entry is now rejected instead of silently deleted (`b c.example` no longer becomes `bc.example`).
 - A workspace can no longer exhaust the shared gateway's memory by serving an oversized or pathological `/openapi.json`: the schema is annotated only up to 512 KiB, one decode at a time, with at most one buffered body per terminal (a slow or hostile terminal can only delay its own schema, never another's), and larger responses pass through unchanged.
 
 ## [1.1.0] - 2026-11-09
