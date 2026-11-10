@@ -59,3 +59,10 @@ Native HTTP and Desktop/PTY/events/process sockets preserve user and chat. Optio
 Desktop action coordinate requirements (`native_schema.go`). This adds model
 descriptions only, preserving endpoints, schemas' constraints, auth and request
 validation. Non-schema, compressed and oversized bodies pass through unchanged.
+
+Bound (2026-11-10): the body comes from a user-controllable container, so only
+bodies up to `schemaLimit` (512 KiB) are decoded, and only one decode runs at a
+time gateway-wide (`schemaSlot`, acquired after the body is read). A waiter
+whose request context ends returns an error, which the proxy ErrorHandler
+turns into 502. Worst measured live heap per decode at the limit is about 30 MiB.
+Source: `internal/gateway/native_schema.go:describeDesktopActions`.
