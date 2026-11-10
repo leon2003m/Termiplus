@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 )
 
 // schemaLimit bounds the schema body that is decoded. Open Terminal 0.16.0
@@ -17,7 +18,8 @@ import (
 // Larger bodies pass through unmodified.
 const schemaLimit = 512 << 10
 
-// schemaSlot admits one decode/re-encode at a time across the gateway.
+// schemaSlot admits one decode/re-encode at a time across the gateway. It is
+// never held across network I/O.
 var schemaSlot = make(chan struct{}, 1)
 
 // schemaDecodeHook, when set by tests, runs while the slot is held.
@@ -33,25 +35,47 @@ func describeDesktopActions(response *http.Response) error {
 	if response.StatusCode != http.StatusOK || (response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != "identity") {
 		return nil
 	}
+	// The body is attacker-controlled (a user's container can replace the Open
+	// Terminal server). Two limits, so one hostile instance can only hurt itself:
+	// a per-instance slot (keyed by the upstream address) is taken before the
+	// body is read, so an instance has at most one buffer and its waiters hold
+	// none; a trickling upstream stalls only its own /openapi.json. The
+	// gateway-wide schemaSlot then covers only the CPU-bound decode of the fully
+	// buffered body. A waiter gives up with its request, which the proxy
+	// ErrorHandler turns into 502 (passing it through unannotated would hand
+	// models a schema without the coordinate guidance, silently).
+	ctx := context.Background()
+	host := ""
+	if response.Request != nil {
+		ctx = response.Request.Context()
+		if response.Request.URL != nil {
+			host = response.Request.URL.Host
+		}
+	}
+	release, err := acquireInstanceSlot(ctx, host)
+	if err != nil {
+		return fmt.Errorf("native schema annotation: %w", err)
+	}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			release()
+		}
+	}()
 	body, err := io.ReadAll(io.LimitReader(response.Body, schemaLimit+1))
 	if err != nil {
 		return fmt.Errorf("read native schema: %w", err)
 	}
 	if len(body) > schemaLimit {
-		response.Body = &schemaBody{Reader: io.MultiReader(bytes.NewReader(body), response.Body), Closer: response.Body}
+		// The buffered prefix is replayed to the client, so keep only the
+		// instance slot until it has been handed over (or the body is closed).
+		upstream := response.Body
+		response.Body = &schemaBody{Reader: &schemaPrefix{prefix: bytes.NewReader(body), rest: upstream, release: release}, Closer: closeFunc(func() error { release(); return upstream.Close() })}
+		handedOver = true
 		return nil
 	}
 	_ = response.Body.Close()
 	response.Body = io.NopCloser(bytes.NewReader(body))
-	// The body is attacker-controlled (a user's container can replace the Open
-	// Terminal server), and decoding costs tens of times its size in heap. Allow
-	// one decode at a time; a waiter gives up with its request, which the proxy
-	// ErrorHandler turns into 502 (passing it through unannotated would hand
-	// models a schema without the coordinate guidance, silently).
-	ctx := context.Background()
-	if response.Request != nil {
-		ctx = response.Request.Context()
-	}
 	select {
 	case schemaSlot <- struct{}{}:
 	case <-ctx.Done():
@@ -117,4 +141,70 @@ func describeDesktopActions(response *http.Response) error {
 type schemaBody struct {
 	io.Reader
 	io.Closer
+}
+
+type closeFunc func() error
+
+func (f closeFunc) Close() error { return f() }
+
+// schemaPrefix replays a buffered prefix, then the rest of the body, and
+// releases the slot as soon as the prefix is drained.
+type schemaPrefix struct {
+	prefix  *bytes.Reader
+	rest    io.Reader
+	release func()
+}
+
+func (p *schemaPrefix) Read(b []byte) (int, error) {
+	if p.prefix.Len() > 0 {
+		n, _ := p.prefix.Read(b)
+		if p.prefix.Len() == 0 {
+			p.release()
+		}
+		return n, nil
+	}
+	return p.rest.Read(b)
+}
+
+type instanceSlot struct {
+	slot chan struct{}
+	refs int
+}
+
+var (
+	instanceSlotsMu sync.Mutex
+	instanceSlots   = map[string]*instanceSlot{}
+)
+
+// acquireInstanceSlot admits one schema buffer per upstream address. Entries
+// are refcounted and removed when unused. The returned release is idempotent.
+func acquireInstanceSlot(ctx context.Context, host string) (func(), error) {
+	instanceSlotsMu.Lock()
+	entry := instanceSlots[host]
+	if entry == nil {
+		entry = &instanceSlot{slot: make(chan struct{}, 1)}
+		instanceSlots[host] = entry
+	}
+	entry.refs++
+	instanceSlotsMu.Unlock()
+	drop := func() {
+		instanceSlotsMu.Lock()
+		if entry.refs--; entry.refs == 0 {
+			delete(instanceSlots, host)
+		}
+		instanceSlotsMu.Unlock()
+	}
+	select {
+	case entry.slot <- struct{}{}:
+	case <-ctx.Done():
+		drop()
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-entry.slot
+			drop()
+		})
+	}, nil
 }
