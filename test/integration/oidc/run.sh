@@ -172,10 +172,25 @@ expect "user without the group is forbidden" "200 -32003" \
 expect "forged X-Forwarded-Groups does not grant the role" "200 -32003" \
   "$(rpc "$B" request_session '{"workspace":"desk","persistent":true,"_confirmed":true}' -H 'X-Forwarded-Groups: termiplus-persist')"
 AS="owui-alice"
-expect "alice sees her session" "200 ok [{" "$(rpc "$A" list_sessions '{}')"
+ALICE_LIST="$(rpc "$A" list_sessions '{}')"
+expect "alice sees her session" "200 ok [{" "$ALICE_LIST"
 AS="owui-bob"
-expect "forged X-Forwarded-User does not impersonate" "200 ok []" \
-  "$(rpc "$B" list_sessions '{}' -H "X-Forwarded-User: $SUB_A")"
+# The dev stub seeds every user with sessions of their own, so bob's list is
+# not empty; a forged subject must leave it unchanged and show none of alice's.
+BOB_LIST="$(rpc "$B" list_sessions '{}')"
+expect "bob lists his own seeded sessions" "200 ok [{" "$BOB_LIST"
+FORGED="$(rpc "$B" list_sessions '{}' -H "X-Forwarded-User: $SUB_A")"
+expect "forged X-Forwarded-User does not impersonate" "$BOB_LIST" "$FORGED"
+SHARED="$(python3 - "$ALICE_LIST" "$FORGED" <<'EOF'
+import json, sys
+def ids(r):
+    t = r.split(" ", 2)
+    return {s["session_id"] for s in json.loads(t[2])} if len(t) == 3 and t[1] == "ok" else set()
+a, f = ids(sys.argv[1]), ids(sys.argv[2])
+print("none" if a and not (a & f) else "shared:" + ",".join(sorted(a & f)) if a else "alice-empty")
+EOF
+)"
+expect "forged X-Forwarded-User shows none of alice's sessions" "none" "$SHARED"
 
 # Open WebUI user keying: the plugin key and user id pass through oauth2-proxy.
 AS=""
