@@ -59,6 +59,45 @@ class Entrypoint(unittest.TestCase):
         self.assertFalse([a for a in args if a.startswith("--rebind-domain-ok")])
         self.assertIn("ignoring malformed", err)
 
+    def _flag(self, args, prefix):
+        return [a for a in args if a.startswith(prefix)]
+
+    def test_local_zones(self):
+        rc, args, err, _ = run(DNS_UPSTREAM="192.0.2.1", DNS_LOCAL_ZONES="leonm.internal,corp.example")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self._flag(args, "--local"), ["--local=/leonm.internal/corp.example/"])
+
+    def test_local_zones_single_and_unset(self):
+        _, args, _, _ = run(DNS_UPSTREAM="192.0.2.1", DNS_LOCAL_ZONES=" corp.example ")
+        self.assertEqual(self._flag(args, "--local"), ["--local=/corp.example/"])
+        for env in ({}, {"DNS_LOCAL_ZONES": ""}, {"DNS_LOCAL_ZONES": " , "}):
+            _, args, _, _ = run(DNS_UPSTREAM="192.0.2.1", **env)
+            self.assertEqual(self._flag(args, "--local"), [])
+
+    def test_local_zones_malformed_rejected(self):
+        for entry in ["Corp.Example", "a/b", "..", ".a.com", "a.com.", "a..com", "a;b", "*", "/"]:
+            rc, args, err, _ = run(DNS_UPSTREAM="192.0.2.1", DNS_LOCAL_ZONES="ok.example," + entry)
+            self.assertEqual(rc, 0, entry)
+            self.assertEqual(self._flag(args, "--local"), ["--local=/ok.example/"], entry)
+            self.assertIn("ignoring malformed DNS_LOCAL_ZONES", err, entry)
+        _, args, err, _ = run(DNS_UPSTREAM="192.0.2.1", DNS_LOCAL_ZONES="A/B")
+        self.assertEqual(self._flag(args, "--local"), [])
+
+    def test_interior_whitespace_rejected(self):
+        for var, prefix in (("DNS_REBIND_OK_DOMAINS", "--rebind-domain-ok"), ("DNS_LOCAL_ZONES", "--local")):
+            for bad in ("b c.example", "b\tc.example", "b\nc.example"):
+                rc, args, err, _ = run(DNS_UPSTREAM="192.0.2.1", **{var: "ok.example," + bad})
+                self.assertEqual(rc, 0, (var, bad))
+                self.assertEqual(self._flag(args, prefix), [prefix + "=/ok.example/"], (var, bad))
+                self.assertIn("ignoring malformed " + var, err, (var, bad))
+
+    def test_edge_whitespace_trimmed(self):
+        for var, prefix in (("DNS_REBIND_OK_DOMAINS", "--rebind-domain-ok"), ("DNS_LOCAL_ZONES", "--local")):
+            rc, args, err, _ = run(DNS_UPSTREAM="192.0.2.1", **{var: " \ta.example\t , b.example "})
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(self._flag(args, prefix), [prefix + "=/a.example/b.example/"], var)
+            self.assertEqual(err, "")
+
 
 if __name__ == "__main__":
     unittest.main()
