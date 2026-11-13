@@ -1,6 +1,6 @@
 # Workspace tool ownership
 
-Use Open WebUI 0.13+ with Open Terminal 0.16.0 for terminal execution, files,
+Use Open WebUI 0.13+ with Open Terminal 0.17.8 for terminal execution, files,
 Git, events, Desktop screenshots/actions and Browser automation. Termiplus does
 not implement a second screenshot/click/type/browser tool family, WebDriver
 service, desktop player or port forwarding UI.

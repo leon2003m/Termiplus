@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- Open WebUI 0.13.3's terminal **System info** panel showed "System info unavailable / Not Found":
+  the bundled Open Terminal 0.16.0 has no `/system/info` endpoint. The terminal image now
+  ships Open Terminal 0.17.8.
+
 ## [1.1.1] - 2026-11-10
 
 Security release. Fixes two low-severity issues found in an internal audit:

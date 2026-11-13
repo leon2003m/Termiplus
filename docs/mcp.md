@@ -1,7 +1,7 @@
 # Workspace control plane (alpha)
 
 Termiplus manages isolated containers, resource limits, egress, persistent homes,
-backups and workspace access. Open WebUI **0.13+** and Open Terminal **0.16.0**
+backups and workspace access. Open WebUI **0.13+** and Open Terminal **0.17.8**
 provide the interactive workspace: terminal, files, Git, live events, Desktop,
 Browser automation and local app previews. See [native integration](native-integration.md).
 
