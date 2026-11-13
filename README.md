@@ -99,7 +99,7 @@ published images. The local builds below are an alternative for development.
 ## Quick start (dedicated VM)
 
 Requirements: Linux VM, Docker 25+ and Sysbox for the bundled desktop policies.
-Use Open WebUI 0.13+ and Open Terminal 0.16.0. Go 1.24+ is needed for Go checks.
+Use Open WebUI 0.13+ and Open Terminal 0.17.8. Go 1.24+ is needed for Go checks.
 
 ```bash
 # 1. Runtime: install Sysbox for the bundled desktop policies, then
@@ -113,8 +113,8 @@ docker info | grep -i runtimes                       # must list sysbox-runc for
 #    terminals resolve with or without it.
 
 # 2. Build the base and complete workspace (pin your deployed image by digest)
-docker build -t ot-terminal:0.16.0 image/
-docker build --build-arg BASE=ot-terminal:0.16.0 -t ot-desktop:0.16.0 image/desktop
+docker build -t ot-terminal:0.17.8 image/
+docker build --build-arg BASE=ot-terminal:0.17.8 -t ot-desktop:0.17.8 image/desktop
 
 # 3. Secrets, each 64 hex chars. gateway and sockproxy run as uid/gid 65534 and
 #    read them through Compose's file secrets, which keep the host file mode:
@@ -129,7 +129,7 @@ done
 
 # 4. Settings for compose (deploy/.env is gitignored)
 cat > deploy/.env <<ENV
-TERMINAL_IMAGE=ot-desktop:0.16.0
+TERMINAL_IMAGE=ot-desktop:0.17.8
 DOCKER_GID=$(stat -c %g /var/run/docker.sock)
 ENV
 
@@ -186,7 +186,7 @@ Open WebUI also sends a few requests without a user (connection check, OpenAPI s
 
 ## Native Desktop and Browser
 
-Use Open WebUI **0.13+** and the bundled Open Terminal **0.16.0** image. Native
+Use Open WebUI **0.13+** and the bundled Open Terminal **0.17.8** image. Native
 terminal connections provide Desktop, Browser, files, Git, events and local app
 previews. Termiplus supplies isolation, user/chat routing, homes and lifecycle.
 Both shipped policies include desktop and browser support. Select the workspace's connection in the chat; human and assistant then use
