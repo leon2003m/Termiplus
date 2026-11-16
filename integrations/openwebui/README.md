@@ -1,7 +1,7 @@
 # Open WebUI workspace tool
 
 Requires Open WebUI **0.13+**, OIDC sign-in and the Termiplus MCP overlay.
-Open Terminal **0.16.0** supplies desktop/browser interaction through the native
+Open Terminal **0.17.8** supplies desktop/browser interaction through the native
 terminal connection. This tool manages only Termiplus workspace lifecycle,
 list/create snapshots and expiring screen-share links. It exposes no network,
 user/group, departed-user, entitlement or backup-deletion administration.

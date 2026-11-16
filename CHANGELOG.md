@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-16
+
+Bugfix release for Open WebUI 0.13.3. Open WebUI 0.13.3 added a terminal
+**System info** panel that reads Open Terminal's `/system/info` endpoint. The
+Open Terminal 0.16.0 bundled in the terminal image has no such endpoint, so the
+panel showed "System info unavailable / Not Found" and the terminal looked
+offline even though it worked. The terminal image now ships Open Terminal
+0.17.8, which provides the endpoint. No gateway, MCP, firewall or security
+changes. Users of Open WebUI 0.13.3 or later should update the terminal image.
+
+### Upgrade notes
+
+- In `deploy/.env`, set `TERMIPLUS_VERSION=1.1.2` and
+  `TERMINAL_IMAGE=ghcr.io/leon2003m/termiplus-desktop:1.1.2`, then pull and
+  recreate the stack. Running terminals keep the old image until they are
+  recreated; homes are kept.
+- Locally built images: rebuild `image/` (it now defaults to
+  `OPEN_TERMINAL_VERSION=0.17.8`) and the desktop image on top of it.
+- The System info panel shows what the terminal container sees: disk usage
+  and uptime are the host's values, not per-terminal limits.
+
+### Fixed
+
+- Open WebUI 0.13.3's terminal **System info** panel showed "System info unavailable / Not Found":
+  the bundled Open Terminal 0.16.0 has no `/system/info` endpoint. The terminal image now
+  ships Open Terminal 0.17.8.
+
 ## [1.1.1] - 2026-11-10
 
 Security release. Fixes two low-severity issues found in an internal audit:
